@@ -4,7 +4,7 @@
 
 ## Haltung
 
-Ruhig, dicht, werkzeughaft – näher an Linear/Notion als an einem Dashboard. Inhalte (Aufgaben, Personen, Tage) tragen Farbe, die Oberfläche bleibt grau. Ein Akzent (Indigo) für Auswahl und primäre Aktion, Rot nur für Fristen und Warnungen. Keine Emojis in der Bedienoberfläche; Teams und Projekte bekommen farbige Kürzel-Quadrate.
+Ruhig, dicht, werkzeughaft – näher an Linear/Notion als an einem Dashboard. Inhalte (Aufgaben, Personen, Tage) tragen Farbe, die Oberfläche bleibt grau. Dezente Lidl-Farbwelt: Blau (#0050aa) für Auswahl und primäre Aktion, Gelb nur als kleiner Marker, Rot nur für Fristen und Warnungen. Die Startseite hat einen blauen Hero mit gelb-roter Kante, sonst bleibt die Fläche weiß/grau. Keine Emojis in der Bedienoberfläche; Teams und Projekte bekommen farbige Kürzel-Quadrate.
 
 ## Farben
 
@@ -19,15 +19,16 @@ Ruhig, dicht, werkzeughaft – näher an Linear/Notion als an einem Dashboard. I
 | `--text` | `#1b1b1f` | `#ececf0` | Primärtext |
 | `--text-2` | `#5f5f6b` | `#a0a0ab` | Sekundärtext, Labels |
 | `--text-3` | `#9a9aa6` | `#6c6c76` | Metadaten, Platzhalter |
-| `--accent` | `#5b5bd6` | `#7c7cf0` | Primäraktion, Auswahl, Fokus |
-| `--accent-soft` | `#efeffd` | `#25254a` | Auswahl-Hintergrund |
-| `--danger` | `#e5484d` | `#ff6369` | Überfällig, Warnung ≥ Schwelle |
-| `--warning` | `#e5940f` | `#f5b94d` | Feiertage, Teilabwesenheit |
+| `--accent` | `#0050aa` | `#4d94f0` | Primäraktion, Auswahl, Fokus (Lidl-Blau) |
+| `--accent-soft` | `#e6eefa` | `#16294a` | Auswahl-Hintergrund |
+| `--yellow` | `#ffe500` | `#ffe500` | Marker: Logo, aktive Navigation, heutiger Tag, Feiertage (als `--yellow-soft`) |
+| `--danger` | `#e60a14` | `#ff5b63` | Überfällig, Warnung ≥ Schwelle |
+| `--warning` | `#a86f00` | `#f5cf4d` | Feiertage, Teilabwesenheit |
 | `--success` | `#30a46c` | `#3dd68c` | Erledigt |
 
 Status-Glyphen statt bunter Pillen: Backlog (gestrichelter Kreis, grau), Offen (Kreis, grau), In Arbeit (halb gefüllt, gelb), Review (drei Viertel, indigo), Erledigt (gefüllt mit Haken, grün).
 
-Abwesenheitsarten: Urlaub `#30a46c`, Krank `#e5484d`, Fortbildung `#5b5bd6`, Sonstiges `#8b8d98`, Feiertag `#e5940f` – jeweils als 14 %-Tönung für Flächen.
+Abwesenheitsarten: Urlaub `#2fa56b`, Krank `#e60a14`, Fortbildung `#0050aa`, Sonstiges `#8b93a3`, Feiertag `#f2b600` – jeweils als 14 %-Tönung für Flächen.
 
 ## Typografie
 
@@ -64,3 +65,7 @@ Inhalt max. 1120 px für Lesen/Listen, volle Breite für Board, Kalender und Ver
 - **Chip/Tag**: neutraler Rahmen, farbiger 6-px-Punkt.
 - **Warnung**: rot getönter Hintergrund + Text „3/5 weg“, nie nur Farbe.
 - **Kürzel-Quadrat**: 18/24/32 px, Teamfarbe, erster Buchstabe weiß.
+
+## Dichte
+
+Keine leeren Flächen: Startseite und Kalender haben rechts eine Seitenspalte (Warnungen, Abwesenheiten, Feiertage), Verfügbarkeit füllt die Breite und zeigt darunter Abwesenheiten und Feiertage des Zeitraums, Board-Spalten teilen sich die Breite. Seitenränder 28 px, Inhalt bis 1320 px.

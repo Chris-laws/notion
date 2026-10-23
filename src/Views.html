@@ -18,7 +18,7 @@ const Views = {
       default: return homePage();
     }
   },
-  after() { bindDrag(); bindCalSelect(); },
+  after() { bindDrag(); bindCalSelect(); countUp(); },
 };
 function notFound() {
   return '<div class="page"><div class="empty">' + icon('search') + '<div>Diese Seite gibt es nicht mehr.</div><br>' +
@@ -512,6 +512,20 @@ function taskCalendarHtml(tasks, opts) {
 }
 
 /* ---------------- pages ---------------- */
+/* Numbers on the home stats count up once, the first time they appear. */
+function countUp() {
+  if (S.counted || !window.requestAnimationFrame) return;
+  const els = document.querySelectorAll('[data-count]');
+  if (!els.length) return;
+  S.counted = true;
+  const start = performance.now();
+  const tick = now => {
+    const k = Math.min(1, (now - start) / 600), e = 1 - Math.pow(1 - k, 3);
+    els.forEach(el => { el.textContent = Math.round(Number(el.dataset.count) * e); });
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
 function pageHead(title, sub, lead, actions) {
   return '<div class="page-head">' + (lead || '') + '<h1 class="page-title">' + esc(title) + '</h1>' +
     (actions ? '<div class="page-actions">' + actions + '</div>' : '') + '</div>' +
@@ -533,22 +547,24 @@ function homePage() {
   }
   const b = S.briefing && S.briefing !== 'loading' ? S.briefing : null;
   const warns = b ? b.teamWarnings || [] : [];
+  const myPeople = uniq(myTeams().reduce((a, tm) => a.concat(teamMembers(tm)), [S.me.email]));
+  const upcoming = calEnsure(t, Shared.addDays(t, 60), '');
+  const statCard = (label, val, warn, sub) => '<div class="stat-card' + (warn ? ' warn' : '') + '"><div class="lbl">' + esc(label) + '</div><div class="val" data-count="' + val + '">' + val + '</div>' +
+    (sub ? '<div class="hint">' + esc(sub) + '</div>' : '') + '</div>';
   return '<div class="page">' +
-    '<div class="home-head"><div><div class="faint" style="font-size:13px">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div>' +
-    '<div class="greet">' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '</div></div></div>' +
-    '<div class="brief"><div class="brief-top">' + icon('sparkle', 'lg') + '<div class="txt">' +
-    (b ? esc(b.text) : '<div class="skeleton" style="width:80%;margin:6px 0"></div><div class="skeleton" style="width:50%"></div>') +
+    '<div class="hero"><div class="eyebrow">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div>' +
+    '<div class="greet">' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '</div>' +
+    '<div class="txt">' + icon('sparkle', 'lg') + '<div>' +
+    (b ? esc(b.text) : '<div class="skeleton" style="width:420px;max-width:70vw;margin:6px 0"></div>') +
     (b && b.focus.length ? '<div class="focus">' + b.focus.map(f => '<button data-action="open-task" data-id="' + esc(f.id) + '">' +
       (f.priority ? prioTag(f.priority, true) : glyph('todo')) + '<span>' + esc(f.title) + '</span></button>').join('') + '</div>' : '') +
     (b ? '<div class="src">' + (b.source === 'ai' ? 'Zusammengefasst von Vertex AI' : 'Automatisch zusammengefasst') + '</div>' : '') +
-    '</div><button class="icon-btn sm" data-action="brief-reload" title="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>' +
-    (b ? '<div class="stats">' + stat('Überfällig', b.overdue, b.overdue > 0) + stat('Heute fällig', b.today) + stat('Rest der Woche', b.week) +
-      stat('Team-Warnungen', warns.length, warns.length > 0, warns.length ? 'nächste 4 Wochen' : 'alle Teams ausreichend besetzt') + '</div>' : '') +
-    '</div>' +
-    (warns.length ? '<div class="banner danger">' + icon('alert') + '<div><b>Dünne Besetzung in deinen Teams.</b> An diesen Tagen ist mindestens die Hälfte abwesend:' +
-      '<div class="days-list">' + warns.slice(0, 8).map(w => '<button class="chip danger" data-action="warn-open" data-team="' + esc(w.teamId) + '">' +
-        esc(DOW[Shared.weekday(w.date)] + ' ' + fmtDate(w.date, { absolute: true }) + ' · ' + w.teamName + ' ' + w.absent + '/' + w.total) + '</button>').join('') + '</div></div></div>' : '') +
+    '</div></div><button class="icon-btn sm" data-action="brief-reload" title="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>' +
+    (b ? '<div class="stats-row">' + statCard('Überfällig', b.overdue, b.overdue > 0) + statCard('Heute fällig', b.today) + statCard('Rest der Woche', b.week) +
+      statCard('Team-Warnungen', warns.length, warns.length > 0, warns.length ? 'nächste 4 Wochen' : 'alle Teams ausreichend besetzt') + '</div>' : '') +
+    '<div class="home-grid"><div>' +
     database(mine, { people: [S.me.email], empty: 'Nichts offen. Mit ⌘K legst du die nächste Aufgabe an.' }) +
+    '</div><aside>' + (upcoming ? sidePanel(upcoming, myPeople) : '<div class="panel"><div class="skeleton"></div></div>') + '</aside></div>' +
     '</div>';
 }
 A['brief-reload'] = () => { S.briefing = null; render({ peek: false }); };
@@ -659,7 +675,7 @@ function calendarPage() {
   const show = S.cal.show;
   const toggle = (k, label) => '<button class="' + (show[k] ? 'on' : '') + '" data-action="cal-show" data-k="' + k + '">' + label + '</button>';
   return '<div class="page wide">' +
-    pageHead('Teamkalender', 'Urlaub, Abwesenheiten und gesetzliche Feiertage aller Länder deines Teams. Ziehe über mehrere Tage, um Urlaub einzutragen.', '',
+    pageHead('Teamkalender', 'Urlaub und Feiertage aller Länder deines Teams. Ziehe über mehrere Tage, um Urlaub einzutragen.', '',
       '<button class="btn outline" data-action="event-new">' + icon('plus', 'sm') + 'Termin</button>' +
       '<button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button>') +
     '<div class="db-bar"><div class="tabs">' + scopeButton('cal-team', teamId) + '</div>' +
@@ -670,8 +686,9 @@ function calendarPage() {
     '<span><span class="sw" style="background:var(--accent-soft)"></span>Termin</span><span style="color:var(--warning);font-weight:500">Feiertag</span></div></div>' +
     '<aside>' + (upcoming ? sidePanel(upcoming, people) : '<div class="panel"><div class="skeleton"></div></div>') + '</aside></div></div>';
 }
-function sidePanel(d, people) {
-  const t = TODAY();
+function sidePanel(d, people, o) {
+  o = o || {};
+  const t = o.from && o.from > TODAY() ? o.from : TODAY();
   const inScope = e => !people || people.indexOf(e) >= 0;
   const hol = {};
   d.holidays.forEach(h => {
@@ -684,7 +701,7 @@ function sidePanel(d, people) {
   });
   const hl = Object.keys(hol).map(k => hol[k]).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 6);
   const abs = d.absences.filter(a => a.endDate >= t && inScope(a.email)).sort((a, b) => a.startDate.localeCompare(b.startDate)).slice(0, 6);
-  const warns = d.warnings.slice(0, 6);
+  const warns = o.noWarn ? [] : d.warnings.slice(0, 6);
   return (warns.length ? '<div class="panel"><h3 style="color:var(--danger)">' + icon('alert', 'sm') + 'Warnungen</h3><div class="hlist">' + warns.map(w =>
     '<div class="hitem warnitem">' + dayBox(w.date) + '<div class="what"><div><b>' + w.absent + ' von ' + w.total + '</b> in ' + esc(w.teamName) + ' abwesend</div>' +
     '<div class="muted">' + esc(w.people.map(x => user(x.email).name.split(' ')[0] + ' (' + (x.kind === 'holiday' ? x.label : absenceType(x.kind).label) + ')').join(', ')) + '</div></div></div>').join('') + '</div></div>' : '') +
@@ -724,7 +741,7 @@ function capacityPage() {
   }
   const d = c.data && c.key === key ? c.data : null;
   const head = '<div class="page wide">' +
-    pageHead('Verfügbarkeit', 'Wer ist wann da? Urlaub und Abwesenheiten kommen aus dem Teamkalender, gesetzliche Feiertage je Land und Bundesland sind eingerechnet. Ab ' +
+    pageHead('Verfügbarkeit', 'Urlaub aus dem Teamkalender, Feiertage je Land und Bundesland eingerechnet. Ab ' +
       ((d && d.threshold) || 50) + ' % Abwesenheit im Team gibt es eine Warnung.', '',
       '<button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button>') +
     '<div class="db-bar"><div class="tabs">' + scopeButton('cap-team', teamId) +
@@ -761,7 +778,10 @@ function capacityPage() {
   }).join('') + '</tr>';
   const legend = '<div class="legend">' + Shared.ABSENCE_TYPES.map(a => '<span><span class="sw" style="background:var(--' + a.key + ')"></span>' + esc(a.label) + '</span>').join('') +
     '<span><span class="sw" style="background:var(--holiday)"></span>Feiertag</span><span><span class="sw blk off" style="display:inline-block;width:10px;height:10px;margin:0 6px 0 0"></span>kein Arbeitstag (Teilzeit)</span></div>';
-  return head + banner + '<div class="av-wrap"><table class="av"><thead>' + th + '</thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>' + legend + '</div>';
+  const extra = calEnsure(d.from, d.to, teamId);
+  const scope = teamId ? teamMembers(team(teamId)) : null;
+  return head + banner + '<div class="av-wrap"><table class="av"><thead>' + th + '</thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>' + legend +
+    (extra ? '<div class="panels-row">' + sidePanel(extra, scope, { noWarn: true, from: d.from }) + '</div>' : '') + '</div>';
 }
 function fmtNum(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
 function uniq(a) { return a.filter((x, i) => a.indexOf(x) === i); }
