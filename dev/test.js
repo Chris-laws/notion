@@ -289,6 +289,8 @@ test('AI placeholder: rules mode works without key', () => {
   assert.strictEqual(parsed.assignees[0], 'anna.schmidt@firma.de');
   const b = call('ai.breakdown', { id: call('tasks.list')[0].id });
   assert.strictEqual(b.configured, false);
+  assert.strictEqual(b.dummy, true);
+  assert.ok(b.subtasks.length >= 3 && b.subtasks.every(x => x.title && x.estimate > 0), 'dummy split is usable');
   const sug = call('ai.suggestAssignee', { id: call('tasks.list').find(t => t.projectId).id });
   assert.ok(sug.candidates.length > 0);
   const brief = call('ai.briefing');

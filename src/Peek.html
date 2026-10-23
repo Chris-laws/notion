@@ -127,7 +127,7 @@ function renderPeek() {
   if (S.breakdown && S.breakdown.taskId === t.id) {
     const b = S.breakdown.data;
     smart += '<div class="suggest"><div class="sh"><span>Vorschlag für Teilaufgaben</span><button class="icon-btn" data-action="breakdown-close">' + icon('x', 'sm') + '</button></div>' +
-      (b.configured ? '<form data-on-submit="breakdown">' + b.subtasks.map((s, i) =>
+      ((b.subtasks && b.subtasks.length) ? (b.hint ? '<div class="notice" style="margin:4px 4px 8px">' + esc(b.hint) + '</div>' : '') + '<form data-on-submit="breakdown">' + b.subtasks.map((s, i) =>
         '<label class="opt"><input type="checkbox" name="pick" value="' + i + '" checked><span style="flex:1">' + esc(s.title) + '</span><span class="faint">' + esc(fmtHours(s.estimate)) + '</span></label>').join('') +
         '<div style="padding:6px"><button class="btn sm primary" type="submit">Übernehmen</button></div></form>'
         : '<div class="notice" style="margin:4px">' + esc(b.hint) + '</div>') + '</div>';
@@ -316,12 +316,7 @@ A['suggest-pick'] = el => {
 };
 A['ai-breakdown'] = () => {
   const id = S.peekId;
-  if (!S.ai.enabled) {
-    S.breakdown = { taskId: id, data: { configured: false, hint: 'Die automatische Zerlegung nutzt Vertex AI. Sobald VERTEX_API_KEY in den Skripteigenschaften hinterlegt ist, schlägt Gemini hier Teilaufgaben mit Aufwand vor.' } };
-    renderPeek();
-    return;
-  }
-  toast('Gemini denkt nach…');
+  toast(S.ai.enabled ? 'Gemini denkt nach…' : 'Beispielvorschlag wird erstellt…');
   call('ai.breakdown', { id: id }).then(d => { S.breakdown = { taskId: id, data: d }; renderPeek(); }).catch(fail);
 };
 A['breakdown-close'] = () => { S.breakdown = null; renderPeek(); };

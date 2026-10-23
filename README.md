@@ -35,7 +35,9 @@ Anmeldung per Google SSO, Daten in einem Google Sheet, Oberfläche im Stil von N
 
 ## Einrichtung
 
-Voraussetzung: Google-Workspace-Konto, Node.js.
+Voraussetzung: Google-Workspace-Konto (die Anmeldung per Google SSO liefert die E-Mail nur für Konten derselben Workspace-Domain, private Gmail-Konten werden nicht erkannt), Node.js.
+
+Vor dem Upload: `npm test` und `npm run check` (prüft Manifest, `include()`-Ziele, Syntax und Routen) laufen lassen.
 
 ```bash
 npm install -g @google/clasp
@@ -51,6 +53,8 @@ Danach im Apps-Script-Editor (`clasp open`):
 3. **Bereitstellen → Neue Bereitstellung → Web-App**
    - Ausführen als: **Ich**
    - Zugriff: **Jeder in &lt;deiner Domain&gt;**
+
+Bei einer neuen Version: `clasp push`, dann `setup()` erneut ausführen (ergänzt neue Spalten, vorhandene Daten bleiben) und unter **Bereitstellungen verwalten** eine neue Version veröffentlichen.
 
 Die Web-App-URL ist der Link für alle Kolleg:innen. Google meldet sie automatisch an; beim ersten Besuch werden sie im Personenverzeichnis angelegt.
 
@@ -71,6 +75,10 @@ Die Web-App-URL ist der Link für alle Kolleg:innen. Google meldet sie automatis
 | `VERTEX_MODEL` | Standard `gemini-2.5-flash` |
 | `VERTEX_PROJECT_ID`, `VERTEX_LOCATION` | Optional: GCP-Projekt und Region für einen regionalen Endpunkt (z. B. `europe-west3`) |
 
+**KI-Funktionen sind vorerst Dummy:** Solange der Platzhalter-Schlüssel steht, liefert „Aufgabe zerlegen“ einen Beispielvorschlag (mit Hinweis in der Oberfläche) und die übrigen smarten Helfer arbeiten regelbasiert. Sobald ein echter Schlüssel in `VERTEX_API_KEY` steht, ist keine Codeänderung nötig.
+
+Gespeicherte Ansichten (Filter/Sortierung) liegen im Browser der jeweiligen Person, nicht in der Tabelle.
+
 Ohne `VERTEX_PROJECT_ID` wird der globale Endpunkt im Vertex-AI-Express-Modus genutzt. Der Schlüssel wird im Header `x-goog-api-key` gesendet, nicht in der URL.
 
 ## Entwicklung
@@ -78,6 +86,7 @@ Ohne `VERTEX_PROJECT_ID` wird der globale Endpunkt im Vertex-AI-Express-Modus ge
 ```bash
 npm test          # führt den echten Servercode gegen In-Memory-Nachbildungen der Apps-Script-Dienste aus
 npm run preview   # baut dev/preview.html: komplette App mit Demodaten im Browser, ohne Google-Konto
+npm run check     # statische Prüfung für Apps Script
 npm run push      # clasp push
 ```
 

@@ -117,9 +117,7 @@ const Ai = {
     const me = Auth.currentUser();
     const t = Db.get('Tasks', p.id);
     if (!t || !Access.canSeeTask(t, Access.context(me))) throw new Error('Aufgabe nicht gefunden.');
-    if (!Ai.enabled()) {
-      return { configured: false, subtasks: [], hint: 'Für automatische Zerlegung bitte VERTEX_API_KEY hinterlegen.' };
-    }
+    if (!Ai.enabled()) return Ai.dummyBreakdown_(t);
     const res = Ai.generate_([
       'Zerlege die folgende Aufgabe in 3 bis 7 konkrete, umsetzbare Teilaufgaben auf Deutsch.',
       'Schätze für jede Teilaufgabe den Aufwand in Stunden.',
@@ -131,6 +129,23 @@ const Ai = {
       title: String(s.title || '').slice(0, 200), estimate: Math.max(0, Number(s.estimate) || 0),
     })).filter(s => s.title);
     return { configured: true, subtasks: subtasks };
+  },
+
+  /** Without a key: a fixed, clearly marked example split so the flow can be tried end to end. */
+  dummyBreakdown_(t) {
+    const total = Number(t.estimate) || 4;
+    const part = share => Math.max(0.25, Math.round(total * share * 4) / 4);
+    return {
+      configured: false, dummy: true,
+      hint: 'Beispielvorschlag ohne KI (Platzhalter-Schlüssel). Mit hinterlegtem VERTEX_API_KEY schlägt Gemini passende Teilaufgaben vor.',
+      subtasks: [
+        { title: 'Ziel und Anforderungen klären: ' + t.title, estimate: part(0.15) },
+        { title: 'Umsetzung vorbereiten', estimate: part(0.25) },
+        { title: 'Umsetzen', estimate: part(0.4) },
+        { title: 'Prüfen und Feedback einholen', estimate: part(0.15) },
+        { title: 'Abschließen und dokumentieren', estimate: part(0.05) },
+      ].map(x => ({ title: x.title.slice(0, 200), estimate: x.estimate })),
+    };
   },
 
   /** Short personal briefing for the home page. */

@@ -5,6 +5,7 @@
   "description": "Notion-artiges Team-Task-Management mit smartem Kalender als Google Apps Script Web-App",
   "scripts": {
     "test": "node dev/test.js",
+    "check": "node dev/check-gas.js",
     "preview": "node dev/build-preview.js",
     "push": "clasp push",
     "deploy": "clasp push && clasp deploy"
