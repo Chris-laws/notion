@@ -1,71 +1,58 @@
 # Taskraum – Designsprache
 
-> Vorläufig: entstanden ohne bestehendes Designsystem (Reifegrad L0). Alle Werte sind bewusst gesetzte Startwerte und als CSS-Variablen in `src/Styles.html` umgesetzt. Änderungen hier zuerst, dann in den Tokens.
+> Vorläufig (Reifegrad L0): kein bestehendes Designsystem, alle Werte sind bewusst gesetzte Startwerte und stehen als CSS-Variablen in `src/Styles.html`. Änderungen hier zuerst, dann in den Tokens.
 
 ## Haltung
 
-Ruhig, dicht, werkzeughaft – näher an Linear/Notion als an einem Dashboard. Inhalte (Aufgaben, Personen, Tage) tragen Farbe, die Oberfläche bleibt grau. Dezente Lidl-Farbwelt: Blau (#0050aa) für Auswahl und primäre Aktion, Gelb nur als kleiner Marker, Rot nur für Fristen und Warnungen. Die Startseite hat einen blauen Hero mit gelb-roter Kante, sonst bleibt die Fläche weiß/grau. Keine Emojis in der Bedienoberfläche; Teams und Projekte bekommen farbige Kürzel-Quadrate.
+Kein Notion-Nachbau. Taskraum ist ein Leitstand für ein Team: Wer macht was, und wer ist wann da. Die Oberfläche sieht aus wie gut gesetzte Beschilderung im Markt: flach, kantig, Tinte auf Weiß, große Zahlen, klare Linien. Keine Schatten, keine Verläufe, keine runden Karten.
+
+Farbe hat eine Aufgabe, nie Dekoration:
+
+- **Lidl-Blau** (`#0050aa`) ist Struktur: Seitenleiste, Auswahl, Links, Blöcke für Urlaub.
+- **Gelb** (`#ffe500`) markiert, wo man ist und was man tun kann: aktive Navigation, primäre Aktion, heutiger Tag, Feiertage, Auswahl.
+- **Rot** (`#e60a14`) heißt Handlungsbedarf: überfällig, dringend, Team ab Schwelle abwesend.
+- Alles andere ist Tinte (`#0b1d3a`) und kühles Grau.
 
 ## Farben
 
 | Token | Hell | Dunkel | Einsatz |
 |---|---|---|---|
-| `--bg` | `#ffffff` | `#141417` | Inhaltsfläche |
-| `--bg-subtle` | `#f8f8fa` | `#1a1a1e` | Seitenleiste, Spaltenhintergrund, Wochenenden |
-| `--bg-hover` | `#f1f1f4` | `#232328` | Hover |
-| `--bg-active` | `#ebebf0` | `#2a2a30` | Aktive Navigation |
-| `--border` | `#ececf0` | `#26262c` | Trennlinien |
-| `--border-strong` | `#dedee4` | `#33333a` | Eingabefelder, Karten |
-| `--text` | `#1b1b1f` | `#ececf0` | Primärtext |
-| `--text-2` | `#5f5f6b` | `#a0a0ab` | Sekundärtext, Labels |
-| `--text-3` | `#9a9aa6` | `#6c6c76` | Metadaten, Platzhalter |
-| `--accent` | `#0050aa` | `#4d94f0` | Primäraktion, Auswahl, Fokus (Lidl-Blau) |
-| `--accent-soft` | `#e6eefa` | `#16294a` | Auswahl-Hintergrund |
-| `--yellow` | `#ffe500` | `#ffe500` | Marker: Logo, aktive Navigation, heutiger Tag, Feiertage (als `--yellow-soft`) |
-| `--danger` | `#e60a14` | `#ff5b63` | Überfällig, Warnung ≥ Schwelle |
-| `--warning` | `#a86f00` | `#f5cf4d` | Feiertage, Teilabwesenheit |
-| `--success` | `#30a46c` | `#3dd68c` | Erledigt |
+| `--ink` / `--text` | `#0b1d3a` | `#eaf0fa` | Text, starke Linien |
+| `--bg` | `#ffffff` | `#0d1626` | Inhaltsfläche |
+| `--bg-subtle` | `#f3f6fa` | `#121d31` | Wochenenden, Fußzeilen |
+| `--border` / `--border-strong` | `#dfe5ee` / `#b9c4d6` | `#1f2e49` / `#354867` | Haarlinien / Rahmen |
+| `--accent` | `#0050aa` | `#5ca2ff` | Blau |
+| `--yellow` | `#ffe500` | `#ffe500` | Marker |
+| `--danger` | `#e60a14` | `#ff5560` | Rot |
+| `--side-bg` | `#0050aa` | `#00346e` | Seitenleiste |
 
-Status-Glyphen statt bunter Pillen: Backlog (gestrichelter Kreis, grau), Offen (Kreis, grau), In Arbeit (halb gefüllt, gelb), Review (drei Viertel, indigo), Erledigt (gefüllt mit Haken, grün).
-
-Abwesenheitsarten: Urlaub `#2fa56b`, Krank `#e60a14`, Fortbildung `#0050aa`, Sonstiges `#8b93a3`, Feiertag `#f2b600` – jeweils als 14 %-Tönung für Flächen.
+Abwesenheiten: Urlaub Blau, Krank Rot, Fortbildung Tinte, Sonstiges Grau, Feiertag Gelb.
+Status als Quadrate: Backlog gestrichelt, Offen leer, In Arbeit halb gelb, Review halb blau, Erledigt blau mit Haken.
 
 ## Typografie
 
-Inter, Basisgröße 14 px, Zeilenhöhe 1.45.
+Inter (optische Größe automatisch) für Text, JetBrains Mono für alles, was Etikett oder Zahl ist.
 
-| Rolle | Größe / Gewicht |
+| Rolle | Stil |
 |---|---|
-| Seitentitel | 22 px / 600, Laufweite −0.01em |
-| Abschnitt | 13 px / 600 |
-| Fließtext, Aufgabentitel | 14 px / 450–500 |
-| UI, Buttons | 13 px / 500 |
-| Metadaten | 12 px / 450, `--text-2` oder `--text-3` |
-| Zahlen | `font-variant-numeric: tabular-nums` |
+| Seitentitel | 32 px / 800, Laufweite −0.04em |
+| Datum im Wochenplan | 26 px / 800 |
+| Aufgabentitel | 14 px / 600, Laufweite −0.01em |
+| Etiketten (Gruppenköpfe, Spalten, Eigenschaften) | Mono 10.5–11 px, Großbuchstaben, +0.08em |
+| Daten, Dauer, Zähler | Mono 11.5 px |
 
-## Abstände und Formen
+## Form
 
-4-px-Raster: 4, 8, 12, 16, 24, 32, 48. Innerhalb von Gruppen eng (4–8), zwischen Gruppen weit (24–32).
-Radien: 6 px (Steuerelemente), 8 px (Karten, Menüs), 12 px (Dialoge, Panels).
-Schatten nur für schwebende Ebenen (Menüs, Dialoge, gezogene Karten); Karten liegen mit 1-px-Rand auf.
-Zeilenhöhen: Navigation 28 px, Tabellenzeile 36 px, Listenzeile 40 px, Buttons 28 px (klein 24 px).
+Radius 3 px überall (Marken und Avatare sind Quadrate). Struktur durch Linien: 2 px Tinte oben an jeder Gruppe, Tabelle, Spalte und jedem Panel, 1 px Haarlinie zwischen Zeilen. Schwebende Ebenen (Menüs, Dialoge) bekommen 1,5 px Tintenrand und einen harten, versetzten Schatten, Dialoge zusätzlich 6 px gelben Kopfstreifen. Karten haben links einen 4 px Streifen nach Priorität: Rot dringend, Blau hoch.
 
 ## Layout
 
-Seitenleiste 244 px + Inhalt + optionale Detailansicht 520 px rechts (mobil Vollbild).
-Kopfzeile 48 px: Pfad links, Suche und „Neue Aufgabe“ rechts.
-Seitenkopf: Kürzel-Quadrat + Titel + eine Zeile Kontext, darunter Ansichts-Tabs und rechts die Werkzeuge (Filter, Gruppierung, Suche als Icon-Buttons).
-Inhalt max. 1120 px für Lesen/Listen, volle Breite für Board, Kalender und Verfügbarkeit.
-
-## Komponenten
-
-- **Ansichts-Tabs**: Text + Icon, aktive Ansicht mit `--bg-active`-Fläche, kein Unterstrich.
-- **Karte (Board)**: Titel 2 Zeilen max., darunter eine Metazeile (Priorität, Fälligkeit, Unteraufgaben), Avatare rechts unten. Projekt nur außerhalb der Projektansicht.
-- **Eigenschaftszeile (Detail)**: Label 120 px in `--text-2`, Wert als Hover-Fläche.
-- **Chip/Tag**: neutraler Rahmen, farbiger 6-px-Punkt.
-- **Warnung**: rot getönter Hintergrund + Text „3/5 weg“, nie nur Farbe.
-- **Kürzel-Quadrat**: 18/24/32 px, Teamfarbe, erster Buchstabe weiß.
+- Seitenleiste 232 px, blau, aktive Seite gelb hinterlegt.
+- Kopfzeile 52 px: Pfad als Mono-Etikett links, „Neue Aufgabe“ (gelb) rechts.
+- Seitenkopf: Titel 32 px, eine Zeile Kontext, darunter 2 px Tintenlinie. Dann Ansichts-Tabs (Woche, Liste, Board, Tabelle, Kalender) mit gelber Unterstreichung.
+- Startseite „Meine Aufgaben“: Begrüßung, gelber Ticker mit Tageszusammenfassung und vier Zahlen, darunter der **Wochenplan** (Aufgaben nach Fälligkeitstag, Feiertage und Teamabwesenheit im Tageskopf, Warnung rot), rechts Warnungen, Abwesenheiten, Feiertage.
+- Verfügbarkeit: Tagesraster, Abwesenheit als durchgehende Balken, Fußzeile mit Prozent, darunter Abwesenheiten und Feiertage des Zeitraums.
 
 ## Dichte
 
-Keine leeren Flächen: Startseite und Kalender haben rechts eine Seitenspalte (Warnungen, Abwesenheiten, Feiertage), Verfügbarkeit füllt die Breite und zeigt darunter Abwesenheiten und Feiertage des Zeitraums, Board-Spalten teilen sich die Breite. Seitenränder 28 px, Inhalt bis 1320 px.
+Keine leeren Flächen: Seitenspalten rechts auf Startseite und Kalender, Verfügbarkeit füllt die Breite, Board-Spalten teilen sich die Breite, Wochenenden erscheinen im Wochenplan nur, wenn dort etwas liegt.

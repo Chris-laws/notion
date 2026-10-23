@@ -27,6 +27,7 @@ function notFound() {
 
 /* ---------------- database (task collection) ---------------- */
 const LAYOUTS = [
+  { key: 'week', label: 'Woche', ic: 'calendar' },
   { key: 'list', label: 'Liste', ic: 'list' },
   { key: 'board', label: 'Board', ic: 'board' },
   { key: 'table', label: 'Tabelle', ic: 'table' },
@@ -42,7 +43,7 @@ function prefs() {
   const k = dbKey();
   if (!S.db[k]) {
     S.db[k] = {
-      layout: S.route.view === 'home' ? 'list' : 'board', groupBy: 'status', who: 'all', prio: [],
+      layout: S.route.view === 'home' ? 'week' : 'board', groupBy: 'status', who: 'all', prio: [],
       showDone: S.route.view !== 'home', search: '', sort: { key: 'dueDate', dir: 1 },
     };
   }
@@ -91,6 +92,7 @@ function database(tasks, opts) {
   const visibleDone = p.showDone ? filtered : filtered.filter(t => !isDone(t));
   if (p.layout === 'board') body = boardHtml(filtered.filter(t => !t.parentId || opts.includeSub), p, opts);
   else if (p.layout === 'table') body = tableHtml(visibleDone.filter(t => !t.parentId || opts.includeSub), p, opts);
+  else if (p.layout === 'week') body = weekHtml(visibleDone, opts);
   else if (p.layout === 'calendar') body = taskCalendarHtml(visibleDone, opts);
   else body = listHtml(visibleDone, opts);
   return bar + chipsHtml + body;
@@ -327,6 +329,57 @@ function listHtml(tasks, opts) {
   }).join('');
   return html || emptyState(opts.empty);
 }
+/* ----- week plan: tasks by due day, with holidays and team absence in the day header ----- */
+function weekHtml(tasks, opts) {
+  const today = TODAY();
+  if (!S.weekFrom) S.weekFrom = Shared.mondayOf(today);
+  const from = S.weekFrom, to = Shared.addDays(from, 6);
+  const home = S.route.view === 'home';
+  const scope = home ? uniq(myTeams().reduce((a, tm) => a.concat(teamMembers(tm)), [S.me.email])) : opts.people || null;
+  const proj = S.route.view === 'project' && project(S.route.id);
+  const teamIds = home || !(opts.teamId || proj) ? myTeams().map(x => x.id) : [opts.teamId || proj.teamId];
+  const data = calEnsure(from, to, opts.teamId || '');
+  const inScope = e => !scope || scope.indexOf(e) >= 0;
+  const open = tasks.filter(t => !isDone(t));
+  const overdue = from <= today && today <= to ? open.filter(t => t.dueDate && t.dueDate < today) : [];
+  const wt = (t, drag) => '<div class="wtask p-' + esc(t.priority || 'none') + (isDone(t) ? ' done' : '') + '" draggable="true" data-drag-id="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '">' +
+    glyph(t.status) + '<span class="tt">' + esc(t.title) + '</span>' + (t.assignees.length > 1 || (opts.teamId && t.assignees.length) ? avatars(t.assignees, 2) : '') + '</div>';
+  const kw = Shared.isoWeek(from);
+  const nav = '<div class="week-nav"><span class="kw">KW ' + kw + '</span><span class="range">' + esc(fmtDate(from, { absolute: true }) + ' – ' + fmtDate(to, { absolute: true })) + '</span>' +
+    '<button class="icon-btn" data-action="week-prev" aria-label="Vorherige Woche">' + icon('left') + '</button>' +
+    '<button class="btn outline sm" data-action="week-today">Heute</button>' +
+    '<button class="icon-btn" data-action="week-next" aria-label="Nächste Woche">' + icon('right') + '</button></div>';
+  const days = [];
+  for (let i = 0; i < 7; i++) days.push(Shared.addDays(from, i));
+  const busy = d => tasks.some(t => t.dueDate === d);
+  const shown = days.filter(d => { const wd = Shared.weekday(d); return (wd !== 0 && wd !== 6) || busy(d) || d === today; });
+  const cols = shown.map(d => {
+    const wd = Shared.weekday(d), weekend = wd === 0 || wd === 6;
+    const flags = [];
+    let warn = [];
+    if (data) {
+      data.holidays.filter(h => h.date === d && h.affects.some(inScope)).forEach(h => flags.push('<div class="wflag hol" title="' + esc(h.country) + '">' + esc(h.name) + '</div>'));
+      warn = (data.warnings || []).filter(w => w.date === d && teamIds.indexOf(w.teamId) >= 0);
+      warn.forEach(w => flags.push('<div class="wflag warn" title="' + esc(w.people.map(x => user(x.email).name).join(', ')) + '">' + icon('alert', 'sm') + esc(w.teamName + ' ' + w.absent + '/' + w.total + ' weg') + '</div>'));
+      const away = uniq(data.absences.filter(a => a.startDate <= d && a.endDate >= d && inScope(a.email)).map(a => a.email));
+      if (away.length && !weekend) flags.push('<div class="wflag away">' + avatars(away, 4) + '<span>' + away.length + ' abwesend</span></div>');
+    }
+    const list = open.concat(tasks.filter(isDone)).filter(t => t.dueDate === d && (!overdue.length || overdue.indexOf(t) < 0))
+      .sort((a, b) => rankPrio(a) - rankPrio(b));
+    return '<div class="wday' + (d === today ? ' today' : '') + (weekend ? ' weekend' : '') + (warn.length ? ' warn' : '') + '" data-drop-date="' + d + '">' +
+      '<div class="wday-head"><span class="dow">' + DOW[wd] + '</span><span class="dnum">' + Number(d.slice(8)) + '</span></div>' +
+      (flags.length ? '<div class="wday-flags">' + flags.join('') + '</div>' : '') +
+      '<div class="wday-body">' + list.map(wt).join('') +
+      '<button class="wday-add" data-action="new-task" data-preset="' + attr({ dueDate: d }) + '" title="Aufgabe für diesen Tag">' + icon('plus', 'sm') + '</button></div></div>';
+  }).join('');
+  const later = open.filter(t => !t.dueDate || t.dueDate > to);
+  const lane = (cls, label, list) => list.length ? '<div class="lane ' + cls + '"><div class="lane-head">' + label + '<span class="n"><span>' + list.length + '</span></span></div>' +
+    '<div class="lane-items">' + list.map(wt).join('') + '</div></div>' : '';
+  return nav + lane('', 'Überfällig', overdue) + '<div class="week" style="--cols:' + shown.length + '">' + cols + '</div>' + lane('later', 'Später und ohne Datum', later.slice(0, 24));
+}
+A['week-prev'] = () => { S.weekFrom = Shared.addDays(S.weekFrom, -7); render(); };
+A['week-next'] = () => { S.weekFrom = Shared.addDays(S.weekFrom, 7); render(); };
+A['week-today'] = () => { S.weekFrom = Shared.mondayOf(TODAY()); render(); };
 function emptyState(text) {
   return '<div class="empty">' + icon('checksq') + '<div>' + esc(text || 'Keine Aufgaben hier.') + '</div><br>' +
     '<button class="btn outline" data-action="palette">' + icon('plus', 'sm') + 'Aufgabe anlegen</button></div>';
@@ -527,9 +580,9 @@ function countUp() {
   requestAnimationFrame(tick);
 }
 function pageHead(title, sub, lead, actions) {
-  return '<div class="page-head">' + (lead || '') + '<h1 class="page-title">' + esc(title) + '</h1>' +
+  return '<header class="ph"><div class="page-head">' + (lead || '') + '<h1 class="page-title">' + esc(title) + '</h1>' +
     (actions ? '<div class="page-actions">' + actions + '</div>' : '') + '</div>' +
-    (sub ? '<p class="page-sub">' + sub + '</p>' : '');
+    (sub ? '<p class="page-sub">' + sub + '</p>' : '') + '</header>';
 }
 function stat(label, val, warn, sub) {
   return '<div class="stat' + (warn ? ' warn' : '') + '"><div class="lbl">' + esc(label) + '</div><div class="val">' + val + '</div>' +
@@ -549,19 +602,14 @@ function homePage() {
   const warns = b ? b.teamWarnings || [] : [];
   const myPeople = uniq(myTeams().reduce((a, tm) => a.concat(teamMembers(tm)), [S.me.email]));
   const upcoming = calEnsure(t, Shared.addDays(t, 60), '');
-  const statCard = (label, val, warn, sub) => '<div class="stat-card' + (warn ? ' warn' : '') + '"><div class="lbl">' + esc(label) + '</div><div class="val" data-count="' + val + '">' + val + '</div>' +
-    (sub ? '<div class="hint">' + esc(sub) + '</div>' : '') + '</div>';
+  const tkn = (label, val, warn) => '<div class="tk-n' + (warn ? ' warn' : '') + '"><b data-count="' + val + '">' + val + '</b><span>' + esc(label) + '</span></div>';
   return '<div class="page">' +
-    '<div class="hero"><div class="eyebrow">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div>' +
-    '<div class="greet">' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '</div>' +
-    '<div class="txt">' + icon('sparkle', 'lg') + '<div>' +
-    (b ? esc(b.text) : '<div class="skeleton" style="width:420px;max-width:70vw;margin:6px 0"></div>') +
-    (b && b.focus.length ? '<div class="focus">' + b.focus.map(f => '<button data-action="open-task" data-id="' + esc(f.id) + '">' +
-      (f.priority ? prioTag(f.priority, true) : glyph('todo')) + '<span>' + esc(f.title) + '</span></button>').join('') + '</div>' : '') +
-    (b ? '<div class="src">' + (b.source === 'ai' ? 'Zusammengefasst von Vertex AI' : 'Automatisch zusammengefasst') + '</div>' : '') +
-    '</div></div><button class="icon-btn sm" data-action="brief-reload" title="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>' +
-    (b ? '<div class="stats-row">' + statCard('Überfällig', b.overdue, b.overdue > 0) + statCard('Heute fällig', b.today) + statCard('Rest der Woche', b.week) +
-      statCard('Team-Warnungen', warns.length, warns.length > 0, warns.length ? 'nächste 4 Wochen' : 'alle Teams ausreichend besetzt') + '</div>' : '') +
+    '<div class="greet-date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div>' +
+    '<h1 class="greet">' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '</h1>' +
+    '<div class="ticker"><div class="tk-label">Heute</div><div class="tk-txt">' +
+    (b ? esc(b.text) : '<div class="skeleton" style="width:420px;max-width:60vw;margin:6px 0"></div>') + '</div>' +
+    (b ? '<div class="tk-nums">' + tkn('überfällig', b.overdue, b.overdue > 0) + tkn('heute', b.today) + tkn('Woche', b.week) + tkn('Warnungen', warns.length, warns.length > 0) +
+      '<button class="icon-btn sm" data-action="brief-reload" title="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>' : '') + '</div>' +
     '<div class="home-grid"><div>' +
     database(mine, { people: [S.me.email], empty: 'Nichts offen. Mit ⌘K legst du die nächste Aufgabe an.' }) +
     '</div><aside>' + (upcoming ? sidePanel(upcoming, myPeople) : '<div class="panel"><div class="skeleton"></div></div>') + '</aside></div>' +
@@ -761,8 +809,8 @@ function capacityPage() {
     : '<div class="banner ok">' + icon('check') + '<div><b>Gut besetzt.</b> Im gewählten Zeitraum ist nie die Hälfte des Teams gleichzeitig weg.</div></div>';
 
   const today = TODAY();
-  const th = '<tr><th class="who">' + d.members.length + ' Personen</th>' + work.map(x =>
-    '<th class="' + (Shared.weekday(x) === 1 ? 'wk ' : '') + (x === today ? 'today' : '') + '">' + DOW[Shared.weekday(x)] + '<small>' + Number(x.slice(8)) + '.' + Number(x.slice(5, 7)) + '.</small></th>').join('') + '</tr>';
+  const th = '<tr><th class="who">' + d.members.length + ' Personen</th>' + work.map((x, i) =>
+    '<th class="' + (Shared.weekday(x) === 1 ? 'wk ' : '') + (x === today ? 'today' : '') + '" title="' + esc(fmtDate(x, { absolute: true })) + '">' + DOW[Shared.weekday(x)] + '<small>' + Number(x.slice(8)) + (Number(x.slice(8)) <= 3 || i === 0 ? '<br>' + MONTHS[Number(x.slice(5, 7)) - 1] : '') + '</small></th>').join('') + '</tr>';
   const rows = d.members.map(m => '<tr><td class="who"><div class="person">' + avatar(m.email, 'md') + '<div style="min-width:0;line-height:1.3"><div style="font-weight:500;font-size:13px">' + esc(m.name) + '</div>' +
     '<div class="faint" style="font-size:11.5px">' + esc(m.region || m.country || '') + (m.awayDays ? ' · ' + m.awayDays + ' Tage weg' : '') + '</div></div></div></td>' +
     work.map(x => {
