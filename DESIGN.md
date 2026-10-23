@@ -40,6 +40,6 @@ Karten mit 14–20 px Radius und sanftem Schatten, Dialoge und Palette 20 px. Tr
 - Übersicht: Begrüßung mit Quick-Add, Briefing, vier Kennzahlen, Widgets in 12er-Raster.
 - Board: Spalten als Karten, Aufgabenkarten mit Priorität und Fälligkeit.
 - Tagesplaner: Liste ungeplanter Aufgaben links, Zeitraster 06–20 Uhr rechts, Blöcke per Drag & Drop in 15-Minuten-Schritten.
-- Agenda: Tage als Zeilen mit Datumskreis, Feiertage und Abwesenheiten inklusive.
+- Kalender: Kopfkarte mit Titel, Team-Auswahl, Filtern und Ansichtsumschalter (Agenda, Planer, Monat, Woche, Tag, Heatmap); darunter Kurzbefehl-Leiste. Agenda mit rotem Block „Überfällig“ und Tagen als Zeilen, Woche/Tag als Zeitraster mit Ganztagesstreifen, Heatmap mit Kennzahlen.
 - Detail: Seitenpanel mit weicher Eigenschaftskarte, KI-Vorschlägen, Unteraufgaben, Kommentaren.
 - Responsiv ab 1180 px und 860 px.

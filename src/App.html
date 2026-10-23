@@ -18,7 +18,7 @@ const S = {
   route: { view: 'dash' },
   peekId: null,
   peekFull: false,
-  cal: { cursor: null, teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {} },
+  cal: { cursor: null, mode: 'agenda', range: 'week', teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {} },
   cap: { teamId: null, from: null, weeks: 6, data: null, loading: false },
   briefing: null,
   collapsed: {},
@@ -387,7 +387,7 @@ function renderSidebar() {
     navItem('home', icon('checksq'), 'Meine Aufgaben', mineOpen ? '<span class="count">' + mineOpen + '</span>' : '') +
     navItem('all', icon('inbox'), 'Alle Aufgaben') +
     navItem('planner', icon('clock'), 'Tagesplaner') +
-    navItem('calendar', icon('calendar'), 'Kalender & Agenda') +
+    navItem('calendar', icon('calendar'), 'Kalender') +
     navItem('capacity', icon('users'), 'Verfügbarkeit', warn) +
     '<div class="side-section"><span>Teams</span><button class="icon-btn sm" data-action="team-new" title="Neues Team">' + icon('plus', 'sm') + '</button></div>' +
     (teamsHtml || '<div class="faint" style="padding:4px 10px;font-size:13px">Noch keine Teams.</div>') +
@@ -402,7 +402,7 @@ A['toggle-team'] = el => { S.collapsed[el.dataset.id] = !S.collapsed[el.dataset.
 function renderTopbar() {
   const r = S.route;
   const crumbs = [];
-  const labels = { dash: 'Übersicht', home: 'Meine Aufgaben', all: 'Alle Aufgaben', planner: 'Tagesplaner', calendar: 'Kalender & Agenda', capacity: 'Verfügbarkeit', settings: 'Einstellungen' };
+  const labels = { dash: 'Übersicht', home: 'Meine Aufgaben', all: 'Alle Aufgaben', planner: 'Tagesplaner', calendar: 'Kalender', capacity: 'Verfügbarkeit', settings: 'Einstellungen' };
   if (labels[r.view]) crumbs.push({ html: esc(labels[r.view]) });
   if (r.view === 'team' && team(r.id)) crumbs.push({ html: mark(team(r.id)) + esc(team(r.id).name) });
   if (r.view === 'project' && project(r.id)) {
@@ -450,6 +450,13 @@ document.addEventListener('keydown', e => {
     if (S.peekId && !typing) { closePeek(); return; }
   }
   if (typing) return;
+  if ((S.route.view === 'calendar' || S.route.view === 'planner') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const m = ['agenda', 'planner', 'month', 'week', 'day', 'heatmap'][Number(e.key) - 1];
+    if (m) { A['cal-mode']({ dataset: { v: m } }); return; }
+    if (e.key === 't') { A['cal-today'](); return; }
+    if (e.key === 'ArrowLeft') { A['cal-prev'](); return; }
+    if (e.key === 'ArrowRight') { A['cal-next'](); return; }
+  }
   if (e.key === 'c' || e.key === 'n') { e.preventDefault(); openPalette(); }
   if (e.key === '/') { e.preventDefault(); openPalette(); }
 });

@@ -16,7 +16,7 @@ Anmeldung per Google SSO, Daten in einem Google Sheet, Oberfläche im Stil von N
   `Angebot senden morgen @anna #website !hoch 2h` → Titel, Fälligkeit, Person, Projekt, Priorität und Aufwand werden erkannt
 - **Übersicht** (Startseite): Begrüßung, Quick-Add, Tagesbriefing, Kennzahlen, Heute/Überfällig, Teamabwesenheit, Agenda, Projektfortschritt, Aktivitäts-Heatmap
 - **Tagesplaner**: Aufgabenliste links, Zeitraster rechts. Aufgaben per Drag & Drop als Zeitblöcke legen (15-Minuten-Raster, Länge = Aufwandsschätzung); gespeichert als `planDate` und `planStart`
-- **Agenda**: Kalender wahlweise als Monat oder Agenda-Liste
+- **Kalender** mit sechs Ansichten (Tasten `1`–`6`): Agenda (Überfällig oben, Zeitraum Heute/Woche/Monat/90 Tage), Planer, Monat, Woche, Tag (Zeitraster mit Drag & Drop) und Heatmap erledigter Aufgaben; Urlaub, Feiertage und Teamwarnung ab 50 % in jeder Ansicht
 - „Meine Aufgaben“ als Datenbank mit Liste, Board, Tabelle
 
 **Kalender, Urlaub und Verfügbarkeit**
