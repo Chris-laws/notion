@@ -173,6 +173,19 @@ const PROP_EDITORS = {
       onPick: (v, sel) => save({ tags: sel }),
     });
   },
+  progress(anchor, t, save) {
+    const v = progressOf(t);
+    openPop(anchor,
+      '<div style="padding:8px 10px;width:220px"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px"><span class="muted">' + (t.progress > 0 ? 'Manuell' : 'Automatisch') + '</span><b class="pvv">' + v + ' %</b></div>' +
+      '<input type="range" min="1" max="100" step="5" value="' + v + '" style="width:100%">' +
+      '<div style="margin-top:8px"><button class="btn sm outline" data-auto>Auf automatisch zurücksetzen</button></div></div>',
+      pop => {
+        const r = $('input', pop);
+        r.addEventListener('input', () => { $('.pvv', pop).textContent = r.value + ' %'; });
+        r.addEventListener('change', () => save({ progress: Number(r.value) }));
+        $('[data-auto]', pop).addEventListener('click', () => { closePop(); save({ progress: 0 }); });
+      });
+  },
   dueDate(anchor, t, save) { dateEditor(anchor, t.dueDate, v => save({ dueDate: v })); },
   startDate(anchor, t, save) { dateEditor(anchor, t.startDate, v => save({ startDate: v })); },
   estimate(anchor, t, save) {
@@ -412,16 +425,44 @@ function tokenChip(tk) {
     default: return '';
   }
 }
+/** Colours the quick-add syntax inside the input line (a mirror layer behind the transparent input). */
+const QA_RULES = [
+  ['qa-assign', /@[\p{L}\d._-]+/gu],
+  ['qa-team', /\+[\p{L}\d._-]+/gu],
+  ['qa-proj', /#[\p{L}\d._-]+/gu],
+  ['qa-prio', /![\p{L}]+/gu],
+  ['qa-est', /(?<![\p{L}\d])\d+(?:[.,]\d+)?\s?(?:h|std|min|m)(?![\p{L}\d])/giu],
+  ['qa-rec', /(?<![\p{L}\d])(?:jede[nrs]?\s(?:tag|werktag|montag|dienstag|mittwoch|donnerstag|freitag|woche|monat)|täglich|werktags|wöchentlich|monatlich)(?![\p{L}\d])/giu],
+  ['qa-date', /(?<![\p{L}\d])(?:heute|morgen|übermorgen|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|nächste woche|ende der woche|in \d+ (?:tag|tagen|wochen)|\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)(?![\p{L}\d])/giu],
+];
+function qaHighlight(text) {
+  const marks = [];
+  QA_RULES.forEach(r => {
+    r[1].lastIndex = 0;
+    let m;
+    while ((m = r[1].exec(text))) {
+      const from = m.index, to = from + m[0].length;
+      if (!marks.some(x => from < x.to && to > x.from)) marks.push({ from: from, to: to, cls: r[0] });
+      if (m[0].length === 0) r[1].lastIndex++;
+    }
+  });
+  marks.sort((x, y) => x.from - y.from);
+  let out = '', pos = 0;
+  marks.forEach(m => { out += esc(text.slice(pos, m.from)) + '<span class="' + m.cls + '">' + esc(text.slice(m.from, m.to)) + '</span>'; pos = m.to; });
+  return out + esc(text.slice(pos));
+}
 function openPalette(prefill) {
   closePop();
   palState = { hover: 0, items: [] };
   $('#palette-root').innerHTML =
     '<div class="palette-bg" data-action="palette-bg"><div class="palette" role="dialog" aria-label="Suchen und erstellen">' +
-    '<div class="palette-in">' + icon('search', 'lg') + '<input id="pal-in" placeholder="Aufgabe eingeben oder suchen…  z. B. „Angebot senden morgen @anna #website !hoch 2h“" value="' + esc(prefill || '') + '"></div>' +
+    '<div class="palette-in">' + icon('bolt', 'lg') + '<div class="qa-wrap"><div class="qa-hl" id="pal-hl"></div>' +
+    '<input id="pal-in" placeholder="Aufgabe eingeben oder suchen" autocomplete="off" spellcheck="false" value="' + esc(prefill || '') + '"></div></div>' +
     '<div class="palette-preview" id="pal-prev"></div><div class="palette-list" id="pal-list"></div>' +
-    '<div class="palette-foot"><span><code>@person</code> zuweisen</span><span><code>+team</code></span><span><code>#projekt/tag</code></span>' +
-    '<span><code>!hoch</code></span><span><code>morgen · freitag · 15.11.</code></span><span><code>2h</code></span><span><code>jeden montag</code></span>' +
-    '<span style="margin-left:auto">↵ anlegen · Strg+↵ anlegen & öffnen</span></div></div></div>';
+    '<div class="qa-legend"><span class="qa-date">morgen</span><small>Fällig</small><span class="qa-date">15.11.</span><small>Datum</small><span class="qa-assign">@anna</span><small>zuweisen</small>' +
+    '<span class="qa-team">+team</span><small>Team</small><span class="qa-proj">#website</span><small>Projekt oder Tag</small><span class="qa-prio">!hoch</span><small>Priorität</small>' +
+    '<span class="qa-est">2h</span><small>Aufwand</small><span class="qa-rec">jeden montag</span><small>Wiederholung</small></div>' +
+    '<div class="palette-foot"><span>↵ anlegen</span><span>Strg+↵ anlegen und öffnen</span><span>↑↓ auswählen</span><span style="margin-left:auto">Esc schließen</span></div></div></div>';
   const input = $('#pal-in');
   input.focus();
   input.addEventListener('input', drawPalette);
@@ -439,6 +480,7 @@ function closePalette() { $('#palette-root').innerHTML = ''; palState = null; }
 
 function drawPalette(keepHover) {
   const q = $('#pal-in').value;
+  $('#pal-hl').innerHTML = qaHighlight(q);
   const parsed = Shared.parse(q, parseCtx());
   const items = [];
   if (q.trim()) items.push({ kind: 'create', parsed: parsed, html: icon('plus') + '<span>Aufgabe anlegen: <b>' + esc(parsed.title) + '</b></span>' });
@@ -462,7 +504,7 @@ function drawPalette(keepHover) {
   }
   palState.items = items;
   if (!keepHover) palState.hover = 0;
-  $('#pal-prev').innerHTML = parsed.tokens.map(tokenChip).join('');
+  $('#pal-prev').innerHTML = q.trim() ? '<div class="qa-title">' + esc(parsed.title || 'Ohne Titel') + '</div><div class="qa-chips">' + parsed.tokens.map(tokenChip).join('') + '</div>' : '';
   $('#pal-list').innerHTML = items.map((it, i) => '<button class="pop-item' + (i === palState.hover ? ' hover' : '') + '" data-action="pal-item" data-i="' + i + '">' + it.html + '</button>').join('');
 }
 A['pal-item'] = (el, e) => runPaletteItem(palState.items[Number(el.dataset.i)], e.ctrlKey || e.metaKey);

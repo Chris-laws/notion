@@ -182,6 +182,20 @@ test('day planner: time block is stored in 5-minute steps and cleared with the d
   assert.strictEqual(call('tasks.list').find(x => x.id === t.id).planDate, '');
 });
 
+test('progress is clamped, time tracking stores minutes and a running timer', () => {
+  as(ME);
+  const [t] = call('tasks.save', { title: 'Zeit messen' });
+  assert.strictEqual(t.progress, 0);
+  assert.strictEqual(t.spent, 0);
+  const [a] = call('tasks.save', { id: t.id, progress: 140, spent: 12.6, timerStart: '2026-10-26T09:00:00Z' });
+  assert.strictEqual(a.progress, 100);
+  assert.strictEqual(a.spent, 13);
+  assert.strictEqual(a.timerStart, '2026-10-26T09:00:00.000Z');
+  const [b] = call('tasks.save', { id: t.id, progress: 0, timerStart: 'kaputt' });
+  assert.strictEqual(b.progress, 0);
+  assert.strictEqual(b.timerStart, '');
+});
+
 test('board move updates several tasks', () => {
   as(ME);
   const tasks = call('tasks.list').slice(0, 2);

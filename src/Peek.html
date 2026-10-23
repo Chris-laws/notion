@@ -25,6 +25,58 @@ function closePeek() {
   render();
 }
 A['close-peek'] = () => closePeek();
+A['progress-auto'] = el => { patchTask(el.dataset.id, { progress: 0 }, { keepPeek: true }); renderPeek(); };
+
+/* ----- time tracking ----- */
+function spentSec(t) {
+  return Math.round((Number(t.spent) || 0) * 60 + (t.timerStart ? Math.max(0, Date.now() - new Date(t.timerStart).getTime()) / 1000 : 0));
+}
+function clockText(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+function timeCardHtml(t, compact) {
+  const run = !!t.timerStart;
+  const est = t.estimate ? Math.min(100, Math.round(spentSec(t) / 3600 / t.estimate * 100)) : 0;
+  const body = '<div class="tt-row"><span class="tt-total" data-timer="total">' + clockText(spentSec(t)) + '</span>' +
+    '<button class="btn ' + (run ? 'white' : 'primary') + ' sm" data-action="timer-toggle" data-id="' + esc(t.id) + '">' + icon(run ? 'stop' : 'play', 'sm') + (run ? 'Stopp' : 'Starten') + '</button></div>' +
+    (run ? '<div class="tt-run"><span class="rec"></span>Läuft seit ' + esc(new Date(t.timerStart).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })) + ' Uhr</div>' : '') +
+    (t.estimate ? '<div class="tt-est"><span class="track"><i style="width:' + est + '%"></i></span><span class="hint">' + est + ' % von ' + esc(fmtHours(t.estimate)) + ' geplant</span></div>' : '') +
+    '<div class="tt-add"><input class="input" data-keep="tmin" data-on-keydown="time-add" placeholder="Minuten nachtragen und Enter drücken" inputmode="numeric"></div>';
+  return compact ? '<div class="time-compact"><div class="k">' + icon('clock') + 'Zeiterfassung</div>' + body + '</div>'
+    : '<div class="card-w"><h3>' + icon('clock', 'sm') + 'Zeiterfassung</h3>' + body + '</div>';
+}
+A['timer-toggle'] = el => {
+  const t = task(el.dataset.id);
+  if (!t) return;
+  if (t.timerStart) patchTask(t.id, { spent: Math.round(spentSec(t) / 60), timerStart: '' }, { keepPeek: true });
+  else patchTask(t.id, { timerStart: new Date().toISOString() }, { keepPeek: true });
+  renderPeek();
+};
+ON.keydown['time-add'] = (el, e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const min = Math.round(Number(String(el.value).replace(',', '.')) || 0);
+  const t = task(S.peekId);
+  if (!t || min <= 0) return;
+  patchTask(t.id, { spent: Math.round(spentSec(t) / 60) + min, timerStart: t.timerStart }, { keepPeek: true });
+  renderPeek();
+  toast(min + ' min nachgetragen');
+};
+function tickTimer() {
+  const t = S.peekId && task(S.peekId);
+  $$('[data-timer=total]').forEach(n => { if (t) n.textContent = clockText(spentSec(t)); });
+}
+setInterval(() => { const t = S.peekId && task(S.peekId); if (t && t.timerStart) tickTimer(); }, 1000);
+A['ed-fmt'] = el => {
+  const ta = $('[data-keep=desc]');
+  if (!ta) return;
+  const ins = { head: '\n## ', bullet: '\n- ', check: '\n- [ ] ', date: fmtDate(TODAY(), { absolute: true }) }[el.dataset.k];
+  const pos = ta.selectionStart || ta.value.length;
+  ta.value = ta.value.slice(0, pos) + ins + ta.value.slice(pos);
+  ta.focus(); ta.setSelectionRange(pos + ins.length, pos + ins.length);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+};
 A['peek-full'] = () => { S.peekFull = !S.peekFull; renderPeek(); };
 
 function propRow(t, field, ic, label, value) {
@@ -35,11 +87,12 @@ function propRow(t, field, ic, label, value) {
 function renderPeek() {
   const el = $('#peek');
   const t = S.peekId && task(S.peekId);
-  if (!t) { el.hidden = true; el.innerHTML = ''; return; }
+  if (!t) { el.hidden = true; el.innerHTML = ''; $('#app').classList.remove('peek-full'); return; }
   const active = document.activeElement;
   const keepFocus = active && el.contains(active) && active.dataset && active.dataset.keep;
   const caret = keepFocus ? [active.dataset.keep, active.selectionStart] : null;
-  const scroll = $('.peek-scroll', el) ? $('.peek-scroll', el).scrollTop : 0;
+  const scrollEl = $('.peek-scroll, .dt-scroll', el);
+  const scroll = scrollEl ? scrollEl.scrollTop : 0;
   el.hidden = false;
   el.classList.toggle('full', S.peekFull);
   const parent = t.parentId && task(t.parentId);
@@ -55,6 +108,7 @@ function renderPeek() {
     propRow(t, 'projectId', 'folder', 'Projekt', projectChip(project(t.projectId))) +
     propRow(t, 'teams', 'users', 'Teams', t.teams.map(id => teamChip(team(id))).join('')) +
     propRow(t, 'estimate', 'hourglass', 'Aufwand', esc(fmtHours(t.estimate))) +
+    propRow(t, 'progress', 'pie', 'Fortschritt', progressBar(t)) +
     propRow(t, 'tags', 'tag', 'Tags', t.tags.map(tagChip).join('')) +
     propRow(t, 'recurrence', 'repeat', 'Wiederholung', t.recurrence ? esc(rec.label) : '');
 
@@ -80,37 +134,77 @@ function renderPeek() {
   }
 
   const comments = S.comments && S.comments.taskId === t.id ? S.comments.list : null;
+  const commentsList = comments === null ? '<div class="skeleton" style="width:60%"></div>' : comments.map(c =>
+    '<div class="comment">' + avatar(c.author) + '<div class="body"><div class="head"><b>' + esc(user(c.author).name) + '</b><span class="muted">' + esc(timeAgo(c.createdAt)) + '</span></div>' +
+    '<div class="text">' + esc(c.body) + '</div></div></div>').join('');
+  const commentForm = '<form class="comment-form" data-on-submit="comment">' + avatar(S.me.email) +
+    '<textarea class="textarea" name="body" data-keep="comment" data-on-keydown="comment-key" placeholder="Kommentar schreiben…" rows="1"></textarea>' +
+    '<button class="btn outline" type="submit">Senden</button></form>';
+  const subsList = subs.map(s => '<div class="subtask"><span class="check' + (isDone(s) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(s.id) + '"></span>' +
+    '<span class="t' + (isDone(s) ? ' done' : '') + '" data-action="open-task" data-id="' + esc(s.id) + '">' + esc(s.title) + '</span>' +
+    (s.assignees.length ? avatars(s.assignees, 2) : '') + dueTag(s) + '</div>').join('') +
+    '<div class="inline-add">' + icon('plus', 'sm faint') + '<input data-keep="sub" data-on-keydown="add-subtask" placeholder="Unteraufgabe hinzufügen und Enter drücken"></div>';
+  const foot = '<div class="meta-foot">Erstellt von ' + esc(user(t.createdBy).name) + ' · ' + esc(timeAgo(t.createdAt)) +
+    (t.updatedAt && t.updatedAt !== t.createdAt ? ' · zuletzt geändert ' + esc(timeAgo(t.updatedAt)) : '') +
+    (t.completedAt ? ' · erledigt ' + esc(timeAgo(t.completedAt)) : '') + '</div>';
+  $('#app').classList.toggle('peek-full', !!S.peekFull);
+  if (S.peekFull) {
+    const pv = progressOf(t);
+    const dp = (label, field, inner, extra) => '<div class="card-w dp"><div class="dpl">' + label + (extra || '') + '</div>' +
+      '<button class="dpv" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + field + '">' + (inner || '<span class="faint">Leer</span>') + icon('chevron', 'sm') + '</button></div>';
+    const over = !isDone(t) && t.dueDate && t.dueDate < TODAY();
+    el.innerHTML = '<div class="dt-scroll"><div class="dt-wrap">' +
+      '<div class="card-w dt-head"><button class="round-btn" data-action="peek-full" title="Zurück">' + icon('back') + '</button>' +
+      '<div class="dt-main"><textarea class="peek-title" rows="1" data-keep="title" data-on-input="peek-title" placeholder="Ohne Titel">' + esc(t.title === 'Ohne Titel' ? '' : t.title) + '</textarea>' +
+      '<div class="dt-chips">' + statusTag(t.status) + prioTag(t.priority) +
+      (t.dueDate ? '<span class="chip ' + (over ? 'danger' : '') + '">' + icon('calendar', 'sm') + esc(fmtDate(t.dueDate, { absolute: true })) + '</span>' : '') +
+      '<span class="chip">' + icon('pie', 'sm') + 'Fortschritt ' + pv + ' %</span>' +
+      (parent ? '<button class="chip accent" data-action="open-task" data-id="' + esc(parent.id) + '">' + icon('left', 'sm') + esc(parent.title) + '</button>' : '') + '</div></div>' +
+      '<div class="dt-acts"><button class="btn white" data-action="toggle-done" data-id="' + esc(t.id) + '">' + (isDone(t) ? icon('repeat', 'sm') + 'Wieder öffnen' : icon('check', 'sm') + 'Erledigt') + '</button>' +
+      '<button class="icon-btn" data-action="peek-more" title="Mehr">' + icon('more') + '</button>' +
+      '<button class="icon-btn" data-action="close-peek" title="Schließen (Esc)">' + icon('x') + '</button></div></div>' +
+      '<div class="dt-props">' +
+      dp('Status', 'status', statusTag(t.status)) + dp('Priorität', 'priority', prioTag(t.priority)) +
+      dp('Start', 'startDate', t.startDate ? '<span class="dtc">' + esc(fmtDate(t.startDate, { absolute: true })) + '</span>' : '') +
+      dp('Fällig', 'dueDate', t.dueDate ? '<span class="dtc' + (over ? ' over' : '') + '">' + esc(fmtDate(t.dueDate, { absolute: true })) + '</span>' : '') +
+      '<div class="card-w dp"><div class="dpl">Fortschritt<span class="dpm">' + pv + ' % · ' + (t.progress > 0 ? 'manuell' : 'automatisch') + '</span></div>' +
+      '<button class="dpv prog" data-action="prop" data-id="' + esc(t.id) + '" data-field="progress"><span class="track"><i style="width:' + pv + '%"></i></span></button>' +
+      (t.progress > 0 ? '<button class="linkbtn" data-action="progress-auto" data-id="' + esc(t.id) + '">Auf automatisch zurücksetzen</button>' : '<span class="hint">Aus Status und Unteraufgaben berechnet</span>') + '</div></div>' +
+      '<div class="dt-grid"><div class="dt-col">' +
+      '<div class="card-w"><h3>' + icon('text', 'sm') + 'Beschreibung</h3><p class="hint" style="margin:-6px 0 12px">Kontext, Vorgehen und Ressourcen festhalten, damit später klar ist, was zu tun ist und warum.</p>' +
+      '<div class="ed-tools"><button data-action="ed-fmt" data-k="head" title="Überschrift">H</button><button data-action="ed-fmt" data-k="bullet" title="Aufzählung">' + icon('list', 'sm') + '</button>' +
+      '<button data-action="ed-fmt" data-k="check" title="Checkliste">' + icon('checksq', 'sm') + '</button><button data-action="ed-fmt" data-k="date" title="Heutiges Datum einfügen">' + icon('calendar', 'sm') + '</button></div>' +
+      '<textarea class="desc big" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
+      '<div class="saved">' + icon('check', 'sm') + 'Alle Änderungen gespeichert</div></div>' +
+      '<div class="card-w"><h3>' + icon('sub', 'sm') + 'Unteraufgaben<span class="n">' + subs.filter(isDone).length + '/' + subs.length + ' erledigt</span></h3>' +
+      '<p class="hint" style="margin:-6px 0 10px">Unteraufgaben sind vollwertige Aufgaben mit eigener Person, Fälligkeit und Status.</p>' + subsList + '</div>' +
+      '</div><div class="dt-col">' + timeCardHtml(t) +
+      '<div class="card-w"><h3>' + icon('layers', 'sm') + 'Details</h3><div class="props" style="margin:0;background:none;padding:0">' + props.split('<div class="prop">').filter(x => /Zugewiesen|Projekt|Teams|Aufwand|Tags|Wiederholung/.test(x)).map(x => '<div class="prop">' + x).join('') + '</div></div>' +
+      '<div class="card-w"><h3>' + icon('sparkle', 'sm') + 'Smarte Hilfen</h3>' + smart + '</div>' +
+      '<div class="card-w"><h3>' + icon('msg', 'sm') + 'Kommentare<span class="n">' + (comments ? comments.length : 0) + '</span></h3>' + commentsList + commentForm + '</div>' +
+      foot + '</div></div></div></div>';
+  } else {
   el.innerHTML =
     '<div class="peek-top">' +
     '<button class="icon-btn" data-action="close-peek" title="Schließen (Esc)">' + icon('x') + '</button>' +
-    '<button class="icon-btn" data-action="peek-full" title="' + (S.peekFull ? 'Als Seitenleiste' : 'Ganze Seite') + '">' + icon(S.peekFull ? 'shrink' : 'expand') + '</button>' +
+    '<button class="icon-btn" data-action="peek-full" title="Ganze Seite">' + icon('expand') + '</button>' +
     (parent ? '<button class="btn sm" data-action="open-task" data-id="' + esc(parent.id) + '">' + icon('left', 'sm') + esc(parent.title) + '</button>' : '') +
     '<div class="spacer"></div>' +
     '<button class="btn sm" data-action="toggle-done" data-id="' + esc(t.id) + '">' + (isDone(t) ? icon('repeat', 'sm') + 'Wieder öffnen' : icon('check', 'sm') + 'Erledigt') + '</button>' +
     '<button class="icon-btn" data-action="peek-more" title="Mehr">' + icon('more') + '</button></div>' +
     '<div class="peek-scroll"><div class="peek-body">' +
     '<textarea class="peek-title" rows="1" data-keep="title" data-on-input="peek-title" placeholder="Ohne Titel">' + esc(t.title === 'Ohne Titel' ? '' : t.title) + '</textarea>' +
-    '<div class="props">' + props + '</div>' + smart +
+    '<div class="props">' + props + '</div>' + timeCardHtml(t, true) + smart +
     '<div class="divider"></div>' +
     '<textarea class="desc" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
-    '<div class="section-label">' + icon('sub', 'sm') + 'Unteraufgaben' + (subs.length ? ' <span class="faint">' + subs.filter(isDone).length + '/' + subs.length + '</span>' : '') + '</div>' +
-    subs.map(s => '<div class="subtask"><span class="check' + (isDone(s) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(s.id) + '"></span>' +
-      '<span class="t' + (isDone(s) ? ' done' : '') + '" data-action="open-task" data-id="' + esc(s.id) + '">' + esc(s.title) + '</span>' +
-      (s.assignees.length ? avatars(s.assignees, 2) : '') + dueTag(s) + '</div>').join('') +
-    '<div class="inline-add">' + icon('plus', 'sm faint') + '<input data-keep="sub" data-on-keydown="add-subtask" placeholder="Unteraufgabe hinzufügen und Enter drücken"></div>' +
-    '<div class="section-label">' + icon('msg', 'sm') + 'Kommentare</div>' +
-    (comments === null ? '<div class="skeleton" style="width:60%"></div>' : comments.map(c =>
-      '<div class="comment">' + avatar(c.author) + '<div class="body"><div class="head"><b>' + esc(user(c.author).name) + '</b><span class="muted">' + esc(timeAgo(c.createdAt)) + '</span></div>' +
-      '<div class="text">' + esc(c.body) + '</div></div></div>').join('')) +
-    '<form class="comment-form" data-on-submit="comment">' + avatar(S.me.email) +
-    '<textarea class="textarea" name="body" data-keep="comment" data-on-keydown="comment-key" placeholder="Kommentar schreiben…" rows="1"></textarea>' +
-    '<button class="btn outline" type="submit">Senden</button></form>' +
-    '<div class="meta-foot">Erstellt von ' + esc(user(t.createdBy).name) + ' · ' + esc(timeAgo(t.createdAt)) +
-    (t.updatedAt && t.updatedAt !== t.createdAt ? ' · zuletzt geändert ' + esc(timeAgo(t.updatedAt)) : '') +
-    (t.completedAt ? ' · erledigt ' + esc(timeAgo(t.completedAt)) : '') + '</div>' +
+    '<div class="section-label">' + icon('sub', 'sm') + 'Unteraufgaben' + (subs.length ? ' <span class="faint">' + subs.filter(isDone).length + '/' + subs.length + '</span>' : '') + '</div>' + subsList +
+    '<div class="section-label">' + icon('msg', 'sm') + 'Kommentare</div>' + commentsList + commentForm + foot +
     '</div></div>';
+  }
+  tickTimer();
   $$('#peek textarea').forEach(autosize);
-  $('.peek-scroll', el).scrollTop = scroll;
+  const sc2 = $('.peek-scroll, .dt-scroll', el);
+  if (sc2) sc2.scrollTop = scroll;
   if (caret) {
     const n = $('[data-keep="' + caret[0] + '"]', el);
     if (n) { n.focus(); try { n.setSelectionRange(caret[1], caret[1]); } catch (e) { /* input type */ } }

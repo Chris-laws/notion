@@ -20,7 +20,7 @@ const Views = {
       default: return dashPage();
     }
   },
-  after() { bindDrag(); bindCalSelect(); bindPlanner(); },
+  after() { bindDrag(); bindCalSelect(); bindPlanner(); bindGantt(); },
 };
 function notFound() {
   return '<div class="page"><div class="empty">' + icon('search') + '<div>Diese Seite gibt es nicht mehr.</div><br>' +
@@ -30,24 +30,27 @@ function notFound() {
 /* ---------------- database (task collection) ---------------- */
 const LAYOUTS = [
   { key: 'list', label: 'Liste', ic: 'list' },
-  { key: 'board', label: 'Board', ic: 'board' },
   { key: 'table', label: 'Tabelle', ic: 'table' },
+  { key: 'board', label: 'Board', ic: 'board' },
   { key: 'calendar', label: 'Kalender', ic: 'calendar' },
+  { key: 'gantt', label: 'Gantt', ic: 'gantt' },
 ];
 const GROUPS = [
   { key: 'status', label: 'Status' }, { key: 'priority', label: 'Priorität' },
   { key: 'assignee', label: 'Person' }, { key: 'project', label: 'Projekt' },
 ];
 function dbKey() { return S.route.view + ':' + (S.route.id || ''); }
+function defaultPrefs() {
+  return {
+    layout: S.route.view === 'home' ? 'list' : 'board', groupBy: 'status', who: 'all', prio: [],
+    showDone: S.route.view !== 'home', search: '', sort: { key: 'dueDate', dir: 1 }, rows: 50, page: 0, collapsedCols: {},
+  };
+}
 function prefs() {
   if (!S.db) S.db = store.get('db', {});
   const k = dbKey();
-  if (!S.db[k]) {
-    S.db[k] = {
-      layout: S.route.view === 'home' ? 'list' : 'board', groupBy: 'status', who: 'all', prio: [],
-      showDone: S.route.view !== 'home', search: '', sort: { key: 'dueDate', dir: 1 },
-    };
-  }
+  if (!S.db[k]) S.db[k] = defaultPrefs();
+  if (!S.db[k].collapsedCols) S.db[k].collapsedCols = {};
   if (!LAYOUTS.some(l => l.key === S.db[k].layout)) S.db[k].layout = 'list';
   return S.db[k];
 }
@@ -75,16 +78,26 @@ function database(tasks, opts) {
   opts = opts || {};
   const filtered = applyFilters(tasks, p);
   const whoLabel = p.who === 'all' ? '' : p.who === 'me' ? 'Mir zugewiesen' : p.who === 'none' ? 'Nicht zugewiesen' : user(p.who).name;
-  const bar =
-    '<div class="db-bar"><div class="tabs">' + LAYOUTS.map(l =>
-      '<button class="tab' + (p.layout === l.key ? ' active' : '') + '" data-action="layout" data-v="' + l.key + '">' + icon(l.ic) + l.label + '</button>').join('') + '</div>' +
+  const sortable = p.layout === 'table' || p.layout === 'gantt';
+  const cnt = n => (n ? '<span class="tn">' + n + '</span>' : '');
+  const views = savedViews();
+  const sw = '<div class="vsw">' + LAYOUTS.map(l =>
+    '<button class="' + (p.layout === l.key ? 'on' : '') + '" data-action="layout" data-v="' + l.key + '" title="' + l.label + '">' + icon(l.ic) + '</button>').join('') + '</div>';
+  const titleRow = opts.title
+    ? '<div class="dbh-top"><div><h1 class="page-title">' + esc(opts.title) + '</h1>' + (opts.sub ? '<p class="page-sub">' + opts.sub + '</p>' : '') + '</div>' +
+      '<div class="dbh-r">' + sw + '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>'
+    : '';
+  const tools = '<div class="dbh-tools">' +
+    '<button class="tbtn' + (p.who !== 'all' ? ' on' : '') + '" data-action="db-who">' + icon('filter', 'sm') + 'Person' + cnt(p.who !== 'all' ? 1 : 0) + '</button>' +
+    '<button class="tbtn' + (p.prio.length ? ' on' : '') + '" data-action="db-prio">' + icon('flag', 'sm') + 'Priorität' + cnt(p.prio.length) + '</button>' +
+    (sortable ? '<button class="tbtn" data-action="db-sort">' + icon('sort', 'sm') + 'Sortierung' + cnt(1) + '</button>' : '') +
+    (p.layout === 'board' ? '<button class="tbtn" data-action="db-group">' + icon('layers', 'sm') + 'Gruppe: ' + esc(GROUPS.find(g => g.key === p.groupBy).label) + '</button>' : '') +
+    (p.layout !== 'board' ? '<button class="tbtn' + (p.showDone ? ' on' : '') + '" data-action="db-done">' + icon('checksq', 'sm') + 'Erledigte</button>' : '') +
     '<input class="db-search' + (p.search ? ' open' : '') + '" placeholder="Suchen…" value="' + esc(p.search) + '" data-on-input="db-search">' +
     '<button class="icon-btn" data-action="db-search-open" title="Suchen">' + icon('search') + '</button>' +
-    '<button class="btn" data-action="db-who">' + icon('user', 'sm') + 'Person</button>' +
-    '<button class="btn" data-action="db-prio">' + icon('flag', 'sm') + 'Priorität</button>' +
-    (p.layout === 'board' ? '<button class="btn" data-action="db-group">' + icon('layers', 'sm') + 'Gruppiert nach ' + esc(GROUPS.find(g => g.key === p.groupBy).label) + '</button>' : '') +
-    (p.layout !== 'board' ? '<button class="btn' + (p.showDone ? ' on' : '') + '" data-action="db-done">' + icon('checksq', 'sm') + 'Erledigte</button>' : '') +
-    '</div>';
+    '<span class="grow"></span>' + (opts.title ? '' : sw) +
+    '<span class="vlbl">Gespeicherte Ansichten</span><button class="tbtn sel" data-action="view-menu">' + esc(p.view || 'Standard') + icon('chevron', 'sm') + '</button>' +
+    '<button class="icon-btn" data-action="view-save" title="Aktuelle Ansicht speichern">' + icon('plus') + '</button></div>';
   const chips = [];
   if (whoLabel) chips.push('<button class="fchip" data-action="db-clear" data-k="who">' + icon('user', 'sm') + esc(whoLabel) + icon('x', 'sm') + '</button>');
   if (p.prio.length) chips.push('<button class="fchip" data-action="db-clear" data-k="prio">' + icon('flag', 'sm') + esc(p.prio.map(k => (prioOf(k) || { label: 'Keine' }).label).join(', ')) + icon('x', 'sm') + '</button>');
@@ -92,12 +105,60 @@ function database(tasks, opts) {
 
   let body;
   const visibleDone = p.showDone ? filtered : filtered.filter(t => !isDone(t));
-  if (p.layout === 'board') body = boardHtml(filtered.filter(t => !t.parentId || opts.includeSub), p, opts);
-  else if (p.layout === 'table') body = tableHtml(visibleDone.filter(t => !t.parentId || opts.includeSub), p, opts);
+  const top = l => l.filter(t => !t.parentId || opts.includeSub);
+  if (p.layout === 'board') body = boardHtml(top(filtered), p, opts);
+  else if (p.layout === 'table') body = tableHtml(top(visibleDone), p, opts);
   else if (p.layout === 'calendar') body = taskCalendarHtml(visibleDone, opts);
+  else if (p.layout === 'gantt') body = ganttHtml(top(visibleDone), p, opts);
   else body = listHtml(visibleDone, opts);
-  return bar + chipsHtml + body;
+  return '<div class="card-w dbh' + (opts.title ? ' titled' : '') + '">' + titleRow + tools + '</div>' + chipsHtml + body;
 }
+/* saved views: filter, layout and sorting per page, kept in this browser */
+function savedViews() {
+  const all = store.get('views', {});
+  return all[dbKey()] || [];
+}
+A['view-menu'] = el => {
+  const list = savedViews();
+  openMenu(el, [{ value: '', html: '<span>Standard</span>', search: '' }].concat(list.map(v => ({ value: v.name, html: '<span>' + esc(v.name) + '</span>', search: v.name }))), {
+    search: false, selected: [prefs().view || ''],
+    onPick: name => {
+      const d = defaultPrefs();
+      const v = list.find(x => x.name === name);
+      S.db[dbKey()] = Object.assign(d, v ? v.p : {}, { view: name });
+      store.set('db', S.db);
+      render();
+    },
+  });
+};
+A['view-save'] = () => {
+  openModal({
+    title: 'Ansicht speichern', submitLabel: 'Speichern',
+    body: field('Name', '<input class="input" name="name" required maxlength="40" placeholder="z. B. Meine offenen Aufgaben">') +
+      '<p class="hint">Gespeichert werden Layout, Filter, Gruppierung und Sortierung dieser Seite, nur in diesem Browser.</p>',
+    onSubmit: v => {
+      const name = String(v.name || '').trim();
+      if (!name) return false;
+      const all = store.get('views', {});
+      const list = (all[dbKey()] || []).filter(x => x.name !== name);
+      const cur = Object.assign({}, prefs());
+      delete cur.view; delete cur.page;
+      list.push({ name: name, p: cur });
+      all[dbKey()] = list;
+      store.set('views', all);
+      prefs().view = name;
+      store.set('db', S.db);
+      render();
+      toast('Ansicht „' + name + '“ gespeichert');
+    },
+  });
+};
+A['db-sort'] = el => {
+  const keys = [['dueDate', 'Fälligkeit'], ['startDate', 'Start'], ['priority', 'Priorität'], ['status', 'Status'], ['title', 'Titel'], ['assignees', 'Zugewiesen'], ['projectId', 'Projekt'], ['progress', 'Fortschritt'], ['estimate', 'Aufwand']];
+  const s = prefs().sort || { key: 'dueDate', dir: 1 };
+  openMenu(el, keys.map(k => ({ value: k[0], html: '<span>' + k[1] + '</span>' + (s.key === k[0] ? '<small>' + (s.dir > 0 ? 'aufsteigend' : 'absteigend') + '</small>' : ''), search: k[1] })),
+    { search: false, selected: [s.key], onPick: v => setPrefs({ sort: { key: v, dir: s.key === v ? -s.dir : 1 } }) });
+};
 A.layout = el => setPrefs({ layout: el.dataset.v });
 A['db-done'] = () => setPrefs({ showDone: !prefs().showDone });
 A['db-clear'] = el => setPrefs(el.dataset.k === 'who' ? { who: 'all' } : { prio: [] });
@@ -133,16 +194,40 @@ function metaHtml(t, opts) {
   if (opts && opts.withTags) t.tags.slice(0, 2).forEach(x => parts.push(tagChip(x)));
   return parts.join('');
 }
+/** "Überfällig seit 4 Wo. 6 T." */
+function agoText(days) {
+  if (days < 14) return days + (days === 1 ? ' Tag' : ' Tage');
+  const w = Math.floor(days / 7), d = days % 7;
+  return w + ' Wo.' + (d ? ' ' + d + ' T.' : '');
+}
+function fmtShort(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  return d + '.' + m + '.' + String(y).slice(2);
+}
 function cardHtml(t, opts) {
+  const pr = t.priority && prioOf(t.priority);
   const p = !(opts && opts.hideProject) && t.projectId && project(t.projectId);
   const tm = !p && t.teams.length && team(t.teams[0]);
-  const ctx = p ? mark(p) + '<span>' + esc(p.name) + '</span>' : tm ? mark(tm) + '<span>' + esc(tm.name) + '</span>' : '';
-  const tags = t.tags.slice(0, 2).map(tagChip).join('');
-  return '<div class="card' + (S.peekId === t.id ? ' selected' : '') + '" draggable="true" data-drag-id="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '">' +
-    (ctx ? '<div class="card-top">' + ctx + '</div>' : '') +
-    '<div class="card-title' + (isDone(t) ? ' done' : '') + '">' + esc(t.title) + '</div>' +
-    '<div class="card-meta">' + metaHtml(t, opts) + '</div>' +
-    (tags || t.assignees.length ? '<div class="card-foot"><span style="display:flex;gap:4px;min-width:0">' + tags + '</span>' + (t.assignees.length ? avatars(t.assignees) : '') + '</div>' : '') +
+  const subs = subtasks(t.id);
+  const today = TODAY();
+  const over = !isDone(t) && t.dueDate && t.dueDate < today;
+  const dates = t.dueDate
+    ? '<div class="cdates"><span class="cdate' + (over ? ' over' : t.dueDate === today ? ' today' : '') + '">' + icon('calendar', 'sm') +
+      esc(t.startDate && t.startDate !== t.dueDate ? fmtRange(t.startDate, t.dueDate) : fmtDate(t.dueDate, { absolute: true })) + '</span>' +
+      (over ? '<span class="cover">Überfällig seit ' + agoText(Shared.diffDays(t.dueDate, today)) + '</span>' : '') + '</div>' : '';
+  const tags = t.tags.slice(0, 3).map(tagChip).join('');
+  const pv = progressOf(t);
+  return '<div class="card' + (S.peekId === t.id ? ' selected' : '') + '" style="--cc:' + STATUS_COLORS[t.status] + '" draggable="true" data-drag-id="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '">' +
+    '<div class="card-top">' + (pr ? '<span class="cprio prio-' + pr.key + '">' + esc(pr.label) + '</span>' : '') +
+    (p ? projectPill(p) : tm ? '<span class="jpill" style="background:var(--c-' + esc(tm.color || 'gray') + ')">' + esc(tm.name) + '</span>' : '') + '</div>' +
+    '<div class="card-title' + (isDone(t) ? ' done' : '') + '"><span>' + esc(t.title) + '</span></div>' +
+    dates + (tags ? '<div class="ctags">' + tags + '</div>' : '') +
+    (subs.length || pv > 0 && !isDone(t) ? '<div class="cprog"><span class="track"><i style="width:' + pv + '%"></i></span><span class="pv">' +
+      (subs.length ? subs.filter(isDone).length + '/' + subs.length + ' · ' : '') + pv + '%</span></div>' : '') +
+    '<div class="card-foot"><span class="cavs">' + (t.assignees.length ? avatars(t.assignees) : '') + '</span><span class="cmeta">' +
+    (t.estimate ? '<span class="meta">' + icon('hourglass', 'sm') + esc(fmtHours(t.estimate)) + '</span>' : '') +
+    (t.recurrence ? '<span class="meta" title="Wiederholt sich">' + icon('repeat', 'sm') + '</span>' : '') + '</span></div>' +
     '</div>';
 }
 A['open-task'] = el => openPeek(el.dataset.id);
@@ -154,37 +239,48 @@ A['toggle-done'] = (el, e) => {
 };
 
 /* ----- board ----- */
+const cdot = c => '<span class="cdot" style="background:' + c + '"></span>';
 function boardColumns(tasks, p) {
+  const PC = { urgent: 'var(--danger)', high: 'var(--c-orange)', medium: 'var(--c-yellow)', low: 'var(--c-gray)' };
   if (p.groupBy === 'priority') {
-    return Shared.PRIORITIES.map(x => ({ value: x.key, head: prioTag(x.key), preset: { priority: x.key } }))
-      .concat([{ value: '', head: '<span class="faint">Keine Priorität</span>', preset: { priority: '' } }])
+    return Shared.PRIORITIES.map(x => ({ value: x.key, label: x.label, color: PC[x.key], preset: { priority: x.key } }))
+      .concat([{ value: '', label: 'Keine Priorität', color: 'var(--text-3)', preset: { priority: '' } }])
       .map(c => Object.assign(c, { tasks: tasks.filter(t => (t.priority || '') === c.value) }));
   }
   if (p.groupBy === 'assignee') {
     const emails = [S.me.email];
     tasks.forEach(t => t.assignees.forEach(e => { if (emails.indexOf(e) < 0) emails.push(e); }));
-    return emails.map(e => ({ value: e, head: person(e), preset: { assignees: [e] }, tasks: tasks.filter(t => t.assignees.indexOf(e) >= 0) }))
-      .concat([{ value: '', head: '<span class="faint">Nicht zugewiesen</span>', preset: { assignees: [] }, tasks: tasks.filter(t => !t.assignees.length) }]);
+    return emails.map(e => ({ value: e, label: user(e).name, color: user(e).color || 'var(--c-gray)', preset: { assignees: [e] }, tasks: tasks.filter(t => t.assignees.indexOf(e) >= 0) }))
+      .concat([{ value: '', label: 'Nicht zugewiesen', color: 'var(--text-3)', preset: { assignees: [] }, tasks: tasks.filter(t => !t.assignees.length) }]);
   }
   if (p.groupBy === 'project') {
     const ids = [];
     tasks.forEach(t => { if (t.projectId && ids.indexOf(t.projectId) < 0 && project(t.projectId)) ids.push(t.projectId); });
-    return ids.map(id => ({ value: id, head: projectChip(project(id)), preset: { projectId: id }, tasks: tasks.filter(t => t.projectId === id) }))
-      .concat([{ value: '', head: '<span class="faint">Ohne Projekt</span>', preset: { projectId: '' }, tasks: tasks.filter(t => !t.projectId) }]);
+    const pc = id => 'var(--c-' + (project(id).color && project(id).color !== 'default' ? project(id).color : 'gray') + ')';
+    return ids.map(id => ({ value: id, label: project(id).name, color: pc(id), preset: { projectId: id }, tasks: tasks.filter(t => t.projectId === id) }))
+      .concat([{ value: '', label: 'Ohne Projekt', color: 'var(--text-3)', preset: { projectId: '' }, tasks: tasks.filter(t => !t.projectId) }]);
   }
-  return Shared.STATUSES.map(s => ({ value: s.key, head: statusTag(s.key), preset: { status: s.key }, tasks: tasks.filter(t => t.status === s.key) }));
+  return Shared.STATUSES.map(s => ({ value: s.key, label: s.label, color: STATUS_COLORS[s.key], preset: { status: s.key }, tasks: tasks.filter(t => t.status === s.key) }));
 }
 function boardHtml(tasks, p, opts) {
   const cols = boardColumns(tasks, p);
   return '<div class="board">' + cols.map(c => {
     const list = c.tasks.slice().sort(bySort);
-    return '<div class="col" data-drop-group="' + esc(p.groupBy) + '" data-drop-value="' + esc(c.value) + '">' +
-      '<div class="col-head">' + c.head + '<span class="n">' + list.length + '</span>' +
-      '<button class="icon-btn" data-action="new-task" data-preset="' + attr(c.preset) + '" title="Neu">' + icon('plus', 'sm') + '</button></div>' +
-      list.map(t => cardHtml(t, opts)).join('') +
-      '<button class="add-row" data-action="new-task" data-preset="' + attr(c.preset) + '">' + icon('plus', 'sm') + 'Neu</button></div>';
+    const key = p.groupBy + ':' + c.value;
+    const dz = 'data-drop-group="' + esc(p.groupBy) + '" data-drop-value="' + esc(c.value) + '"';
+    if (p.collapsedCols[key]) {
+      return '<div class="col collapsed" ' + dz + '><button class="col-open" data-action="col-toggle" data-k="' + esc(key) + '" title="Spalte aufklappen">' + icon('chevron', 'sm') +
+        cdot(c.color) + '<span class="vt">' + esc(c.label) + '</span><span class="n">' + list.length + '</span></button></div>';
+    }
+    return '<div class="col" ' + dz + '>' +
+      '<div class="col-head"><button class="icon-btn sm" data-action="col-toggle" data-k="' + esc(key) + '" title="Spalte einklappen">' + icon('chevron', 'sm chev') + '</button>' +
+      cdot(c.color) + '<span class="cn">' + esc(c.label) + '</span><span class="n">' + list.length + '</span>' +
+      '<button class="icon-btn sm" data-action="new-task" data-preset="' + attr(c.preset) + '" title="Neue Aufgabe">' + icon('plus', 'sm') + '</button></div>' +
+      '<div class="col-cards">' + list.map(t => cardHtml(t, opts)).join('') + '</div>' +
+      '<button class="add-row" data-action="new-task" data-preset="' + attr(c.preset) + '">' + icon('plus', 'sm') + 'Aufgabe hinzufügen</button></div>';
   }).join('') + '</div>';
 }
+A['col-toggle'] = el => { const p = prefs(); p.collapsedCols[el.dataset.k] = !p.collapsedCols[el.dataset.k]; store.set('db', S.db); render(); };
 
 /* ----- drag & drop (board + calendar) ----- */
 const dragState = { id: null, from: null };
@@ -249,14 +345,17 @@ function dropOnColumn(t, zone, y) {
 
 /* ----- table ----- */
 const COLUMNS = [
-  { key: 'status', label: 'Status', ic: 'status', cell: t => statusTag(t.status) },
-  { key: 'assignees', label: 'Zugewiesen', ic: 'user', cell: t => (t.assignees.length === 1 ? person(t.assignees[0]) : avatars(t.assignees, 4)) },
-  { key: 'priority', label: 'Priorität', ic: 'flag', cell: t => prioTag(t.priority) },
-  { key: 'dueDate', label: 'Fällig', ic: 'calendar', cell: t => dueTag(t) },
-  { key: 'projectId', label: 'Projekt', ic: 'folder', cell: t => projectChip(project(t.projectId)) },
-  { key: 'teams', label: 'Teams', ic: 'users', cell: t => t.teams.map(id => teamChip(team(id))).join('') },
-  { key: 'estimate', label: 'Aufwand', ic: 'hourglass', cell: t => esc(fmtHours(t.estimate)) },
-  { key: 'tags', label: 'Tags', ic: 'tag', cell: t => t.tags.map(tagChip).join('') },
+  { key: 'status', label: 'Status', cell: t => statusTag(t.status) },
+  { key: 'priority', label: 'Priorität', cell: t => prioTag(t.priority) },
+  { key: 'projectId', label: 'Projekt', cell: t => projectPill(project(t.projectId)) || '<span class="faint">Kein Projekt</span>' },
+  { key: 'assignees', label: 'Zugewiesen', cell: t => (t.assignees.length ? avatars(t.assignees, 4) : '') },
+  { key: 'startDate', label: 'Start', cell: t => (t.startDate ? '<span class="dtc">' + esc(fmtShort(t.startDate)) + '</span>' : '<span class="faint">Kein Start</span>') },
+  { key: 'dueDate', label: 'Fällig', cell: t => (t.dueDate
+    ? '<span class="dtc' + (!isDone(t) && t.dueDate < TODAY() ? ' over' : '') + '">' + esc(fmtShort(t.dueDate)) + '</span>' + (t.recurrence ? icon('repeat', 'sm faint') : '')
+    : '<span class="faint">Kein Datum</span>') },
+  { key: 'tags', label: 'Tags', cell: t => t.tags.map(tagChip).join('') },
+  { key: 'progress', label: 'Fortschritt', cell: t => progressBar(t) },
+  { key: 'estimate', label: 'Aufwand', cell: t => esc(fmtHours(t.estimate)) },
 ];
 function sortValue(t, key) {
   switch (key) {
@@ -264,37 +363,189 @@ function sortValue(t, key) {
     case 'status': return Shared.STATUSES.findIndex(s => s.key === t.status);
     case 'priority': return rankPrio(t);
     case 'dueDate': return t.dueDate || '9999';
+    case 'startDate': return t.startDate || '9999';
     case 'assignees': return t.assignees.map(e => user(e).name).join(',') || '~';
     case 'projectId': return t.projectId ? (project(t.projectId) || {}).name || '' : '~';
     case 'estimate': return t.estimate || 0;
+    case 'progress': return progressOf(t);
     default: return '';
   }
 }
-function tableHtml(tasks, p, opts) {
+function sortTasks(tasks, p) {
   const s = p.sort || { key: 'dueDate', dir: 1 };
-  const list = tasks.slice().sort((a, b) => {
+  return tasks.slice().sort((a, b) => {
     const x = sortValue(a, s.key), y = sortValue(b, s.key);
     return (x < y ? -1 : x > y ? 1 : 0) * s.dir || bySort(a, b);
   });
+}
+function tableHtml(tasks, p, opts) {
+  const s = p.sort || { key: 'dueDate', dir: 1 };
+  const list = sortTasks(tasks, p);
+  const rows = p.rows || 50;
+  const pages = Math.max(1, Math.ceil(list.length / rows));
+  const pg = Math.min(p.page || 0, pages - 1);
+  const shown = list.slice(pg * rows, pg * rows + rows);
   const cols = COLUMNS.filter(c => !(opts.hideProject && c.key === 'projectId'));
   const ind = k => (s.key === k ? '<span class="sort-ind">' + (s.dir > 0 ? '▲' : '▼') + '</span>' : '');
-  return '<div class="table-wrap"><table class="db"><thead><tr>' +
-    '<th data-action="sort" data-k="title" style="min-width:300px">' + icon('text', 'sm') + ' Titel' + ind('title') + '</th>' +
-    cols.map(c => '<th data-action="sort" data-k="' + c.key + '">' + icon(c.ic, 'sm') + ' ' + c.label + ind(c.key) + '</th>').join('') +
-    '</tr></thead><tbody>' + list.map(t =>
-    '<tr><td><div class="title-cell" data-action="open-task" data-id="' + esc(t.id) + '">' +
-      '<span class="check' + (isDone(t) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(t.id) + '" role="checkbox" aria-checked="' + isDone(t) + '"></span>' +
-      '<span' + (isDone(t) ? ' class="faint" style="text-decoration:line-through"' : '') + '>' + esc(t.title) + '</span>' +
-      '<span class="open">' + icon('open', 'sm') + 'Öffnen</span></div></td>' +
-      cols.map(c => '<td><div class="cell" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + c.key + '">' + c.cell(t) + '</div></td>').join('') +
-      '</tr>').join('') +
-    '</tbody></table></div><button class="add-row" data-action="new-task">' + icon('plus', 'sm') + 'Neu</button>';
+  return '<div class="table-wrap"><div class="tscroll"><table class="db"><thead><tr><th class="ck"></th>' +
+    '<th data-action="sort" data-k="title" style="min-width:280px">Aufgabe' + ind('title') + '</th>' +
+    cols.map(c => '<th data-action="sort" data-k="' + c.key + '">' + c.label + ind(c.key) + '</th>').join('') +
+    '</tr></thead><tbody>' + shown.map(t => {
+      const subs = subtasks(t.id);
+      return '<tr><td class="ck"><span class="check' + (isDone(t) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(t.id) + '" role="checkbox" aria-checked="' + isDone(t) + '"></span></td>' +
+        '<td><div class="title-cell" data-action="open-task" data-id="' + esc(t.id) + '">' +
+        '<span class="tt' + (isDone(t) ? ' done' : '') + '">' + esc(t.title) + '</span>' +
+        (subs.length ? '<span class="subc" title="Unteraufgaben">' + icon('sub', 'sm') + subs.length + '</span>' : '') + '</div></td>' +
+        cols.map(c => '<td><div class="cell" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + c.key + '">' + c.cell(t) + '</div></td>').join('') +
+        '</tr>';
+    }).join('') +
+    '</tbody></table></div>' +
+    '<div class="tfoot"><span>' + (list.length ? pg * rows + 1 : 0) + ' bis ' + Math.min(list.length, pg * rows + rows) + ' von ' + list.length + ' Aufgaben</span>' +
+    '<span class="trows">Zeilen <select data-on-change="db-rows">' + [25, 50, 100, 200].map(n => '<option' + (n === rows ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></span>' +
+    '<span class="grow"></span><button class="icon-btn sm" data-action="db-page" data-d="-1"' + (pg === 0 ? ' disabled' : '') + '>' + icon('left', 'sm') + '</button>' +
+    '<span class="pgn">' + (pg + 1) + ' / ' + pages + '</span>' +
+    '<button class="icon-btn sm" data-action="db-page" data-d="1"' + (pg >= pages - 1 ? ' disabled' : '') + '>' + icon('right', 'sm') + '</button></div></div>' +
+    '<button class="add-row" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>';
 }
+ON.change['db-rows'] = el => setPrefs({ rows: Number(el.value) || 50, page: 0 });
+A['db-page'] = el => setPrefs({ page: Math.max(0, (prefs().page || 0) + Number(el.dataset.d)) });
 A.sort = el => {
   const p = prefs();
   const k = el.dataset.k;
   setPrefs({ sort: { key: k, dir: p.sort && p.sort.key === k ? -p.sort.dir : 1 } });
 };
+
+/* ----- gantt ----- */
+const GZ = { week: [44, 56, 'Woche'], month: [30, 90, 'Monat'], quarter: [12, 200, 'Quartal'] };
+const GT_ROW = 40;
+function ganttHtml(tasks, p, opts) {
+  if (!S.gantt) S.gantt = { start: null, zoom: 'month', hideList: false };
+  const g = S.gantt, today = TODAY();
+  const z = GZ[g.zoom] || GZ.month, px = z[0], n = z[1];
+  if (!g.start) g.start = Shared.addDays(today, -14);
+  const start = g.start, end = Shared.addDays(start, n - 1);
+  const key = p.sort && p.sort.key !== 'dueDate' ? p.sort : null;
+  const dated = tasks.filter(t => t.startDate || t.dueDate)
+    .sort((a, b) => key ? sortTasks([a, b], p)[0] === a ? -1 : 1 : (a.startDate || a.dueDate).localeCompare(b.startDate || b.dueDate) || bySort(a, b));
+  const undated = tasks.filter(t => !t.startDate && !t.dueDate && !isDone(t));
+  const rows = dated.concat(undated);
+  const W = n * px;
+  const off = d => Shared.diffDays(start, d);
+  const months = [];
+  for (let i = 0; i < n; i++) {
+    const d = Shared.addDays(start, i), m = d.slice(0, 7);
+    if (!months.length || months[months.length - 1].m !== m) months.push({ m: m, from: i, n: 0 });
+    months[months.length - 1].n++;
+  }
+  let days = '', weekend = '';
+  for (let i = 0; i < n; i++) {
+    const d = Shared.addDays(start, i), wd = Shared.weekday(d), we = wd === 0 || wd === 6;
+    days += '<div class="gt-d' + (d === today ? ' today' : '') + (we ? ' we' : '') + '" style="left:' + i * px + 'px;width:' + px + 'px">' +
+      (px >= 28 ? '<b>' + Number(d.slice(8)) + '</b><small>' + DOW[wd] + '</small>' : (wd === 1 ? '<b>' + Number(d.slice(8)) + '</b>' : '')) + '</div>';
+    if (we) weekend += '<div class="gt-we" style="left:' + i * px + 'px;width:' + px + 'px"></div>';
+  }
+  const bar = t => {
+    const bs = t.startDate || t.dueDate, be = t.dueDate || t.startDate;
+    if (!bs) return '';
+    const s0 = Math.max(0, off(bs)), e0 = Math.min(n - 1, off(be));
+    if (e0 < 0 || s0 > n - 1) return '';
+    const w = (e0 - s0 + 1) * px;
+    const over = !isDone(t) && be < today;
+    const pv = progressOf(t);
+    return '<div class="gt-bar' + (over ? ' over' : '') + (isDone(t) ? ' done' : '') + (off(bs) < 0 ? ' cl' : '') + '" data-gid="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) +
+      '" style="left:' + s0 * px + 'px;width:' + Math.max(w - 3, 10) + 'px;--bc:' + STATUS_COLORS[t.status] + '">' +
+      '<i class="gb-fill" style="width:' + pv + '%"></i>' +
+      '<span class="gb-in">' + (w > 90 && t.assignees.length ? avatars(t.assignees, 2) : '') + (w > 60 ? '<span class="gb-t">' + esc(t.title) + '</span>' : '') +
+      (w > 130 ? '<span class="gb-p">' + pv + '%</span>' : '') + '</span><b class="gb-rs" data-gid="' + esc(t.id) + '"></b></div>';
+  };
+  const left = rows.map(t => '<div class="gt-lr' + (isDone(t) ? ' done' : '') + '" data-action="open-task" data-id="' + esc(t.id) + '">' + cdot(STATUS_COLORS[t.status]) +
+    '<span class="tt">' + esc(t.title) + '</span>' + (subtasks(t.id).length ? '<span class="subc">' + icon('sub', 'sm') + subtasks(t.id).length + '</span>' : '') + '</div>').join('');
+  const right = rows.map(t => '<div class="gt-r">' + bar(t) + '</div>').join('');
+  const tl = off(today);
+  const shift = k => 'data-action="gt-shift" data-d="' + k + '"';
+  return '<div class="card-w gt"><div class="gt-top"><h3 style="margin:0">Gantt-Diagramm</h3>' +
+    '<button class="icon-btn" ' + shift(-Math.round(n / 2)) + ' title="Zurück">' + icon('left') + icon('left') + '</button>' +
+    '<button class="icon-btn" ' + shift(-7) + '>' + icon('left') + '</button>' +
+    '<button class="btn outline sm" data-action="gt-today">Heute</button>' +
+    '<button class="icon-btn" ' + shift(7) + '>' + icon('right') + '</button>' +
+    '<button class="icon-btn" ' + shift(Math.round(n / 2)) + ' title="Vor">' + icon('right') + icon('right') + '</button>' +
+    '<div class="seg" style="margin-left:6px">' + Object.keys(GZ).map(k => '<button class="' + (g.zoom === k ? 'on' : '') + '" data-action="gt-zoom" data-k="' + k + '">' + GZ[k][2] + '</button>').join('') + '</div>' +
+    '<button class="tbtn" data-action="gt-list">' + icon('list', 'sm') + (g.hideList ? 'Liste einblenden' : 'Liste ausblenden') + '</button>' +
+    '<span class="grow"></span><span class="hint">Balken ziehen verschiebt den Zeitraum, der rechte Rand ändert das Fälligkeitsdatum.</span></div>' +
+    (rows.length ? '<div class="gt-body">' + (g.hideList ? '' : '<div class="gt-left"><div class="gt-lh">Aufgaben</div>' + left + '</div>') +
+      '<div class="gt-right"><div class="gt-scroll" style="width:' + W + 'px;--px:' + px + 'px">' +
+      '<div class="gt-head"><div class="gt-m">' + months.map(m => '<span style="left:' + m.from * px + 'px;width:' + m.n * px + 'px">' + MONTHS_LONG[Number(m.m.slice(5)) - 1] + ' ' + m.m.slice(0, 4) + '</span>').join('') + '</div><div class="gt-ds">' + days + '</div></div>' +
+      '<div class="gt-rows" style="height:' + rows.length * GT_ROW + 'px">' + weekend + right +
+      (tl >= 0 && tl < n ? '<div class="gt-today" style="left:' + (tl * px + px / 2) + 'px"></div>' : '') + '</div></div></div></div>'
+      : '<div class="empty">' + icon('gantt') + '<div>Keine Aufgaben mit Datum.</div></div>') + '</div>';
+}
+A['gt-shift'] = el => { S.gantt.start = Shared.addDays(S.gantt.start, Number(el.dataset.d)); render(); };
+A['gt-today'] = () => { S.gantt.start = Shared.addDays(TODAY(), -14); render(); };
+A['gt-zoom'] = el => { S.gantt.zoom = el.dataset.k; S.gantt.start = Shared.addDays(TODAY(), el.dataset.k === 'quarter' ? -30 : -14); render(); };
+A['gt-list'] = () => { S.gantt.hideList = !S.gantt.hideList; render(); };
+
+const gtDrag = { id: null, mode: null, x: 0, dx: 0, moved: false };
+function gtTip(bar) {
+  let tip = $('#gt-tip');
+  if (!bar) { if (tip) tip.hidden = true; return; }
+  const t = task(bar.dataset.gid);
+  if (!t) return;
+  if (!tip) { tip = document.createElement('div'); tip.id = 'gt-tip'; document.body.appendChild(tip); }
+  tip.hidden = false;
+  tip.innerHTML = '<b>' + esc(t.title) + '</b><div class="row">' + statusTag(t.status) + prioTag(t.priority) + '</div>' +
+    (t.startDate ? '<div class="l">' + icon('clock', 'sm') + 'Start ' + esc(fmtDate(t.startDate, { absolute: true })) + '</div>' : '') +
+    (t.dueDate ? '<div class="l">' + icon('calendar', 'sm') + 'Fällig ' + esc(fmtDate(t.dueDate, { absolute: true })) + '</div>' : '') +
+    progressBar(t, { wide: true }) +
+    (t.assignees.length ? '<div class="l">' + avatars(t.assignees, 4) + esc(t.assignees.map(e => user(e).name.split(' ')[0]).join(', ')) + '</div>' : '') +
+    (t.description ? '<p>' + esc(t.description.slice(0, 110)) + (t.description.length > 110 ? '…' : '') + '</p>' : '');
+  const r = bar.getBoundingClientRect();
+  tip.style.left = Math.min(window.innerWidth - 300, Math.max(8, r.left + 12)) + 'px';
+  tip.style.top = (r.bottom + 8 + 190 > window.innerHeight ? r.top - 8 - tip.offsetHeight : r.bottom + 8) + 'px';
+}
+function bindGantt() {
+  gtTip(null);
+  $$('.gt-bar').forEach(bar => {
+    bar.addEventListener('mouseenter', () => { if (!gtDrag.id) gtTip(bar); });
+    bar.addEventListener('mouseleave', () => gtTip(null));
+    bar.addEventListener('click', e => { if (gtDrag.moved) { e.stopPropagation(); e.preventDefault(); gtDrag.moved = false; } }, true);
+    bar.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      gtDrag.id = bar.dataset.gid; gtDrag.mode = e.target.classList.contains('gb-rs') ? 'end' : 'move';
+      gtDrag.x = e.clientX; gtDrag.dx = 0; gtDrag.moved = false; gtDrag.bar = bar;
+      gtTip(null);
+      e.preventDefault();
+    });
+  });
+}
+document.addEventListener('mousemove', e => {
+  if (!gtDrag.id) return;
+  const px = Number(getComputedStyle(gtDrag.bar.closest('.gt-scroll')).getPropertyValue('--px').replace('px', '')) || 30;
+  gtDrag.dx = Math.round((e.clientX - gtDrag.x) / px) * px;
+  if (Math.abs(e.clientX - gtDrag.x) > 4) gtDrag.moved = true;
+  if (gtDrag.mode === 'move') gtDrag.bar.style.transform = 'translateX(' + gtDrag.dx + 'px)';
+  else gtDrag.bar.style.width = Math.max(10, gtDrag.bar.offsetWidth + (gtDrag.dx - (gtDrag.last || 0))) + 'px', gtDrag.last = gtDrag.dx;
+});
+document.addEventListener('mouseup', () => {
+  if (!gtDrag.id) return;
+  const id = gtDrag.id, bar = gtDrag.bar;
+  const px = Number(getComputedStyle(bar.closest('.gt-scroll')).getPropertyValue('--px').replace('px', '')) || 30;
+  const days = Math.round(gtDrag.dx / px);
+  const mode = gtDrag.mode;
+  gtDrag.id = null; gtDrag.last = 0;
+  setTimeout(() => { gtDrag.moved = false; }, 50);
+  const t = task(id);
+  if (!t || !days) { render(); return; }
+  const patch = {};
+  if (mode === 'move') {
+    if (t.startDate) patch.startDate = Shared.addDays(t.startDate, days);
+    if (t.dueDate) patch.dueDate = Shared.addDays(t.dueDate, days);
+  } else {
+    const nd = Shared.addDays(t.dueDate || t.startDate, days);
+    if (t.startDate && nd < t.startDate) { render(); return; }
+    patch.dueDate = nd;
+  }
+  patchTask(id, patch);
+});
 
 /* ----- list ----- */
 function listRow(t, opts) {
@@ -595,18 +846,8 @@ function dashPage() {
   const todayList = open.filter(x => x.dueDate && x.dueDate <= t).sort((a, c) => (a.dueDate < c.dueDate ? -1 : a.dueDate > c.dueDate ? 1 : rankPrio(a) - rankPrio(c)));
   const people = myPeopleList();
   const upcoming = calEnsure(t, Shared.addDays(t, 14), '');
-  const tile = (cls, ic, val, label, view) => '<button class="tile ' + cls + '" data-action="nav" data-view="' + view + '"><span class="ic">' + icon(ic, 'lg') + '</span><span><div class="val">' + val + '</div><div class="lbl">' + label + '</div></span></button>';
   const util = b ? b.utilization : 0;
-  const ringTile = '<button class="tile" data-action="nav" data-view="planner"><span class="ring' + (util > 100 ? ' over' : '') + '" style="--p:' + Math.min(100, util) + '"><span>' + util + '%</span></span>' +
-    '<span><div class="val">' + (b ? fmtNum(b.planned) + ' h' : '–') + '</div><div class="lbl">Auslastung diese Woche' + (b && b.available ? ' von ' + fmtNum(b.available) + ' h' : '') + '</div></span></button>';
-  const projects = S.projects.filter(p => p.status !== 'done' && myTeams().some(x => x.id === p.teamId)).slice(0, 5);
-  const projRow = p => {
-    const top = S.tasks.filter(x => x.projectId === p.id && !x.parentId);
-    const pct = top.length ? Math.round(top.filter(isDone).length / top.length * 100) : 0;
-    const tm = team(p.teamId);
-    return '<div class="prow" data-action="nav" data-view="project" data-id="' + esc(p.id) + '">' + mark(p, 'md') + '<div class="pn">' + esc(p.name) + '<small>' + esc(tm ? tm.name : '') + ' · ' + top.filter(x => !isDone(x)).length + ' offen</small></div>' +
-      '<div class="progress"><i style="width:' + pct + '%"></i></div><span class="pct2">' + pct + '%</span></div>';
-  };
+  const projects = S.projects.filter(p => p.status !== 'done' && myTeams().some(x => x.id === p.teamId)).slice(0, 6);
   const absNext = upcoming ? upcoming.absences.filter(a => a.endDate >= t && people.indexOf(a.email) >= 0).sort((a, c) => a.startDate.localeCompare(c.startDate)).slice(0, 3) : [];
   const teamCard = '<div class="card-w w-5"><h3>' + icon('users', 'sm') + 'Team<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>' +
     (warns.length ? '<div class="hlist">' + warns.slice(0, 3).map(w => '<div class="hitem warnitem" data-action="warn-open" data-team="' + esc(w.teamId) + '" style="cursor:pointer">' + dayBox(w.date) +
@@ -624,36 +865,88 @@ function dashPage() {
     cells.push(d > t ? '<i style="visibility:hidden"></i>' : '<i class="' + (c >= 5 ? 'l4' : c >= 3 ? 'l3' : c >= 2 ? 'l2' : c >= 1 ? 'l1' : '') + (d === t ? ' today' : '') + '" title="' + esc(fmtDate(d, { absolute: true }) + ': ' + c + ' erledigt') + '"></i>');
   }
   const doneTotal = Object.keys(counts).reduce((s, k) => s + counts[k], 0);
-  return '<div class="page">' +
-    '<div class="dash-head"><div><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div><h1>' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '</h1></div>' +
-    '<button class="quick" data-action="palette">' + icon('plus', 'sm') + '<span class="qt">Aufgabe hinzufügen, z. B. „Angebot senden morgen @anna“</span><span class="kbd">⌘K</span><span class="go">' + icon('right', 'sm') + '</span></button></div>' +
+  // header numbers
+  const my = S.tasks.filter(isMine);
+  const weekStart = Shared.mondayOf(t);
+  const doneToday = my.filter(x => isDone(x) && x.completedAt && x.completedAt.slice(0, 10) === t).length;
+  const dueNow = open.filter(x => x.dueDate && x.dueDate <= t).length;
+  const prog = doneToday + dueNow ? Math.round(doneToday / (doneToday + dueNow) * 100) : 0;
+  const newWeek = my.filter(x => x.createdAt && x.createdAt.slice(0, 10) >= weekStart).length;
+  const doneWeek = my.filter(x => isDone(x) && x.completedAt && x.completedAt.slice(0, 10) >= weekStart).length;
+  const dueSoon = open.filter(x => x.dueDate && x.dueDate >= t && x.dueDate <= Shared.addDays(t, 3)).length;
+  const overdueN = open.filter(x => x.dueDate && x.dueDate < t).length;
+  const stile = (cls, ic, badge, label, val, view) => '<button class="stile ' + cls + '" data-action="nav" data-view="' + view + '"><span class="sr"><span class="sic">' + icon(ic, 'lg') + '</span>' +
+    '<span class="sbadge">' + esc(badge) + '</span></span><span class="sl">' + label + '</span><span class="sv">' + val + '</span></button>';
+  // project overview
+  if (!S.dashProj || !projects.some(x => x.id === S.dashProj)) S.dashProj = projects.length ? projects[0].id : '';
+  const sp = project(S.dashProj);
+  const projCard = (() => {
+    if (!sp) return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Projektübersicht</h3><div class="empty-w">Noch keine Projekte in deinen Teams.</div></div>';
+    const ptasks = S.tasks.filter(x => x.projectId === sp.id && !x.parentId);
+    const pdone = ptasks.filter(isDone).length;
+    const ppct = ptasks.length ? Math.round(pdone / ptasks.length * 100) : 0;
+    const pc = sp.color && sp.color !== 'default' && sp.color !== 'gray' ? 'var(--c-' + sp.color + ')' : 'var(--accent)';
+    const st = Shared.PROJECT_STATUSES.find(x => x.key === sp.status) || Shared.PROJECT_STATUSES[1];
+    const counts = Shared.STATUSES.map(x => '<div class="sc"><b>' + ptasks.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
+    const next = ptasks.filter(x => !isDone(x) && x.dueDate).sort((x, y) => x.dueDate.localeCompare(y.dueDate)).slice(0, 3);
+    return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Projektübersicht<button class="btn white sm more2" data-action="proj-all">Alle Projekte</button></h3>' +
+      '<div class="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '">' + cdot(x.color && x.color !== 'default' ? 'var(--c-' + x.color + ')' : 'var(--c-gray)') + esc(x.name) + '</button>').join('') + '</div>' +
+      '<div class="pbanner" style="--pc:' + pc + '"><div class="pb-t">' + cdot('#fff') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
+      '<p>' + esc(sp.description || 'Keine Beschreibung.') + '</p></div>' +
+      '<div class="pstats"><div class="pst"><div class="l">Fortschritt<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Ansehen</button></div><div class="v"><b>' + ppct + '%</b><span class="track"><i style="width:' + ppct + '%"></i></span></div></div>' +
+      '<div class="pst"><div class="l">Aufgaben<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Öffnen</button></div><div class="v"><b>' + pdone + '/' + ptasks.length + '</b><small>' + ppct + ' % erledigt</small></div></div>' +
+      '<div class="pst"><div class="l">Team<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Verwalten</button></div><div class="v">' + avatars(projectMembers(sp), 5) + '</div></div></div>' +
+      '<div class="pgrid"><div class="pbox"><div class="l">Aufgabenstatus</div><div class="scs">' + counts + '</div></div>' +
+      '<div class="pbox"><div class="l">Als Nächstes fällig</div>' + (next.length ? next.map(x => '<div class="nx" data-action="open-task" data-id="' + esc(x.id) + '"><span class="tt">' + esc(x.title) + '</span>' + dueTag(x) + '</div>').join('') : '<div class="hint">Nichts Offenes mit Datum.</div>') + '</div></div></div>';
+  })();
+  // today's focus
+  const focus = open.filter(x => (x.dueDate && x.dueDate <= t) || x.planDate === t).sort((a, c) => (a.dueDate || '9') < (c.dueDate || '9') ? -1 : 1 || rankPrio(a) - rankPrio(c));
+  const fcard = x => {
+    const over = x.dueDate && x.dueDate < t;
+    return '<div class="fcard" data-action="open-task" data-id="' + esc(x.id) + '"><span class="check" data-action="toggle-done" data-id="' + esc(x.id) + '" role="checkbox" aria-checked="false"></span>' +
+      '<div class="fc-main"><div class="fc-t"><span>' + esc(x.title) + '</span>' + (over ? '<span class="fc-over">Überfällig</span>' : '') + '</div>' +
+      '<div class="fc-m">' + statusTag(x.status) + prioTag(x.priority) + (x.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(x.estimate)) + '</span>' : '') +
+      (x.dueDate ? '<span class="fc-d">Fällig ' + esc(fmtDate(x.dueDate, { absolute: true })) + '</span>' : '') + '</div></div></div>';
+  };
+  const focusCard = '<div class="card-w focus-card"><h3>' + icon('bolt', 'sm') + 'Heute im Fokus<button class="btn white sm more2" data-action="nav" data-view="home">Alle (' + focus.length + ')</button></h3>' +
+    '<p class="hint" style="margin:-6px 0 12px">Aufgaben mit Fälligkeit oder Zeitblock heute und früher' + (b && b.available ? ' · Auslastung ' + util + ' %' : '') + '</p>' +
+    (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Nichts fällig. Mit ⌘K legst du die nächste Aufgabe an.</div>') + '</div>';
+  return '<div class="page wide">' +
+    '<div class="card-w dash-top"><div class="du">' + avatar(S.me.email, 'xl') + '<div><h1>' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '!</h1><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div></div></div>' +
+    '<div class="dprog"><div><div class="pt">Dein Fortschritt heute</div><div class="ps">' + (doneToday + dueNow ? '<b>' + doneToday + ' von ' + (doneToday + dueNow) + '</b> Aufgaben erledigt' : 'Heute ist nichts fällig') + '</div></div>' +
+    '<span class="ring lgr" style="--p:' + prog + '"><span>' + prog + '%</span></span></div>' +
+    '<div class="dr"><button class="icon-btn sq" data-action="nav" data-view="capacity" title="Team-Warnungen">' + icon('bell') + (warns.length ? '<i class="bdg">' + warns.length + '</i>' : '') + '</button>' +
+    '<button class="icon-btn sq" data-action="brief-reload" title="Briefing aktualisieren">' + icon('sparkle') + '</button>' +
+    '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
+    '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>' +
     '<div class="brief-w">' + icon('sparkle', 'lg') + '<div class="txt">' +
     (b ? esc(b.text) : '<div class="skeleton" style="width:70%;margin:6px 0"></div><div class="skeleton" style="width:40%"></div>') +
     (b && b.focus.length ? '<div class="focus">' + b.focus.map(f => '<button data-action="open-task" data-id="' + esc(f.id) + '">' + (f.priority ? prioTag(f.priority, true) : glyph('todo')) + '<span>' + esc(f.title) + '</span></button>').join('') + '</div>' : '') +
     (b ? '<div class="src">' + (b.source === 'ai' ? 'Zusammengefasst von Vertex AI' : 'Automatisch zusammengefasst') + '</div>' : '') +
-    '</div><button class="icon-btn sm" data-action="brief-reload" title="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>' +
-    '<div class="tiles">' + tile('red', 'alert', b ? b.overdue : '–', 'Überfällig', 'home') + tile('', 'clock', b ? b.today : '–', 'Heute fällig', 'planner') +
-    tile('yellow', 'calendar', b ? b.week : '–', 'Rest der Woche', 'home') + ringTile + '</div>' +
-    '<div class="dash-grid">' +
-    '<div class="card-w w-7"><h3>' + icon('checksq', 'sm') + 'Heute und überfällig <span class="n">' + todayList.length + '</span><a class="more" data-action="nav" data-view="planner">Tag planen</a></h3>' +
-    (todayList.length ? todayList.slice(0, 8).map(trowHtml).join('') + (todayList.length > 8 ? '<div class="hint" style="padding-top:6px">+ ' + (todayList.length - 8) + ' weitere in „Meine Aufgaben“</div>' : '')
-      : '<div class="empty-w">Nichts fällig. Mit ⌘K legst du die nächste Aufgabe an.</div>') + '</div>' +
+    '</div></div>' +
+    '<div class="stiles">' + stile('', 'checksq', newWeek ? newWeek + ' neu diese Woche' : 'Keine neuen diese Woche', 'Aufgaben gesamt', my.length, 'home') +
+    stile('green', 'check', doneWeek ? doneWeek + ' diese Woche' : 'Noch keine diese Woche', 'Erledigt', my.filter(isDone).length, 'home') +
+    stile('yellow', 'clock', dueSoon ? dueSoon + ' bald fällig' : 'Nichts bald fällig', 'Aktiv', open.length, 'home') +
+    stile('red', 'alert', overdueN ? 'Jetzt handeln' : 'Alles im Plan', 'Überfällig', overdueN, 'home') + '</div>' +
+    '<div class="dash-grid"><div class="w-8">' + projCard + '</div><div class="w-4">' + focusCard + '</div>' +
     teamCard +
     '<div class="card-w w-7"><h3>' + icon('calendar', 'sm') + 'Agenda, nächste 14 Tage<a class="more" data-action="cal-agenda">Alles ansehen</a></h3>' +
     (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true }) : '<div class="skeleton"></div>') + '</div>' +
-    '<div class="card-w w-5"><h3>' + icon('folder', 'sm') + 'Projekte</h3>' + (projects.length ? projects.map(projRow).join('') : '<div class="empty-w">Noch keine Projekte in deinen Teams.</div>') + '</div>' +
-    '<div class="card-w w-12"><h3>' + icon('check', 'sm') + 'Aktivität <span class="n">' + doneTotal + ' erledigt in 16 Wochen</span></h3><div class="heat">' + cells.join('') + '</div>' +
+    '<div class="card-w w-12"><h3>' + icon('check', 'sm') + 'Aktivität <span class="n">' + doneTotal + ' erledigt in 16 Wochen</span><a class="more" data-action="dash-heat">Ganzes Jahr</a></h3><div class="heat">' + cells.join('') + '</div>' +
     '<div class="heat-legend">weniger <i style="background:var(--bg-hover)"></i><i style="background:#c6dcf7"></i><i style="background:#7fb0ec"></i><i style="background:#2f7bd0"></i><i style="background:#0050aa"></i> mehr</div></div>' +
     '</div></div>';
 }
+A['proj-all'] = () => { const sp = project(S.dashProj); S.teamTab = 'projects'; go('team', sp ? sp.teamId : (S.teams[0] || {}).id); };
+A['dash-proj'] = el => { S.dashProj = el.dataset.id; render(); };
+A['dash-heat'] = () => { S.cal.mode = 'heatmap'; go('calendar'); };
 A['brief-reload'] = () => { S.briefing = null; render({ peek: false }); };
 A['warn-open'] = el => { S.cap.teamId = el.dataset.team; S.cap.data = null; go('capacity'); };
 A['cal-agenda'] = () => { S.cal.mode = 'agenda'; go('calendar'); };
 
 function homePage() {
   const mine = S.tasks.filter(isMine);
-  return '<div class="page">' + pageHead('Meine Aufgaben', 'Alles, was dir zugewiesen ist: persönlich, über Teams und in Projekten.') +
-    database(mine, { people: [S.me.email], empty: 'Nichts offen. Mit ⌘K legst du die nächste Aufgabe an.' }) + '</div>';
+  return '<div class="page wide">' +
+    database(mine, { title: 'Meine Aufgaben', sub: 'Alles, was dir zugewiesen ist: persönlich, über Teams und in Projekten.', people: [S.me.email], empty: 'Nichts offen. Mit ⌘K legst du die nächste Aufgabe an.' }) + '</div>';
 }
 
 /* day planner: pick tasks from the list, drop them on the time line */
@@ -838,8 +1131,7 @@ function bindPlanner() {
 
 
 function allPage() {
-  return '<div class="page wide">' + pageHead('Alle Aufgaben', 'Deine Aufgaben und die deiner Teams und Projekte.') +
-    database(S.tasks, {}) + '</div>';
+  return '<div class="page wide">' + database(S.tasks, { title: 'Alle Aufgaben', sub: 'Deine Aufgaben und die deiner Teams und Projekte.' }) + '</div>';
 }
 
 function teamTasks(t) {
@@ -909,22 +1201,59 @@ function projectPage(p) {
   const t = team(p.teamId);
   const tasks = S.tasks.filter(x => x.projectId === p.id);
   const top = tasks.filter(x => !x.parentId);
+  const subsAll = tasks.filter(x => x.parentId);
   const done = top.filter(isDone).length;
   const pct = top.length ? Math.round(done / top.length * 100) : 0;
   const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
   const members = projectMembers(p);
-  const hours = top.filter(x => !isDone(x)).reduce((s, x) => s + (x.estimate || 0), 0);
-  return '<div class="page wide">' +
-    pageHead(p.name, p.description ? esc(p.description) : '', mark(p, 'lg'),
-      '<button class="icon-btn" data-action="project-edit" data-id="' + esc(p.id) + '" title="Projekt bearbeiten">' + icon('settings') + '</button>') +
-    '<div class="page-meta"><span class="chip soft">' + esc(st.label) + '</span>' +
-    (t ? '<button class="meta" data-action="nav" data-view="team" data-id="' + esc(t.id) + '">' + mark(t) + esc(t.name) + '</button>' : '') +
-    (p.startDate || p.endDate ? '<span class="meta">' + icon('calendar', 'sm') + esc(fmtRange(p.startDate || p.endDate, p.endDate)) + '</span>' : '') +
-    '<span class="sep"></span><span>' + avatars(members, 6) + '</span><span>' + (p.members.length ? members.length + ' Mitglieder' : 'Ganzes Team') + '</span>' +
-    '<span class="sep"></span><span style="display:inline-flex;align-items:center;gap:8px"><span class="progress" style="width:90px"><i style="width:' + pct + '%"></i></span><span class="num">' + pct + ' %</span></span>' +
-    (hours ? '<span class="meta">' + icon('hourglass', 'sm') + esc(fmtHours(hours)) + ' offen</span>' : '') + '</div>' +
-    database(tasks, { hideProject: true, people: members }) + '</div>';
+  const today = TODAY();
+  const tab = S.projTab || 'overview';
+  const pc = p.color && p.color !== 'default' && p.color !== 'gray' ? 'var(--c-' + p.color + ')' : 'var(--accent)';
+  const over = top.filter(x => !isDone(x) && x.dueDate && x.dueDate < today).length;
+  const hoursAll = top.reduce((s2, x) => s2 + (x.estimate || 0), 0);
+  const hoursDone = top.filter(isDone).reduce((s2, x) => s2 + (x.estimate || 0), 0);
+  const spent = tasks.reduce((s2, x) => s2 + (Number(x.spent) || 0), 0) / 60;
+  const subDone = subsAll.filter(isDone).length;
+  const rows = [
+    { l: 'Aufgaben', d: 'Hauptaufgaben des Projekts', v: pct, c: done + '/' + top.length + ' erledigt' },
+    { l: 'Unteraufgaben', d: 'Einzelne Arbeitsschritte', v: subsAll.length ? Math.round(subDone / subsAll.length * 100) : 0, c: subDone + '/' + subsAll.length + ' erledigt' },
+    { l: 'Aufwand', d: 'Geplante Stunden, die abgeschlossen sind', v: hoursAll ? Math.round(hoursDone / hoursAll * 100) : 0, c: fmtNum(hoursDone) + ' von ' + fmtNum(hoursAll) + ' h' },
+  ];
+  const used = rows.filter((r, i) => i === 0 || (i === 1 ? subsAll.length : hoursAll));
+  const overall = used.length ? Math.round(used.reduce((s2, r) => s2 + r.v, 0) / used.length) : 0;
+  const dist = Shared.STATUSES.map(x => '<div class="dst"><b>' + top.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
+  const qs = (l, v, cls) => '<div class="qs"><span>' + l + '</span><b class="' + (cls || '') + '">' + v + '</b></div>';
+  let body = '';
+  if (tab === 'overview') {
+    body = '<div class="pj-grid"><div class="card-w"><h3>' + icon('pie', 'sm') + 'Aufgabenverteilung</h3><div class="dsts">' + dist + '</div></div>' +
+      '<div class="card-w"><h3>' + icon('clock', 'sm') + 'Kurzstatistik</h3>' + qs('Abschlussquote', pct + ' %') + qs('Überfällige Aufgaben', over, over ? 'red' : '') +
+      qs('Offene Aufgaben', top.length - done) + qs('Gebuchte Zeit', fmtNum(Math.round(spent * 10) / 10) + ' h') + '</div></div>' +
+      '<div class="card-w"><h3>' + icon('layers', 'sm') + 'Fortschritt im Detail<span class="n">Gesamt ' + overall + ' %</span></h3><p class="hint" style="margin:-6px 0 12px">So setzt sich der Gesamtfortschritt zusammen.</p>' +
+      '<div class="ovr"><span class="track"><i style="width:' + overall + '%"></i></span></div>' +
+      rows.map(r => '<div class="brow"><div class="bt"><b>' + r.l + '</b><small>' + r.d + '</small></div><div class="bb"><span class="track"><i style="width:' + r.v + '%"></i></span></div><div class="bv"><b>' + r.v + ' %</b><small>' + r.c + '</small></div></div>').join('') + '</div>';
+  } else if (tab === 'tasks') {
+    body = database(tasks, { hideProject: true, people: members });
+  } else {
+    body = '<div class="card-w"><div class="members-list">' + members.map(e => {
+      const u = user(e);
+      const open = tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
+      return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:600">' + esc(u.name) + (t && e === t.lead ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
+        '<span class="col2">' + flag(u.country) + ' ' + esc(u.region || '') + '</span><span class="col2 num">' + open + ' offen im Projekt</span></div>';
+    }).join('') + '</div></div>';
+  }
+  return '<div class="page wide"><div class="pj-banner" style="--pc:' + pc + '">' +
+    '<div class="pj-l">' + mark(p, 'lg') + '<div><div class="pj-t"><h1>' + esc(p.name) + '</h1><span class="pb-chip">' + esc(st.label) + '</span></div>' +
+    '<p>' + esc(p.description || 'Keine Beschreibung.') + '</p>' +
+    '<div class="pj-m">' + (t ? '<button data-action="nav" data-view="team" data-id="' + esc(t.id) + '">' + mark(t) + esc(t.name) + '</button>' : '') +
+    (p.startDate || p.endDate ? '<span>' + icon('calendar', 'sm') + esc(fmtRange(p.startDate || p.endDate, p.endDate)) + '</span>' : '') +
+    '<span>' + avatars(members, 5) + (p.members.length ? members.length + ' Mitglieder' : 'Ganzes Team') + '</span></div></div></div>' +
+    '<div class="pj-acts"><button class="icon-btn sq" data-action="new-task" title="Neue Aufgabe">' + icon('plus') + '</button>' +
+    '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
+    '<button class="icon-btn sq" data-action="project-edit" data-id="' + esc(p.id) + '" title="Projekt bearbeiten">' + icon('settings') + '</button></div></div>' +
+    '<div class="pj-tabs">' + [['overview', 'Übersicht', ''], ['tasks', 'Aufgaben', top.length], ['members', 'Mitglieder', members.length]].map(x =>
+      '<button class="' + (tab === x[0] ? 'on' : '') + '" data-action="proj-tab" data-v="' + x[0] + '">' + x[1] + (x[2] !== '' ? ' <span class="n">' + x[2] + '</span>' : '') + '</button>').join('') + '</div>' + body + '</div>';
 }
+A['proj-tab'] = el => { S.projTab = el.dataset.v; render(); };
 
 /* ---------------- team calendar ---------------- */
 function scopeButton(action, teamId) {

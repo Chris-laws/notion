@@ -56,6 +56,9 @@ const Tasks = {
         completedAt: '',
         planDate: '',
         planStart: 0,
+        progress: 0,
+        spent: 0,
+        timerStart: '',
       }, fields);
       if (task.status === 'done') task.completedAt = now;
       return [Db.insert('Tasks', task)];
@@ -77,6 +80,9 @@ const Tasks = {
       completedAt: '',
       planDate: '',
       planStart: 0,
+      progress: 0,
+      spent: 0,
+      timerStart: '',
       sort: Date.now(),
     }));
   },
@@ -158,6 +164,11 @@ const Tasks = {
     if (has('planDate')) f.planDate = Shared.isDate(p.planDate) ? p.planDate : '';
     if (has('planStart')) f.planStart = Math.max(0, Math.min(1435, Math.round((Number(p.planStart) || 0) / 5) * 5));
     if (f.planDate === '') f.planStart = 0;
+    // Progress: 0 = automatic (derived from status and sub-tasks), 1-100 = set by hand.
+    if (has('progress')) f.progress = Math.max(0, Math.min(100, Math.round(Number(p.progress) || 0)));
+    // Time tracking: minutes spent, and the start of a running timer.
+    if (has('spent')) f.spent = Math.max(0, Math.min(100000, Math.round(Number(p.spent) || 0)));
+    if (has('timerStart')) f.timerStart = p.timerStart && !isNaN(new Date(p.timerStart).getTime()) ? new Date(p.timerStart).toISOString() : '';
     if (has('estimate')) f.estimate = Math.max(0, Math.min(1000, Math.round((Number(p.estimate) || 0) * 100) / 100));
     if (has('parentId')) f.parentId = p.parentId || '';
     if (has('recurrence')) f.recurrence = Shared.RECURRENCES.some(r => r.key === p.recurrence) ? p.recurrence : '';

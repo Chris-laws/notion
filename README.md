@@ -9,12 +9,13 @@ Anmeldung per Google SSO, Daten in einem Google Sheet, Oberfläche im Stil von N
 - Aufgaben für sich selbst, eine Person, mehrere Personen oder ganze Teams
 - Teams (wie Notion-Teamspaces) mit Lead und Mitgliedern, darin Projekte
 - Projekte mit eigenem Mitgliederkreis: ganzes Team oder gemischt aus verschiedenen Teams
-- Ansichten: **Liste**, **Board** (Drag & Drop, Gruppierung nach Status/Priorität/Person/Projekt), **Tabelle** (sortierbar, Inline-Bearbeitung), **Kalender** (Drag & Drop auf neues Datum)
-- Seitenansicht pro Aufgabe: Status, Zuweisung, Priorität, Start/Fällig, Projekt, Teams, Aufwand, Tags, Wiederholung, Beschreibung, Unteraufgaben, Kommentare
+- Ansichten: **Liste**, **Tabelle** (sortierbar, Inline-Bearbeitung, Fortschrittsbalken, Seitenzahl), **Board** (Drag & Drop, Gruppierung nach Status/Priorität/Person/Projekt, Spalten einklappbar), **Kalender** und **Gantt** (Balken ziehen verschiebt, rechter Rand ändert das Fälligkeitsdatum, Zoom Woche/Monat/Quartal); gespeicherte Ansichten pro Seite (im Browser)
+- Aufgabe als Seitenansicht oder Vollseite (Eigenschaftskarten, Fortschritt manuell oder automatisch, Zeiterfassung mit Timer, Unteraufgaben, Kommentare): Status, Zuweisung, Priorität, Start/Fällig, Projekt, Teams, Aufwand, Tags, Wiederholung, Beschreibung, Unteraufgaben, Kommentare
 - Wiederkehrende Aufgaben (täglich, werktags, wöchentlich, monatlich)
-- Befehlspalette (`Strg+K`) mit Quick-Add in natürlicher Sprache:
+- Befehlspalette (`Strg+K`) mit Quick-Add in natürlicher Sprache, die Syntax wird farbig markiert:
   `Angebot senden morgen @anna #website !hoch 2h` → Titel, Fälligkeit, Person, Projekt, Priorität und Aufwand werden erkannt
-- **Übersicht** (Startseite): Begrüßung, Quick-Add, Tagesbriefing, Kennzahlen, Heute/Überfällig, Teamabwesenheit, Agenda, Projektfortschritt, Aktivitäts-Heatmap
+- **Übersicht** (Startseite): Begrüßung mit Tagesfortschritt, Tagesbriefing, vier Kennzahlen, Projektübersicht, „Heute im Fokus“, Teamabwesenheit, Agenda, Aktivitäts-Heatmap
+- **Projektseite** mit Übersicht (Aufgabenverteilung, Kurzstatistik, Fortschritt im Detail), Aufgaben und Mitgliedern
 - **Tagesplaner**: Aufgabenliste links, Zeitraster rechts. Aufgaben per Drag & Drop als Zeitblöcke legen (15-Minuten-Raster, Länge = Aufwandsschätzung); gespeichert als `planDate` und `planStart`
 - **Kalender** mit sechs Ansichten (Tasten `1`–`6`): Agenda (Überfällig oben, Zeitraum Heute/Woche/Monat/90 Tage), Planer, Monat, Woche, Tag (Zeitraster mit Drag & Drop) und Heatmap erledigter Aufgaben; Urlaub, Feiertage und Teamwarnung ab 50 % in jeder Ansicht
 - „Meine Aufgaben“ als Datenbank mit Liste, Board, Tabelle

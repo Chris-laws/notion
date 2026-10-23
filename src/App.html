@@ -157,6 +157,13 @@ const ICONS = {
   plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
   hourglass: '<path d="M5 22h14M5 2h14M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2"/>',
   open: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  gantt: '<path d="M4 4v16"/><rect x="7" y="5" width="8" height="3.5" rx="1"/><rect x="11" y="10.5" width="9" height="3.5" rx="1"/><rect x="8" y="16" width="7" height="3.5" rx="1"/>',
+  bell: '<path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  play: '<path d="M7 4.5v15l12-7.5z"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  pie: '<path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>',
+  back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
 };
 function icon(name, cls) {
@@ -197,17 +204,31 @@ const GLYPHS = {
 function glyph(key) {
   return '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">' + (GLYPHS[key] || GLYPHS.todo) + '</svg>';
 }
+const STATUS_COLORS = { backlog: '#8d98b0', todo: '#5b78a8', doing: '#e0a800', review: '#0050aa', done: '#12935b' };
 function statusTag(key) {
-  return '<span class="status">' + glyph(key) + esc(statusOf(key).label) + '</span>';
+  return '<span class="spill st-' + esc(key) + '">' + esc(statusOf(key).label) + '</span>';
 }
 function prioTag(key, short) {
   const p = prioOf(key);
   if (!p) return '';
   const on = { urgent: 3, high: 3, medium: 2, low: 1 }[p.key];
+  if (!short) return '<span class="ppill prio-' + p.key + '" title="Priorität: ' + esc(p.label) + '">' + esc(p.label) + '</span>';
   const bars = key === 'urgent'
     ? '<svg class="i sm" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="currentColor" stroke="none"/><path d="M12 7v6M12 16.5h.01" stroke="#fff" stroke-width="2.4"/></svg>'
     : '<span class="prio-bars">' + [1, 2, 3].map(i => '<i class="' + (i <= on ? 'on' : '') + '"></i>').join('') + '</span>';
-  return '<span class="prio prio-' + p.key + '" title="Priorität: ' + esc(p.label) + '">' + bars + (short ? '' : '<span>' + esc(p.label) + '</span>') + '</span>';
+  return '<span class="prio prio-' + p.key + '" title="Priorität: ' + esc(p.label) + '">' + bars + '</span>';
+}
+/** Progress in %: set by hand (1-100) or derived from sub-tasks and status. */
+function progressOf(t) {
+  if (t.progress > 0) return Math.min(100, t.progress);
+  if (isDone(t)) return 100;
+  const subs = subtasks(t.id);
+  if (subs.length) return Math.round(subs.filter(isDone).length / subs.length * 100);
+  return { backlog: 0, todo: 0, doing: 40, review: 80 }[t.status] || 0;
+}
+function progressBar(t, o) {
+  const v = progressOf(t);
+  return '<span class="pbar' + (o && o.wide ? ' wide' : '') + '"><span class="track"><i style="width:' + v + '%"></i></span><span class="pv">' + v + '%</span></span>';
 }
 function dueTag(t) {
   if (!t.dueDate) return '';
@@ -216,11 +237,17 @@ function dueTag(t) {
   return '<span class="meta ' + cls + '">' + icon('calendar', 'sm') + esc(fmtDate(t.dueDate)) + '</span>';
 }
 function tagChip(name) {
-  return '<span class="chip"><span class="dot" style="background:var(--c-' + tagColor(name) + ')"></span>' + esc(name) + '</span>';
+  return '<span class="tpill t-' + tagColor(name) + '">' + esc(name) + '</span>';
 }
 function projectChip(p) {
   if (!p) return '';
   return '<span class="person">' + mark(p) + '<span>' + esc(p.name) + '</span></span>';
+}
+/** Solid coloured label for a project (table, board). */
+function projectPill(p) {
+  if (!p) return '';
+  const c = p.color && p.color !== 'default' ? 'var(--c-' + esc(p.color) + ')' : 'var(--c-gray)';
+  return '<span class="jpill" style="background:' + c + '" title="' + esc(p.name) + '">' + esc(p.name) + '</span>';
 }
 function teamChip(t) {
   if (!t) return '';
@@ -363,8 +390,10 @@ function renderSidebar() {
   const active = (v, id) => (r.view === v && (id === undefined || r.id === id) ? ' active' : '');
   const mineOpen = S.tasks.filter(t => isMine(t) && !isDone(t)).length;
   const navItem = (view, ic, label, extra, id) =>
-    '<button class="nav-item' + active(view, id) + '" data-action="nav" data-view="' + view + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' +
+    '<button class="nav-item' + active(view, id) + '" data-action="nav" data-view="' + view + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + ' title="' + esc(String(label).replace(/<[^>]*>/g, '')) + '">' +
     ic + '<span class="nav-label">' + label + '</span>' + (extra || '') + '</button>';
+  S.rail = S.rail === undefined ? store.get('rail', true) : S.rail;
+  $('#sidebar').classList.toggle('rail', !!S.rail);
   const warn = (S.warnings || []).length ? '<span class="alert" title="Team-Abwesenheit über der Warnschwelle"></span>' : '';
 
   const teamsHtml = S.teams.slice().sort((a, b) => a.name.localeCompare(b.name)).map(t => {
@@ -380,7 +409,8 @@ function renderSidebar() {
 
   $('#sidebar').innerHTML =
     '<div class="side-head"><div class="ws-mark">' + icon('check') + '</div><div class="ws-name">' + esc(S.appName) + '</div>' +
-    '<span id="sync" class="sync-dot" title="Synchronisiert"></span></div>' +
+    '<span id="sync" class="sync-dot" title="Synchronisiert"></span>' +
+    '<button class="icon-btn rail-toggle" data-action="rail-toggle" title="Seitenleiste ein-/ausklappen">' + icon('menu') + '</button></div>' +
     '<div class="side-scroll">' +
     '<button class="side-search" data-action="palette">' + icon('search', 'sm') + '<span class="grow">Suchen …</span><span class="kbd">⌘K</span></button>' +
     navItem('dash', icon('home'), 'Übersicht') +
@@ -397,6 +427,7 @@ function renderSidebar() {
     esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button></div>';
   syncDot();
 }
+A['rail-toggle'] = () => { S.rail = !S.rail; store.set('rail', S.rail); renderSidebar(); };
 A['toggle-team'] = el => { S.collapsed[el.dataset.id] = !S.collapsed[el.dataset.id]; store.set('collapsed', S.collapsed); renderSidebar(); };
 
 function renderTopbar() {
@@ -416,9 +447,10 @@ function renderTopbar() {
     '<nav class="crumbs">' + crumbs.map((c, i) => (i ? '<span class="sep">/</span>' : '') +
       (c.view ? '<button data-action="nav" data-view="' + c.view + '" data-id="' + esc(c.id) + '">' + c.html + '</button>'
         : '<button class="current">' + c.html + '</button>')).join('') + '</nav>' +
+    '<button class="top-search" data-action="palette">' + icon('search', 'sm') + '<span>Aufgaben und Projekte suchen</span><span class="kbd">⌘K</span></button>' +
     '<div class="spacer"></div>' +
     (S.ai.enabled ? '<span class="chip accent">' + icon('sparkle', 'sm') + 'KI aktiv</span>' : '') +
-    '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>';
+    (['home', 'all', 'dash'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : '');
 }
 
 /* ---------------- global events ---------------- */

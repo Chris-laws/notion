@@ -56,18 +56,19 @@ function seedDemoData() {
     members: [people[4].email, people[2].email, people[1].email] });
 
   const t = (title, f) => Tasks.save(Object.assign({ title: title }, f))[0];
-  t('Wireframes für Startseite', { projectId: web.id, assignees: [people[0].email], status: 'done', priority: 'high', dueDate: S.addDays(today, -5), estimate: 6, tags: ['Design'] });
+  t('Wireframes für Startseite', { projectId: web.id, assignees: [people[0].email], status: 'done', priority: 'high', startDate: S.addDays(today, -12), dueDate: S.addDays(today, -5), estimate: 6, tags: ['Design'] });
   const cms = t('CMS evaluieren und entscheiden', { projectId: web.id, assignees: [me.email, people[1].email], status: 'doing', priority: 'urgent', startDate: S.addDays(today, -2), dueDate: S.addDays(today, 2), estimate: 10, description: 'Contentful, Sanity und Storyblok vergleichen.\nKriterien: Preis, Editor-Erlebnis, i18n.' });
   t('Preise und Lizenzen vergleichen', { projectId: web.id, parentId: cms.id, assignees: [me.email], dueDate: S.addDays(today, 1), estimate: 2 });
   t('Demo-Termin mit Anbietern', { projectId: web.id, parentId: cms.id, assignees: [people[1].email], dueDate: S.addDays(today, 2), estimate: 2, status: 'done' });
-  t('Design-System in Figma anlegen', { projectId: web.id, assignees: [people[0].email], status: 'review', priority: 'medium', dueDate: S.addDays(today, 4), estimate: 12, tags: ['Design'] });
-  t('SEO-Audit der alten Seite', { projectId: web.id, assignees: [people[2].email], status: 'todo', priority: 'low', dueDate: S.addDays(today, 9), estimate: 5 });
+  t('Design-System in Figma anlegen', { projectId: web.id, assignees: [people[0].email], status: 'review', priority: 'medium', startDate: S.addDays(today, -3), dueDate: S.addDays(today, 4), estimate: 12, tags: ['Design'] });
+  t('SEO-Audit der alten Seite', { projectId: web.id, assignees: [people[2].email], status: 'todo', priority: 'low', startDate: S.addDays(today, 4), dueDate: S.addDays(today, 9), estimate: 5 });
   t('Hosting & Domains umziehen', { projectId: web.id, teams: [product.id], status: 'backlog', priority: 'medium', estimate: 8 });
-  t('Push-Benachrichtigungen konzipieren', { projectId: app.id, assignees: [people[3].email], status: 'todo', priority: 'high', dueDate: S.addDays(today, 12), estimate: 16 });
-  t('User-Interviews auswerten', { projectId: app.id, assignees: [me.email, people[0].email], status: 'todo', priority: 'medium', dueDate: S.addDays(today, 6), estimate: 6, tags: ['Research'] });
-  t('Kampagnen-Briefing schreiben', { projectId: launch.id, assignees: [people[4].email], status: 'doing', priority: 'high', dueDate: S.addDays(today, 3), estimate: 4 });
-  t('Social-Media-Plan November', { projectId: launch.id, teams: [marketing.id], assignees: [people[2].email, people[4].email], status: 'todo', dueDate: S.addDays(today, 8), estimate: 10, tags: ['Social'] });
+  t('Push-Benachrichtigungen konzipieren', { projectId: app.id, assignees: [people[3].email], status: 'todo', priority: 'high', startDate: S.addDays(today, 5), dueDate: S.addDays(today, 12), estimate: 16 });
+  t('User-Interviews auswerten', { projectId: app.id, assignees: [me.email, people[0].email], status: 'todo', priority: 'medium', startDate: S.addDays(today, 1), dueDate: S.addDays(today, 6), estimate: 6, tags: ['Research'] });
+  t('Kampagnen-Briefing schreiben', { projectId: launch.id, assignees: [people[4].email], status: 'doing', priority: 'high', startDate: S.addDays(today, -1), dueDate: S.addDays(today, 3), estimate: 4, progress: 60 });
+  t('Social-Media-Plan November', { projectId: launch.id, teams: [marketing.id], assignees: [people[2].email, people[4].email], status: 'todo', startDate: S.addDays(today, 2), dueDate: S.addDays(today, 8), estimate: 10, tags: ['Social'] });
   t('Weekly Team-Sync vorbereiten', { assignees: [me.email], recurrence: 'weekly', dueDate: S.addDays(S.mondayOf(today), 7), estimate: 0.5, priority: 'low' });
+  t('Angebot für Mobile App freigeben', { projectId: app.id, assignees: [me.email, people[3].email], status: 'doing', priority: 'high', startDate: S.addDays(today, -10), dueDate: S.addDays(today, -4), estimate: 3, tags: ['Research'], progress: 70 });
   t('Reisekosten abrechnen', { assignees: [me.email], dueDate: S.addDays(today, -1), estimate: 1 });
   t('Onboarding-Doku aktualisieren', { teams: [product.id], status: 'backlog', estimate: 3 });
 

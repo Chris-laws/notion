@@ -4,7 +4,7 @@
 
 ## Haltung
 
-Ruhige, helle Oberfläche in der Art moderner Planungs-Apps: weiche Arbeitsfläche, weiße Karten mit großzügigen Rundungen, wenig Linien, klare Hierarchie. Aufbau und Muster (Übersicht, Kanban-Board, Aufgabendetail, Tagesplaner mit Zeitblöcken, Agenda) folgen allgemein üblichen Layoutideen. Alle Farben, Formen, Texte und Icons sind eigenständig gestaltet; es wurden keine fremden Assets, Icons, Texte oder Screenshots übernommen.
+Ruhige, helle Oberfläche in der Art moderner Planungs-Apps: weiche Arbeitsfläche, weiße Karten mit großzügigen Rundungen, wenig Linien, klare Hierarchie. Aufbau und Muster (Übersicht mit Kennzahlen und Projektübersicht, Aufgabentabelle, Kanban-Board, Gantt, Aufgabendetail als Seite mit Zeiterfassung, Tagesplaner mit Zeitblöcken, Agenda, Quick-Add mit farbiger Syntax) folgen den vom Auftraggeber gelieferten Referenz-Screens und allgemein üblichen Layoutideen; sie sind selbst gezeichnet. Alle Farben, Formen, Texte und Icons sind eigenständig gestaltet; es wurden keine fremden Assets, Icons, Texte oder Screenshots übernommen.
 
 Lidl-Anmutung dezent: Farbe hat eine Aufgabe, nie Dekoration.
 
@@ -36,9 +36,15 @@ Karten mit 14–20 px Radius und sanftem Schatten, Dialoge und Palette 20 px. Tr
 
 ## Layout
 
-- Seitenleiste (weiß): Übersicht, Meine Aufgaben, Alle Aufgaben, Tagesplaner, Kalender & Agenda, Verfügbarkeit; aktive Seite sanft blau mit gelbem Balken.
+- Seitenleiste: standardmäßig schmale Icon-Leiste (68 px) mit Team- und Projektmarken, per Menü-Taste auf volle Breite aufklappbar. Einträge: Übersicht, Meine Aufgaben, Alle Aufgaben, Tagesplaner, Kalender & Agenda, Verfügbarkeit; aktive Seite sanft blau mit gelbem Balken.
 - Übersicht: Begrüßung mit Quick-Add, Briefing, vier Kennzahlen, Widgets in 12er-Raster.
-- Board: Spalten als Karten, Aufgabenkarten mit Priorität und Fälligkeit.
+- Kopfzeile: zentrale Suchleiste (öffnet die Palette). Seitenköpfe sind Karten mit Titel, Untertitel und Aktionen; Aufgabenseiten haben darunter Filterleiste und Ansichtsumschalter (Liste, Tabelle, Board, Kalender, Gantt) sowie gespeicherte Ansichten.
+- Tabelle: Status, Priorität und Tags als weiche Pillen, Projekt als volle Farbfläche, Fortschrittsbalken, Fußzeile mit Zeilenzahl und Seiten.
+- Board: Spalten mit Farbpunkt und Zähler (einklappbar), Karten mit Farbstreifen links, Priorität, Projekt, Datum, Überfällig-Hinweis, Tags, Fortschritt.
+- Gantt: Aufgabenliste links, Zeitraster rechts mit Heute-Linie, Wochenenden, Tooltip; Balkenfarbe nach Status.
+- Aufgabendetail (Vollseite): Kopfkarte mit Chips, fünf Eigenschaftskarten (Status, Priorität, Start, Fällig, Fortschritt), links Beschreibung und Unteraufgaben, rechts Zeiterfassung, Details, smarte Hilfen und Kommentare.
+- Quick-Add: Eingabezeile mit farbig markierter Syntax, Vorschau mit Titel und Chips, Legende der Kürzel.
+- Projektseite: Farbbanner mit Tabs Übersicht, Aufgaben, Mitglieder.
 - Tagesplaner: Liste ungeplanter Aufgaben links, Zeitraster 06–20 Uhr rechts, Blöcke per Drag & Drop in 15-Minuten-Schritten.
 - Kalender: Kopfkarte mit Titel, Team-Auswahl, Filtern und Ansichtsumschalter (Agenda, Planer, Monat, Woche, Tag, Heatmap); darunter Kurzbefehl-Leiste. Agenda mit rotem Block „Überfällig“ und Tagen als Zeilen, Woche/Tag als Zeitraster mit Ganztagesstreifen, Heatmap mit Kennzahlen.
 - Detail: Seitenpanel mit weicher Eigenschaftskarte, KI-Vorschlägen, Unteraufgaben, Kommentaren.
