@@ -157,6 +157,8 @@ const Ai = {
       utilization: week.utilization, available: week.available, planned: week.planned,
       holidays: upcoming.slice(0, 3).map(h => ({ date: h.date, name: h.name })),
       focus: focus.map(t => ({ id: t.id, title: t.title, dueDate: t.dueDate, priority: t.priority })),
+      teamWarnings: Availability.warnings(today, Shared.addDays(today, 27), Object.keys(ctx.teamIds))
+        .map(w => ({ teamId: w.teamId, teamName: w.teamName, date: w.date, absent: w.absent, total: w.total })),
     };
 
     let text = '';
@@ -181,6 +183,10 @@ const Ai = {
       if (week.available) {
         text += ' Deine Auslastung diese Woche liegt bei ' + week.utilization + ' % (' + week.planned + ' von ' + week.available + ' h).';
         if (week.utilization > 100) text += ' Überleg, ob du etwas abgeben oder verschieben kannst.';
+      }
+      if (facts.teamWarnings.length) {
+        const w = facts.teamWarnings[0];
+        text += ' Achtung: Am ' + w.date.split('-').reverse().join('.') + ' sind in ' + w.teamName + ' ' + w.absent + ' von ' + w.total + ' Personen abwesend.';
       }
       if (upcoming.length) text += ' Nächster Feiertag: ' + upcoming[0].name + ' am ' + upcoming[0].date.split('-').reverse().join('.') + '.';
     }

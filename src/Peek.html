@@ -68,7 +68,7 @@ function renderPeek() {
       d.candidates.map(c => '<button class="opt" data-action="suggest-pick" data-email="' + esc(c.email) + '">' + avatar(c.email) +
         '<div style="flex:1;min-width:0"><b>' + esc(c.name) + '</b> <span class="faint">· ' + (c.free > 0 ? fmtNum(c.free) + ' h frei' : 'ausgelastet') + '</span>' +
         '<small>' + esc(c.reasons.join(' · ')) + '</small></div>' +
-        (t.assignees.indexOf(c.email) >= 0 ? '<span class="tag c-green">zugewiesen</span>' : '<span class="btn sm outline">Zuweisen</span>') + '</button>').join('') + '</div>';
+        (t.assignees.indexOf(c.email) >= 0 ? '<span class="chip ok">zugewiesen</span>' : '<span class="btn sm outline">Zuweisen</span>') + '</button>').join('') + '</div>';
   }
   if (S.breakdown && S.breakdown.taskId === t.id) {
     const b = S.breakdown.data;

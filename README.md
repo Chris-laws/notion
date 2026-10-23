@@ -16,11 +16,13 @@ Anmeldung per Google SSO, Daten in einem Google Sheet, Oberfläche im Stil von N
   `Angebot senden morgen @anna #website !hoch 2h` → Titel, Fälligkeit, Person, Projekt, Priorität und Aufwand werden erkannt
 - „Meine Aufgaben“ mit Tagesbriefing, Überfälligem, Wochenauslastung
 
-**Kalender und Kapazität**
+**Kalender, Urlaub und Verfügbarkeit**
 - Teamkalender mit Aufgaben, Terminen/Meilensteinen, Abwesenheiten und **internationalen Feiertagen**
 - Feiertage pro Person nach Land **und Region** (z. B. Allerheiligen nur für `DE-BY`, Thanksgiving nur für `US`)
 - Quellen: [Nager.Date](https://date.nager.at) (≈120 Länder inkl. regionaler Feiertage), Fallback auf Googles Feiertagskalender und eine eingebaute Berechnung für DE, AT, CH, US, GB, FR, IT, ES, NL, PL; dazu eigene Firmen-Feiertage
-- Kapazitätsplanung pro Person und Woche: Wochenstunden und Arbeitstage (Teilzeit), minus Feiertage und Abwesenheiten, verglichen mit dem geschätzten Aufwand offener Aufgaben (verteilt auf die Arbeitstage zwischen Start und Fälligkeit)
+- Urlaub wird direkt im Teamkalender gepflegt: mehrere Tage mit der Maus markieren oder „Urlaub eintragen“
+- **Verfügbarkeit**: Tagesraster pro Team, wer wann weg ist (Urlaub, Krank, Fortbildung, Feiertag). Sind an einem Tag **mindestens 50 %** eines Teams abwesend, gibt es eine Warnung im Kalender, in der Verfügbarkeit, im Tagesbriefing und direkt beim Eintragen des Urlaubs. Feiertage zählen mit, je nach Land und Region der Person. Schwelle über `ABSENCE_WARN_PERCENT` anpassbar
+- Aufwandsplanung pro Person und Woche (für „Wer hat Kapazität?“): Wochenstunden und Arbeitstage (Teilzeit), minus Feiertage und Abwesenheiten, verglichen mit dem geschätzten Aufwand offener Aufgaben (verteilt auf die Arbeitstage zwischen Start und Fälligkeit)
 
 **Smarte Funktionen (Vertex AI vorbereitet)**
 - Ohne KI-Schlüssel läuft alles regelbasiert: Quick-Add-Parser, „Wer hat Kapazität?“ (Vorschlag nach freier Kapazität, Feiertagen und Abwesenheiten), Tagesbriefing
@@ -60,6 +62,7 @@ Die Web-App-URL ist der Link für alle Kolleg:innen. Google meldet sie automatis
 | `ADMIN_EMAILS` | Kommagetrennte Admin-Adressen |
 | `DEFAULT_COUNTRY` | Land für neue Personen, Standard `DE` |
 | `DEFAULT_HOURS_PER_WEEK` | Wochenstunden für neue Personen, Standard `40` |
+| `ABSENCE_WARN_PERCENT` | Ab wie viel Prozent Abwesenheit ein Team gewarnt wird, Standard `50` |
 | `VERTEX_API_KEY` | **Platzhalter** `PLATZHALTER_VERTEX_AI_API_KEY` – hier später den Vertex-AI-Schlüssel eintragen |
 | `VERTEX_MODEL` | Standard `gemini-2.5-flash` |
 | `VERTEX_PROJECT_ID`, `VERTEX_LOCATION` | Optional: GCP-Projekt und Region für einen regionalen Endpunkt (z. B. `europe-west3`) |
@@ -87,6 +90,7 @@ src/
   Auth.js           Google SSO, Berechtigungen, Konfiguration
   Users.js, Teams.js, Tasks.js
   Calendar.js       Termine, Abwesenheiten, Kapazitätsberechnung
+  Availability.js   Wer ist wann weg, Team-Warnung ab Schwelle
   Holidays.js       Internationale Feiertage mit Cache und Fallbacks
   Ai.js             Smarte Funktionen, Vertex-AI-Anbindung
   Setup.js          setup(), seedDemoData()
@@ -94,7 +98,7 @@ src/
   Styles.html       Design (hell/dunkel, mobil)
   App.html          Zustand, Routing, Seitenleiste
   Components.html   Menüs, Eigenschafts-Editoren, Dialoge, Befehlspalette
-  Views.html        Liste, Board, Tabelle, Kalender, Kapazität, Teams, Projekte, Einstellungen
+  Views.html        Liste, Board, Tabelle, Kalender, Verfügbarkeit, Teams, Projekte, Einstellungen
   Peek.html         Aufgaben-Detailansicht
 dev/                Tests und lokale Vorschau (wird nicht hochgeladen)
 ```
@@ -109,3 +113,7 @@ dev/                Tests und lokale Vorschau (wird nicht hochgeladen)
 ### Grenzen
 
 Google Sheets als Datenbank passt für Teams bis in den niedrigen vierstelligen Bereich an Aufgaben. Schreibzugriffe laufen über eine Sperre (`LockService`), damit gleichzeitige Änderungen sich nicht überschreiben. Für deutlich größere Datenmengen lässt sich `Db.js` gegen Firestore oder Cloud SQL tauschen, ohne die übrigen Dateien zu ändern.
+
+## Design
+
+Die Designsprache (Farben, Typografie, Abstände, Komponenten) steht in [DESIGN.md](DESIGN.md) und ist als CSS-Variablen in `src/Styles.html` umgesetzt.

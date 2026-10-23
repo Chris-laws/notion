@@ -297,4 +297,27 @@ test('errors are returned, not thrown', () => {
   assert.ok(fails('tasks.save', { title: 'x', status: 'invalid' }));
 });
 
+
+test('team availability warns at 50 % absence (holidays + vacation)', () => {
+  as(ME);
+  const marketing = call('bootstrap').teams.find(t => t.name === 'Marketing'); // Chris (DE), Sofia (IT), Lea (AT)
+  const a = call('availability', { teamId: marketing.id, from: '2026-12-07', weeks: 1 });
+  assert.strictEqual(a.threshold, 50);
+  const dec8 = a.team.find(d => d.date === '2026-12-08'); // IT + AT holiday
+  assert.strictEqual(dec8.absent, 2);
+  assert.strictEqual(dec8.total, 3);
+  assert.strictEqual(dec8.warn, true);
+  assert.strictEqual(a.team.find(d => d.date === '2026-12-09').warn, false);
+  assert.strictEqual(a.members.find(m => m.email === 'lea.huber@firma.de').cells['2026-12-11'].works, false, 'Lea works Mon-Thu');
+  as('lea.huber@firma.de');
+  const first = call('absences.save', { startDate: '2026-12-10', endDate: '2026-12-10', type: 'training' });
+  assert.strictEqual(first.warnings.length, 0, '1 of 3 is below 50 %');
+  as(ME);
+  const res = call('absences.save', { startDate: '2026-12-10', endDate: '2026-12-10', type: 'vacation' });
+  assert.ok(res.absence.id);
+  assert.ok(res.warnings.some(w => w.teamId === marketing.id && w.date === '2026-12-10' && w.absent === 2));
+  const range = call('calendar.range', { from: '2026-12-01', to: '2026-12-31' });
+  assert.ok(range.warnings.some(w => w.date === '2026-12-08' && w.teamId === marketing.id));
+});
+
 console.log('\n' + passed + ' Tests ' + (process.exitCode ? 'mit Fehlern' : 'bestanden'));

@@ -18,7 +18,7 @@ function load(opts) {
     vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), ctx, { filename: f });
   });
   // Expose script-scoped consts (const/let are not properties of the global object).
-  vm.runInContext('globalThis.__exports = { Shared, Db, Tasks, Holidays, Capacity, Calendar, Ai, Config };', ctx);
+  vm.runInContext('globalThis.__exports = { Shared, Db, Tasks, Holidays, Capacity, Calendar, Ai, Config, Availability };', ctx);
   return ctx;
 }
 

@@ -45,6 +45,7 @@ const ROUTES = {
   'companyHolidays.save': p => Calendar.saveCompanyHoliday(p),
   'companyHolidays.remove': p => Calendar.removeCompanyHoliday(p.id),
   'capacity': p => Capacity.forTeam(p),
+  'availability': p => Availability.forTeam(p),
   'ai.status': () => Ai.status(),
   'ai.parse': p => Ai.parse(p),
   'ai.suggestAssignee': p => Ai.suggestAssignee(p),

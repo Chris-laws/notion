@@ -16,7 +16,11 @@ const Calendar = {
       .map(a => (admin || a.email === me.email ? a : Object.assign({}, a, { note: '' })));
     const holidays = Holidays.inRange(people.map(u => u.country), from, to).map(h =>
       Object.assign({}, h, { affects: people.filter(u => Holidays.appliesTo(h, u)).map(u => u.email) }));
-    return { from: from, to: to, events: events, absences: absences, holidays: holidays };
+    const teamIds = p.teamId ? [p.teamId] : null;
+    return {
+      from: from, to: to, events: events, absences: absences, holidays: holidays,
+      warnings: Availability.warnings(from, to, teamIds), threshold: Availability.threshold(),
+    };
   },
 
   people_(teamId) {
@@ -78,12 +82,20 @@ const Calendar = {
       note: String(p.note || '').slice(0, 500),
     };
     return Db.tx(() => {
+      let saved;
       if (p.id) {
         const a = Db.get('Absences', p.id);
         if (!a || (a.email !== me.email && !Auth.isAdmin(me))) throw new Error('Keine Berechtigung.');
-        return Db.update('Absences', p.id, data);
+        saved = Db.update('Absences', p.id, data);
+      } else {
+        saved = Db.insert('Absences', Object.assign(data, { id: Util.uid('ab_'), createdAt: new Date().toISOString() }));
       }
-      return Db.insert('Absences', Object.assign(data, { id: Util.uid('ab_'), createdAt: new Date().toISOString() }));
+      // Tell the person right away if their absence pushes a team to the warning level.
+      const teamIds = Db.all('Teams').filter(t => t.lead === email || (t.members || []).indexOf(email) >= 0).map(t => t.id);
+      const warnings = teamIds.length
+        ? Availability.warnings(saved.startDate, saved.endDate, teamIds).filter(w => w.people.some(x => x.email === email))
+        : [];
+      return { absence: saved, warnings: warnings, threshold: Availability.threshold() };
     });
   },
 

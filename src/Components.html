@@ -8,11 +8,11 @@
 function toast(msg, opts) {
   opts = opts || {};
   const el = document.createElement('div');
-  el.className = 'toast' + (opts.error ? ' err' : '');
+  el.className = 'toast' + (opts.error ? ' err' : opts.warn ? ' warn' : '');
   el.innerHTML = '<span>' + esc(msg) + '</span>' + (opts.action ? '<button>' + esc(opts.action.label) + '</button>' : '');
   if (opts.action) el.querySelector('button').onclick = () => { opts.action.fn(); el.remove(); };
   $('#toasts').appendChild(el);
-  setTimeout(() => el.remove(), opts.error ? 6000 : 3800);
+  setTimeout(() => el.remove(), opts.error || opts.warn ? 8000 : 3800);
 }
 
 /* ---------------- popovers ---------------- */
@@ -255,17 +255,7 @@ function formValues(form) {
   });
   return out;
 }
-const EMOJIS = ['🚀', '📣', '🎯', '🌐', '📱', '💡', '🛠️', '📊', '🎨', '🧪', '💼', '🧭', '📦', '🔒', '🤝', '🌱', '⚡', '📚', '🧩', '🏁'];
 const COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
-function emojiField(value) {
-  return '<input type="hidden" name="icon" value="' + esc(value || '') + '"><div class="emoji-row">' +
-    EMOJIS.map(e => '<button type="button" class="' + (e === value ? 'on' : '') + '" data-action="pick-emoji" data-v="' + e + '">' + e + '</button>').join('') + '</div>';
-}
-A['pick-emoji'] = el => {
-  const row = el.parentNode;
-  $$('button', row).forEach(b => b.classList.toggle('on', b === el));
-  row.previousElementSibling.value = el.dataset.v;
-};
 function colorField(value) {
   return '<input type="hidden" name="color" value="' + esc(value || 'blue') + '"><div class="color-row">' +
     COLORS.map(c => '<button type="button" class="' + (c === (value || 'blue') ? 'on' : '') + '" style="background:var(--dot-' + c + ')" data-action="pick-color" data-v="' + c + '" title="' + c + '"></button>').join('') + '</div>';
@@ -301,11 +291,10 @@ function divField(label, inner) { return '<div class="field"><span>' + esc(label
 
 /* Team */
 function teamModal(t) {
-  t = t || { members: [S.me.email], lead: S.me.email, color: 'blue', icon: '🚀' };
+  t = t || { members: [S.me.email], lead: S.me.email, color: 'purple' };
   openModal({
     title: t.id ? 'Team bearbeiten' : 'Neues Team',
     body: field('Name', '<input class="input" name="name" required maxlength="80" value="' + esc(t.name || '') + '" placeholder="z. B. Produkt, Vertrieb, Design">') +
-      divField('Icon', emojiField(t.icon)) +
       divField('Farbe', colorField(t.color)) +
       field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(t.description || '') + '</textarea>') +
       field('Team-Lead', selectField('lead', S.users.map(u => ({ key: u.email, label: u.name })), t.lead)) +
@@ -322,14 +311,14 @@ A['team-edit'] = el => teamModal(team(el.dataset.id));
 
 /* Project */
 function projectModal(p, teamId) {
-  p = p || { teamId: teamId || (myTeams()[0] || S.teams[0] || {}).id, status: 'active', icon: '📁', members: [] };
+  p = p || { teamId: teamId || (myTeams()[0] || S.teams[0] || {}).id, status: 'active', color: 'blue', members: [] };
   if (!S.teams.length) { toast('Lege zuerst ein Team an.'); return teamModal(); }
   openModal({
     title: p.id ? 'Projekt bearbeiten' : 'Neues Projekt',
     body: field('Name', '<input class="input" name="name" required maxlength="120" value="' + esc(p.name || '') + '">') +
       '<div class="row">' + field('Team', selectField('teamId', S.teams.map(t => ({ key: t.id, label: (t.icon || '') + ' ' + t.name })), p.teamId)) +
       field('Status', selectField('status', Shared.PROJECT_STATUSES, p.status)) + '</div>' +
-      divField('Icon', emojiField(p.icon)) +
+      divField('Farbe', colorField(p.color)) +
       '<div class="row">' + field('Start', '<input class="input" type="date" name="startDate" value="' + esc(p.startDate || '') + '">') +
       field('Ende', '<input class="input" type="date" name="endDate" value="' + esc(p.endDate || '') + '">') + '</div>' +
       field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(p.description || '') + '</textarea>') +
@@ -373,7 +362,14 @@ function absenceModal(a) {
       field('Bis', '<input class="input" type="date" name="endDate" value="' + esc(a.endDate || '') + '">') + '</div>' +
       field('Notiz (nur für dich und Admins sichtbar)', '<input class="input" name="note" value="' + esc(a.note || '') + '">'),
     danger: a.id ? { label: 'Löschen', onClick: () => call('absences.remove', { id: a.id }).then(() => { closeModal(); calReload(); }).catch(fail) } : null,
-    onSubmit: v => call('absences.save', Object.assign({ id: a.id }, v)).then(() => { toast('Abwesenheit gespeichert – Kapazität wird angepasst.'); calReload(); }),
+    onSubmit: v => call('absences.save', Object.assign({ id: a.id }, v)).then(res => {
+      const w = res.warnings || [];
+      if (w.length) {
+        toast('Achtung: ' + w.map(x => fmtDate(x.date, { absolute: true }) + ' ' + x.teamName + ' ' + x.absent + '/' + x.total).slice(0, 3).join(', ') +
+          (w.length > 3 ? ' …' : '') + ' – mindestens ' + res.threshold + ' % des Teams sind dann weg.', { warn: true });
+      } else toast('Abwesenheit gespeichert.');
+      calReload();
+    }),
   });
 }
 A['absence-new'] = () => absenceModal();
@@ -404,15 +400,15 @@ function parseCtx() {
 }
 function tokenChip(tk) {
   switch (tk.type) {
-    case 'due': return '<span class="tag c-blue">' + icon('calendar', 'sm') + 'Fällig ' + esc(fmtDate(tk.value)) + '</span>';
-    case 'start': return '<span class="tag c-gray">' + icon('clock', 'sm') + 'Start ' + esc(fmtDate(tk.value)) + '</span>';
-    case 'assignee': return '<span class="tag c-default">' + avatar(tk.value) + esc(user(tk.value).name) + '</span>';
+    case 'due': return '<span class="chip accent">' + icon('calendar', 'sm') + 'Fällig ' + esc(fmtDate(tk.value)) + '</span>';
+    case 'start': return '<span class="chip">' + icon('clock', 'sm') + 'Start ' + esc(fmtDate(tk.value)) + '</span>';
+    case 'assignee': return '<span class="chip">' + avatar(tk.value) + esc(user(tk.value).name) + '</span>';
     case 'team': return teamChip(team(tk.value));
-    case 'project': return '<span class="tag c-default">' + projectChip(project(tk.value)) + '</span>';
+    case 'project': return '<span class="chip">' + projectChip(project(tk.value)) + '</span>';
     case 'tag': return tagChip(tk.value);
-    case 'priority': return '<span class="tag c-default">' + prioTag(tk.value) + '</span>';
-    case 'estimate': return '<span class="tag c-default">' + icon('hourglass', 'sm') + esc(fmtHours(tk.value)) + '</span>';
-    case 'recurrence': return '<span class="tag c-purple">' + icon('repeat', 'sm') + esc((Shared.RECURRENCES.find(r => r.key === tk.value) || {}).label) + '</span>';
+    case 'priority': return '<span class="chip">' + prioTag(tk.value) + '</span>';
+    case 'estimate': return '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(tk.value)) + '</span>';
+    case 'recurrence': return '<span class="chip accent">' + icon('repeat', 'sm') + esc((Shared.RECURRENCES.find(r => r.key === tk.value) || {}).label) + '</span>';
     default: return '';
   }
 }
@@ -421,7 +417,7 @@ function openPalette(prefill) {
   palState = { hover: 0, items: [] };
   $('#palette-root').innerHTML =
     '<div class="palette-bg" data-action="palette-bg"><div class="palette" role="dialog" aria-label="Suchen und erstellen">' +
-    '<div class="palette-in">' + icon('sparkle', 'lg') + '<input id="pal-in" placeholder="Aufgabe eingeben oder suchen…  z. B. „Angebot senden morgen @anna #website !hoch 2h“" value="' + esc(prefill || '') + '"></div>' +
+    '<div class="palette-in">' + icon('search', 'lg') + '<input id="pal-in" placeholder="Aufgabe eingeben oder suchen…  z. B. „Angebot senden morgen @anna #website !hoch 2h“" value="' + esc(prefill || '') + '"></div>' +
     '<div class="palette-preview" id="pal-prev"></div><div class="palette-list" id="pal-list"></div>' +
     '<div class="palette-foot"><span><code>@person</code> zuweisen</span><span><code>+team</code></span><span><code>#projekt/tag</code></span>' +
     '<span><code>!hoch</code></span><span><code>morgen · freitag · 15.11.</code></span><span><code>2h</code></span><span><code>jeden montag</code></span>' +
@@ -453,8 +449,8 @@ function drawPalette(keepHover) {
     { kind: 'nav', view: 'calendar', label: 'Teamkalender', ic: icon('calendar') },
     { kind: 'nav', view: 'capacity', label: 'Kapazität', ic: icon('gauge') },
     { kind: 'nav', view: 'settings', label: 'Einstellungen', ic: icon('settings') },
-  ].concat(S.teams.map(t => ({ kind: 'nav', view: 'team', id: t.id, label: t.name, ic: '<span class="emoji">' + esc(t.icon || '👥') + '</span>' })))
-    .concat(S.projects.map(p => ({ kind: 'nav', view: 'project', id: p.id, label: p.name, ic: '<span class="emoji">' + esc(p.icon || '📁') + '</span>' })));
+  ].concat(S.teams.map(t => ({ kind: 'nav', view: 'team', id: t.id, label: t.name, ic: mark(t) })))
+    .concat(S.projects.map(p => ({ kind: 'nav', view: 'project', id: p.id, label: p.name, ic: mark(p) })));
   nav.filter(n => !ql || n.label.toLowerCase().indexOf(ql) >= 0).slice(0, ql ? 4 : 5)
     .forEach(n => items.push(Object.assign(n, { html: n.ic + '<span>' + esc(n.label) + '</span><small>Öffnen</small>' })));
   if (ql) {
