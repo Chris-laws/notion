@@ -170,6 +170,18 @@ test('recurring task spawns next occurrence', () => {
   assert.strictEqual(changed[1].status, 'todo');
 });
 
+test('day planner: time block is stored in 5-minute steps and cleared with the date', () => {
+  as(ME);
+  const [t] = call('tasks.save', { title: 'Fokuszeit', estimate: 1.5 });
+  assert.strictEqual(t.planDate, '');
+  const [p] = call('tasks.save', { id: t.id, planDate: '2026-10-26', planStart: 9 * 60 + 12 });
+  assert.strictEqual(p.planDate, '2026-10-26');
+  assert.strictEqual(p.planStart, 9 * 60 + 10);
+  const [c] = call('tasks.save', { id: t.id, planDate: '' });
+  assert.strictEqual(c.planStart, 0);
+  assert.strictEqual(call('tasks.list').find(x => x.id === t.id).planDate, '');
+});
+
 test('board move updates several tasks', () => {
   as(ME);
   const tasks = call('tasks.list').slice(0, 2);

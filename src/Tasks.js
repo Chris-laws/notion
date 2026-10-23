@@ -54,6 +54,8 @@ const Tasks = {
         createdAt: now,
         updatedAt: now,
         completedAt: '',
+        planDate: '',
+        planStart: 0,
       }, fields);
       if (task.status === 'done') task.completedAt = now;
       return [Db.insert('Tasks', task)];
@@ -73,6 +75,8 @@ const Tasks = {
       createdAt: now,
       updatedAt: now,
       completedAt: '',
+      planDate: '',
+      planStart: 0,
       sort: Date.now(),
     }));
   },
@@ -150,6 +154,10 @@ const Tasks = {
     ['startDate', 'dueDate'].forEach(k => {
       if (has(k)) f[k] = Shared.isDate(p[k]) ? p[k] : '';
     });
+    // Day planner: the time block of a task (date + start in minutes since midnight, 5-minute steps).
+    if (has('planDate')) f.planDate = Shared.isDate(p.planDate) ? p.planDate : '';
+    if (has('planStart')) f.planStart = Math.max(0, Math.min(1435, Math.round((Number(p.planStart) || 0) / 5) * 5));
+    if (f.planDate === '') f.planStart = 0;
     if (has('estimate')) f.estimate = Math.max(0, Math.min(1000, Math.round((Number(p.estimate) || 0) * 100) / 100));
     if (has('parentId')) f.parentId = p.parentId || '';
     if (has('recurrence')) f.recurrence = Shared.RECURRENCES.some(r => r.key === p.recurrence) ? p.recurrence : '';

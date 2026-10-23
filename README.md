@@ -9,12 +9,15 @@ Anmeldung per Google SSO, Daten in einem Google Sheet, Oberfläche im Stil von N
 - Aufgaben für sich selbst, eine Person, mehrere Personen oder ganze Teams
 - Teams (wie Notion-Teamspaces) mit Lead und Mitgliedern, darin Projekte
 - Projekte mit eigenem Mitgliederkreis: ganzes Team oder gemischt aus verschiedenen Teams
-- Ansichten wie in Notion: **Liste**, **Board** (Drag & Drop, Gruppierung nach Status/Priorität/Person/Projekt), **Tabelle** (sortierbar, Inline-Bearbeitung), **Kalender** (Drag & Drop auf neues Datum)
+- Ansichten: **Liste**, **Board** (Drag & Drop, Gruppierung nach Status/Priorität/Person/Projekt), **Tabelle** (sortierbar, Inline-Bearbeitung), **Kalender** (Drag & Drop auf neues Datum)
 - Seitenansicht pro Aufgabe: Status, Zuweisung, Priorität, Start/Fällig, Projekt, Teams, Aufwand, Tags, Wiederholung, Beschreibung, Unteraufgaben, Kommentare
 - Wiederkehrende Aufgaben (täglich, werktags, wöchentlich, monatlich)
 - Befehlspalette (`Strg+K`) mit Quick-Add in natürlicher Sprache:
   `Angebot senden morgen @anna #website !hoch 2h` → Titel, Fälligkeit, Person, Projekt, Priorität und Aufwand werden erkannt
-- „Meine Aufgaben“ mit Tagesbriefing, Überfälligem, Wochenauslastung
+- **Übersicht** (Startseite): Begrüßung, Quick-Add, Tagesbriefing, Kennzahlen, Heute/Überfällig, Teamabwesenheit, Agenda, Projektfortschritt, Aktivitäts-Heatmap
+- **Tagesplaner**: Aufgabenliste links, Zeitraster rechts. Aufgaben per Drag & Drop als Zeitblöcke legen (15-Minuten-Raster, Länge = Aufwandsschätzung); gespeichert als `planDate` und `planStart`
+- **Agenda**: Kalender wahlweise als Monat oder Agenda-Liste
+- „Meine Aufgaben“ als Datenbank mit Liste, Board, Tabelle
 
 **Kalender, Urlaub und Verfügbarkeit**
 - Teamkalender mit Aufgaben, Terminen/Meilensteinen, Abwesenheiten und **internationalen Feiertagen**

@@ -22,9 +22,9 @@ const SCHEMA = {
   Tasks: {
     cols: ['id', 'title', 'description', 'status', 'priority', 'projectId', 'teams', 'assignees', 'tags',
       'startDate', 'dueDate', 'estimate', 'parentId', 'recurrence', 'sort', 'createdBy', 'createdAt',
-      'updatedAt', 'completedAt'],
+      'updatedAt', 'completedAt', 'planDate', 'planStart'],
     json: ['teams', 'assignees', 'tags'],
-    num: ['estimate', 'sort'],
+    num: ['estimate', 'sort', 'planStart'],
   },
   Comments: {
     cols: ['id', 'taskId', 'author', 'body', 'createdAt'],
