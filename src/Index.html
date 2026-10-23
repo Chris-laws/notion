@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <?!= include('Styles') ?>
+  </head>
+  <body>
+    <div id="app" class="app is-loading">
+      <aside id="sidebar" class="sidebar" aria-label="Navigation"></aside>
+      <div class="scrim" data-action="sidebar-close"></div>
+      <main class="main">
+        <header id="topbar" class="topbar"></header>
+        <section id="view" class="view">
+          <div class="boot">
+            <div class="boot-mark"></div>
+            <div class="skeleton" style="width: 40%"></div>
+            <div class="skeleton" style="width: 70%"></div>
+            <div class="skeleton" style="width: 55%"></div>
+          </div>
+        </section>
+      </main>
+      <aside id="peek" class="peek" aria-label="Aufgabe" hidden></aside>
+    </div>
+    <div id="popover-root"></div>
+    <div id="modal-root"></div>
+    <div id="palette-root"></div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <script><?!= clientLib() ?></script>
+    <?!= include('App') ?>
+    <?!= include('Components') ?>
+    <?!= include('Views') ?>
+    <?!= include('Peek') ?>
+  </body>
+</html>

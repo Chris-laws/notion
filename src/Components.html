@@ -1,0 +1,499 @@
+<script>
+/* ==========================================================================
+   Reusable UI: toasts, popover menus, property editors, modals, forms,
+   and the command palette (search + natural-language quick add).
+   ========================================================================== */
+
+/* ---------------- toasts ---------------- */
+function toast(msg, opts) {
+  opts = opts || {};
+  const el = document.createElement('div');
+  el.className = 'toast' + (opts.error ? ' err' : '');
+  el.innerHTML = '<span>' + esc(msg) + '</span>' + (opts.action ? '<button>' + esc(opts.action.label) + '</button>' : '');
+  if (opts.action) el.querySelector('button').onclick = () => { opts.action.fn(); el.remove(); };
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), opts.error ? 6000 : 3800);
+}
+
+/* ---------------- popovers ---------------- */
+let popOutside = null;
+function openPop(anchor, html, mount) {
+  closePop();
+  const root = $('#popover-root');
+  root.innerHTML = '<div class="pop" role="dialog">' + html + '</div>';
+  const pop = root.firstChild;
+  const r = anchor.getBoundingClientRect();
+  const w = Math.max(pop.offsetWidth, 220);
+  const h = pop.offsetHeight;
+  let left = Math.min(r.left, window.innerWidth - w - 8);
+  let top = r.bottom + 4;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 4);
+  pop.style.left = Math.max(8, left) + 'px';
+  pop.style.top = top + 'px';
+  popOutside = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) closePop(); };
+  setTimeout(() => document.addEventListener('mousedown', popOutside), 0);
+  if (mount) mount(pop);
+  const first = pop.querySelector('input');
+  if (first) first.focus();
+  return pop;
+}
+function closePop() {
+  const root = $('#popover-root');
+  if (!root.children.length) return false;
+  root.innerHTML = '';
+  document.removeEventListener('mousedown', popOutside);
+  return true;
+}
+function closeTopLayer() {
+  if ($('#palette-root').children.length) { closePalette(); return true; }
+  if (closePop()) return true;
+  if ($('#modal-root').children.length) { closeModal(); return true; }
+  return false;
+}
+
+/**
+ * Generic option menu.
+ * items: [{ value, html, search }], opts: { multi, selected:[], search, create, onPick(value, selected) }
+ */
+function openMenu(anchor, items, opts) {
+  let selected = (opts.selected || []).slice();
+  let query = '';
+  let hover = 0;
+  const visible = () => {
+    const q = query.trim().toLowerCase();
+    let list = items.filter(it => !q || (it.search || '').toLowerCase().indexOf(q) >= 0);
+    if (opts.create && q && !items.some(it => (it.search || '').toLowerCase() === q)) {
+      list = list.concat([{ value: query.trim(), html: icon('plus', 'sm') + ' „' + esc(query.trim()) + '“ hinzufügen', create: true }]);
+    }
+    return list;
+  };
+  const draw = pop => {
+    const list = visible();
+    hover = Math.min(hover, Math.max(0, list.length - 1));
+    $('.pop-list', pop).innerHTML = list.map((it, i) => it.label
+      ? '<div class="pop-label">' + esc(it.label) + '</div>'
+      : '<button class="pop-item' + (i === hover ? ' hover' : '') + '" data-i="' + i + '">' + it.html +
+        (selected.indexOf(it.value) >= 0 ? '<span class="tick">' + icon('check', 'sm') + '</span>' : '') + '</button>').join('') ||
+      '<div class="faint" style="padding:8px">Keine Treffer</div>';
+  };
+  const pick = (pop, it) => {
+    if (!it || it.label) return;
+    if (opts.multi) {
+      const i = selected.indexOf(it.value);
+      if (i >= 0) selected.splice(i, 1); else selected.push(it.value);
+      if (it.create) { items.push({ value: it.value, html: tagChip(it.value), search: it.value }); query = ''; $('.pop-search', pop).value = ''; }
+      opts.onPick(it.value, selected.slice());
+      draw(pop);
+    } else {
+      closePop();
+      opts.onPick(it.value, [it.value]);
+    }
+  };
+  openPop(anchor,
+    (opts.search !== false && items.length > 6 || opts.create ? '<input class="pop-search" placeholder="' + esc(opts.placeholder || 'Suchen…') + '">' : '') +
+    '<div class="pop-list"></div>',
+    pop => {
+      draw(pop);
+      pop.addEventListener('click', e => {
+        const b = e.target.closest('.pop-item');
+        if (b) pick(pop, visible()[Number(b.dataset.i)]);
+      });
+      const input = $('.pop-search', pop);
+      const keys = e => {
+        const list = visible();
+        if (e.key === 'ArrowDown') { hover = Math.min(list.length - 1, hover + 1); draw(pop); e.preventDefault(); }
+        if (e.key === 'ArrowUp') { hover = Math.max(0, hover - 1); draw(pop); e.preventDefault(); }
+        if (e.key === 'Enter') { pick(pop, list[hover]); e.preventDefault(); }
+      };
+      if (input) {
+        input.addEventListener('input', () => { query = input.value; hover = 0; draw(pop); });
+        input.addEventListener('keydown', keys);
+      }
+    });
+}
+
+/* ---------------- property editors ---------------- */
+function peopleItems(preferred) {
+  const pref = preferred || [];
+  const list = S.users.slice().sort((a, b) =>
+    (b.email === S.me.email) - (a.email === S.me.email) ||
+    (pref.indexOf(b.email) >= 0) - (pref.indexOf(a.email) >= 0) ||
+    a.name.localeCompare(b.name));
+  return list.map(u => ({
+    value: u.email,
+    html: avatar(u.email) + '<span>' + esc(u.name) + (u.email === S.me.email ? ' <span class="faint">(ich)</span>' : '') + '</span>',
+    search: u.name + ' ' + u.email,
+  }));
+}
+function relevantPeople(t) {
+  let emails = [];
+  const p = t.projectId && project(t.projectId);
+  if (p) emails = emails.concat(projectMembers(p));
+  (t.teams || []).forEach(id => { if (team(id)) emails = emails.concat(teamMembers(team(id))); });
+  return emails;
+}
+
+const PROP_EDITORS = {
+  status(anchor, t, save) {
+    openMenu(anchor, Shared.STATUSES.map(s => ({ value: s.key, html: statusTag(s.key), search: s.label })),
+      { selected: [t.status], search: false, onPick: v => save({ status: v }) });
+  },
+  priority(anchor, t, save) {
+    openMenu(anchor, Shared.PRIORITIES.map(p => ({ value: p.key, html: prioTag(p.key), search: p.label }))
+      .concat([{ value: '', html: '<span class="faint">Keine Priorität</span>', search: 'keine' }]),
+    { selected: [t.priority], search: false, onPick: v => save({ priority: v }) });
+  },
+  assignees(anchor, t, save) {
+    openMenu(anchor, peopleItems(relevantPeople(t)), {
+      multi: true, selected: t.assignees, placeholder: 'Person suchen…',
+      onPick: (v, sel) => save({ assignees: sel }),
+    });
+  },
+  teams(anchor, t, save) {
+    openMenu(anchor, S.teams.map(x => ({ value: x.id, html: teamChip(x), search: x.name })),
+      { multi: true, selected: t.teams, onPick: (v, sel) => save({ teams: sel }) });
+  },
+  projectId(anchor, t, save) {
+    const items = [{ value: '', html: '<span class="faint">Kein Projekt</span>', search: 'kein' }];
+    S.teams.forEach(tm => {
+      const ps = S.projects.filter(p => p.teamId === tm.id);
+      if (!ps.length) return;
+      items.push({ label: (tm.icon || '') + ' ' + tm.name, search: '' });
+      ps.forEach(p => items.push({ value: p.id, html: projectChip(p), search: p.name + ' ' + tm.name }));
+    });
+    openMenu(anchor, items, { selected: [t.projectId], search: true, onPick: v => save({ projectId: v }) });
+  },
+  recurrence(anchor, t, save) {
+    openMenu(anchor, Shared.RECURRENCES.map(r => ({ value: r.key, html: (r.key ? icon('repeat', 'sm') : '') + '<span>' + esc(r.label) + '</span>', search: r.label })),
+      { selected: [t.recurrence], search: false, onPick: v => save({ recurrence: v }) });
+  },
+  tags(anchor, t, save) {
+    openMenu(anchor, allTags().map(x => ({ value: x, html: tagChip(x), search: x })), {
+      multi: true, create: true, selected: t.tags, placeholder: 'Tag suchen oder neu anlegen…',
+      onPick: (v, sel) => save({ tags: sel }),
+    });
+  },
+  dueDate(anchor, t, save) { dateEditor(anchor, t.dueDate, v => save({ dueDate: v })); },
+  startDate(anchor, t, save) { dateEditor(anchor, t.startDate, v => save({ startDate: v })); },
+  estimate(anchor, t, save) {
+    openPop(anchor,
+      '<div style="padding:4px"><input class="input" type="number" min="0" step="0.25" value="' + esc(t.estimate || '') + '" placeholder="Stunden"></div>' +
+      '<div class="pop-quick">' + [0.5, 1, 2, 4, 8, 16].map(h => '<button class="btn sm outline" data-h="' + h + '">' + fmtHours(h) + '</button>').join('') + '</div>',
+      pop => {
+        const input = $('input', pop);
+        const done = v => { closePop(); save({ estimate: Number(v) || 0 }); };
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') done(input.value); });
+        pop.addEventListener('click', e => { const b = e.target.closest('[data-h]'); if (b) done(b.dataset.h); });
+        input.addEventListener('change', () => save({ estimate: Number(input.value) || 0 }));
+      });
+  },
+};
+function dateEditor(anchor, value, onSave) {
+  const t = TODAY();
+  const quick = [
+    ['Heute', t], ['Morgen', Shared.addDays(t, 1)], ['Nächster Mo', Shared.addDays(Shared.mondayOf(t), 7)],
+    ['In 1 Woche', Shared.addDays(t, 7)],
+  ];
+  openPop(anchor,
+    '<div style="padding:4px"><input class="input" type="date" value="' + esc(value || '') + '"></div>' +
+    '<div class="pop-quick">' + quick.map(q => '<button class="btn sm outline" data-d="' + q[1] + '">' + q[0] + '</button>').join('') + '</div>' +
+    (value ? '<div class="pop-sep"></div><button class="pop-item" data-d="">' + icon('x', 'sm') + 'Datum entfernen</button>' : ''),
+    pop => {
+      const input = $('input', pop);
+      input.addEventListener('change', () => { if (Shared.isDate(input.value) || !input.value) { onSave(input.value); } });
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') closePop(); });
+      pop.addEventListener('click', e => {
+        const b = e.target.closest('[data-d]');
+        if (b) { closePop(); onSave(b.dataset.d); }
+      });
+    });
+}
+/** data-action="prop" data-id data-field — used by peek, table and cards. */
+A.prop = (el, e) => {
+  e.stopPropagation();
+  const t = task(el.dataset.id);
+  if (!t) return;
+  PROP_EDITORS[el.dataset.field](el, t, patch => patchTask(t.id, patch, { keepPeek: false }));
+};
+
+/* ---------------- modals & forms ---------------- */
+let modalSubmit = null;
+function openModal(o) {
+  closePop();
+  modalSubmit = o.onSubmit;
+  $('#modal-root').innerHTML =
+    '<div class="modal-bg" data-action="modal-bg"><form class="modal" data-on-submit="modal" autocomplete="off">' +
+    '<div class="modal-head">' + esc(o.title) + '<button type="button" class="icon-btn" data-action="modal-close" aria-label="Schließen">' + icon('x') + '</button></div>' +
+    '<div class="modal-body">' + o.body + '</div>' +
+    '<div class="modal-foot">' + (o.danger ? '<button type="button" class="btn danger left" data-action="modal-danger">' + esc(o.danger.label) + '</button>' : '') +
+    '<button type="button" class="btn" data-action="modal-close">Abbrechen</button>' +
+    '<button type="submit" class="btn primary">' + esc(o.submitLabel || 'Speichern') + '</button></div></form></div>';
+  A['modal-danger'] = () => o.danger && o.danger.onClick();
+  const first = $('#modal-root input:not([type=hidden]):not([type=checkbox]), #modal-root textarea');
+  if (first) first.focus();
+  if (o.mount) o.mount($('#modal-root .modal'));
+}
+function closeModal() { $('#modal-root').innerHTML = ''; modalSubmit = null; }
+A['modal-close'] = () => closeModal();
+A['modal-bg'] = (el, e) => { if (e.target === el) closeModal(); };
+ON.submit.modal = form => {
+  if (!modalSubmit) return;
+  const btn = $('button[type=submit]', form);
+  btn.disabled = true;
+  Promise.resolve(modalSubmit(formValues(form))).then(ok => { if (ok !== false) closeModal(); else btn.disabled = false; })
+    .catch(err => { btn.disabled = false; fail(err); });
+};
+function formValues(form) {
+  const out = {};
+  $$('[name]', form).forEach(el => {
+    if (el.type === 'checkbox') {
+      if (!out[el.name]) out[el.name] = [];
+      if (el.checked) out[el.name].push(el.value);
+    } else if (el.type === 'radio') {
+      if (el.checked) out[el.name] = el.value;
+    } else out[el.name] = el.value;
+  });
+  return out;
+}
+const EMOJIS = ['🚀', '📣', '🎯', '🌐', '📱', '💡', '🛠️', '📊', '🎨', '🧪', '💼', '🧭', '📦', '🔒', '🤝', '🌱', '⚡', '📚', '🧩', '🏁'];
+const COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
+function emojiField(value) {
+  return '<input type="hidden" name="icon" value="' + esc(value || '') + '"><div class="emoji-row">' +
+    EMOJIS.map(e => '<button type="button" class="' + (e === value ? 'on' : '') + '" data-action="pick-emoji" data-v="' + e + '">' + e + '</button>').join('') + '</div>';
+}
+A['pick-emoji'] = el => {
+  const row = el.parentNode;
+  $$('button', row).forEach(b => b.classList.toggle('on', b === el));
+  row.previousElementSibling.value = el.dataset.v;
+};
+function colorField(value) {
+  return '<input type="hidden" name="color" value="' + esc(value || 'blue') + '"><div class="color-row">' +
+    COLORS.map(c => '<button type="button" class="' + (c === (value || 'blue') ? 'on' : '') + '" style="background:var(--dot-' + c + ')" data-action="pick-color" data-v="' + c + '" title="' + c + '"></button>').join('') + '</div>';
+}
+A['pick-color'] = el => {
+  const row = el.parentNode;
+  const form = el.closest('#view form');
+  if (form) form.setAttribute('data-touched', '1');
+  $$('button', row).forEach(b => b.classList.toggle('on', b === el));
+  row.previousElementSibling.value = el.dataset.v;
+};
+function peopleField(name, selected, hint) {
+  return '<input class="input" placeholder="Person filtern…" data-on-input="filter-people" style="margin-bottom:6px">' +
+    '<div class="picker">' + S.users.slice().sort((a, b) => a.name.localeCompare(b.name)).map(u =>
+    '<label data-s="' + esc((u.name + ' ' + u.email).toLowerCase()) + '"><input type="checkbox" name="' + name + '" value="' + esc(u.email) + '"' +
+    (selected.indexOf(u.email) >= 0 ? ' checked' : '') + '>' + avatar(u.email) + '<span>' + esc(u.name) + '</span><span class="faint" style="margin-left:auto;font-size:12px">' + esc(u.email) + '</span></label>').join('') +
+    '</div><input class="input" name="' + name + 'Extra" placeholder="Weitere E-Mails einladen (kommagetrennt)" style="margin-top:6px">' +
+    (hint ? '<div class="hint" style="margin-top:4px">' + esc(hint) + '</div>' : '');
+}
+ON.input['filter-people'] = el => {
+  const q = el.value.toLowerCase();
+  $$('label', el.nextElementSibling).forEach(l => { l.hidden = q && l.dataset.s.indexOf(q) < 0; });
+};
+function collectPeople(v, name) {
+  return (v[name] || []).concat(String(v[name + 'Extra'] || '').split(/[,;\s]+/).filter(Boolean));
+}
+function selectField(name, options, value) {
+  return '<select class="select" name="' + name + '">' + options.map(o =>
+    '<option value="' + esc(o.key) + '"' + (o.key === value ? ' selected' : '') + '>' + esc(o.label) + '</option>').join('') + '</select>';
+}
+function field(label, inner) { return '<label class="field"><span>' + esc(label) + '</span>' + inner + '</label>'; }
+function divField(label, inner) { return '<div class="field"><span>' + esc(label) + '</span>' + inner + '</div>'; }
+
+/* Team */
+function teamModal(t) {
+  t = t || { members: [S.me.email], lead: S.me.email, color: 'blue', icon: '🚀' };
+  openModal({
+    title: t.id ? 'Team bearbeiten' : 'Neues Team',
+    body: field('Name', '<input class="input" name="name" required maxlength="80" value="' + esc(t.name || '') + '" placeholder="z. B. Produkt, Vertrieb, Design">') +
+      divField('Icon', emojiField(t.icon)) +
+      divField('Farbe', colorField(t.color)) +
+      field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(t.description || '') + '</textarea>') +
+      field('Team-Lead', selectField('lead', S.users.map(u => ({ key: u.email, label: u.name })), t.lead)) +
+      divField('Mitglieder', peopleField('members', t.members)),
+    submitLabel: t.id ? 'Speichern' : 'Team anlegen',
+    danger: t.id ? { label: 'Team löschen', onClick: () => confirmDelete('Team „' + t.name + '“ löschen? Projekte werden entfernt, Aufgaben bleiben erhalten.', () =>
+      call('teams.remove', { id: t.id }).then(() => reloadAll()).then(() => go('home'))) } : null,
+    onSubmit: v => call('teams.save', Object.assign({ id: t.id }, v, { members: collectPeople(v, 'members') }))
+      .then(saved => reloadAll().then(() => go('team', saved.id))),
+  });
+}
+A['team-new'] = () => teamModal();
+A['team-edit'] = el => teamModal(team(el.dataset.id));
+
+/* Project */
+function projectModal(p, teamId) {
+  p = p || { teamId: teamId || (myTeams()[0] || S.teams[0] || {}).id, status: 'active', icon: '📁', members: [] };
+  if (!S.teams.length) { toast('Lege zuerst ein Team an.'); return teamModal(); }
+  openModal({
+    title: p.id ? 'Projekt bearbeiten' : 'Neues Projekt',
+    body: field('Name', '<input class="input" name="name" required maxlength="120" value="' + esc(p.name || '') + '">') +
+      '<div class="row">' + field('Team', selectField('teamId', S.teams.map(t => ({ key: t.id, label: (t.icon || '') + ' ' + t.name })), p.teamId)) +
+      field('Status', selectField('status', Shared.PROJECT_STATUSES, p.status)) + '</div>' +
+      divField('Icon', emojiField(p.icon)) +
+      '<div class="row">' + field('Start', '<input class="input" type="date" name="startDate" value="' + esc(p.startDate || '') + '">') +
+      field('Ende', '<input class="input" type="date" name="endDate" value="' + esc(p.endDate || '') + '">') + '</div>' +
+      field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(p.description || '') + '</textarea>') +
+      divField('Projektmitglieder', peopleField('members', p.members, 'Leer lassen = ganzes Team. Auch Personen aus anderen Teams sind möglich.')),
+    submitLabel: p.id ? 'Speichern' : 'Projekt anlegen',
+    danger: p.id ? { label: 'Projekt löschen', onClick: () => confirmDelete('Projekt „' + p.name + '“ löschen? Die Aufgaben bleiben erhalten.', () =>
+      call('projects.remove', { id: p.id }).then(() => reloadAll()).then(() => go('team', p.teamId))) } : null,
+    onSubmit: v => call('projects.save', Object.assign({ id: p.id }, v, { members: collectPeople(v, 'members') }))
+      .then(saved => reloadAll().then(() => go('project', saved.id))),
+  });
+}
+A['project-new'] = el => projectModal(null, el.dataset.team);
+A['project-edit'] = el => projectModal(project(el.dataset.id));
+
+/* Event */
+function eventModal(ev, date) {
+  ev = ev || { type: 'meeting', startDate: date || TODAY(), teamId: S.cal.teamId || '' };
+  openModal({
+    title: ev.id ? 'Termin bearbeiten' : 'Neuer Termin',
+    body: field('Titel', '<input class="input" name="title" required value="' + esc(ev.title || '') + '">') +
+      '<div class="row">' + field('Art', selectField('type', Shared.EVENT_TYPES, ev.type)) +
+      field('Team', selectField('teamId', [{ key: '', label: 'Alle' }].concat(S.teams.map(t => ({ key: t.id, label: t.name }))), ev.teamId)) + '</div>' +
+      '<div class="row">' + field('Von', '<input class="input" type="date" name="startDate" required value="' + esc(ev.startDate) + '">') +
+      field('Bis', '<input class="input" type="date" name="endDate" value="' + esc(ev.endDate || '') + '">') + '</div>' +
+      field('Notiz', '<textarea class="textarea" name="note" style="min-height:60px">' + esc(ev.note || '') + '</textarea>'),
+    danger: ev.id ? { label: 'Löschen', onClick: () => call('events.remove', { id: ev.id }).then(() => { closeModal(); calReload(); }).catch(fail) } : null,
+    onSubmit: v => call('events.save', Object.assign({ id: ev.id }, v)).then(() => calReload()),
+  });
+}
+A['event-new'] = el => eventModal(null, el && el.dataset.date);
+A['event-edit'] = (el, e) => { e.stopPropagation(); const ev = calFind('events', el.dataset.id); if (ev) eventModal(ev); };
+
+/* Absence */
+function absenceModal(a) {
+  a = a || { type: 'vacation', email: S.me.email, startDate: TODAY() };
+  openModal({
+    title: a.id ? 'Abwesenheit bearbeiten' : 'Abwesenheit eintragen',
+    body: (S.me.admin ? field('Person', selectField('email', S.users.map(u => ({ key: u.email, label: u.name })), a.email)) : '') +
+      field('Art', selectField('type', Shared.ABSENCE_TYPES, a.type)) +
+      '<div class="row">' + field('Von', '<input class="input" type="date" name="startDate" required value="' + esc(a.startDate) + '">') +
+      field('Bis', '<input class="input" type="date" name="endDate" value="' + esc(a.endDate || '') + '">') + '</div>' +
+      field('Notiz (nur für dich und Admins sichtbar)', '<input class="input" name="note" value="' + esc(a.note || '') + '">'),
+    danger: a.id ? { label: 'Löschen', onClick: () => call('absences.remove', { id: a.id }).then(() => { closeModal(); calReload(); }).catch(fail) } : null,
+    onSubmit: v => call('absences.save', Object.assign({ id: a.id }, v)).then(() => { toast('Abwesenheit gespeichert – Kapazität wird angepasst.'); calReload(); }),
+  });
+}
+A['absence-new'] = () => absenceModal();
+A['absence-edit'] = (el, e) => { e.stopPropagation(); const a = calFind('absences', el.dataset.id); if (a) absenceModal(a); };
+
+function confirmDelete(text, fn) {
+  openModal({
+    title: 'Wirklich löschen?',
+    body: '<p style="margin:0 0 8px">' + esc(text) + '</p>',
+    submitLabel: 'Löschen',
+    onSubmit: () => Promise.resolve(fn()).catch(fail),
+  });
+}
+
+function reloadAll() {
+  return call('bootstrap').then(d => { Object.assign(S, d); S.cap.data = null; S.cal.cache = {}; render(); });
+}
+
+/* ---------------- command palette ---------------- */
+let palState = null;
+function parseCtx() {
+  return {
+    today: TODAY(), me: S.me.email,
+    users: S.users.map(u => ({ email: u.email, name: u.name })),
+    teams: S.teams.map(t => ({ id: t.id, name: t.name })),
+    projects: S.projects.map(p => ({ id: p.id, name: p.name })),
+  };
+}
+function tokenChip(tk) {
+  switch (tk.type) {
+    case 'due': return '<span class="tag c-blue">' + icon('calendar', 'sm') + 'Fällig ' + esc(fmtDate(tk.value)) + '</span>';
+    case 'start': return '<span class="tag c-gray">' + icon('clock', 'sm') + 'Start ' + esc(fmtDate(tk.value)) + '</span>';
+    case 'assignee': return '<span class="tag c-default">' + avatar(tk.value) + esc(user(tk.value).name) + '</span>';
+    case 'team': return teamChip(team(tk.value));
+    case 'project': return '<span class="tag c-default">' + projectChip(project(tk.value)) + '</span>';
+    case 'tag': return tagChip(tk.value);
+    case 'priority': return '<span class="tag c-default">' + prioTag(tk.value) + '</span>';
+    case 'estimate': return '<span class="tag c-default">' + icon('hourglass', 'sm') + esc(fmtHours(tk.value)) + '</span>';
+    case 'recurrence': return '<span class="tag c-purple">' + icon('repeat', 'sm') + esc((Shared.RECURRENCES.find(r => r.key === tk.value) || {}).label) + '</span>';
+    default: return '';
+  }
+}
+function openPalette(prefill) {
+  closePop();
+  palState = { hover: 0, items: [] };
+  $('#palette-root').innerHTML =
+    '<div class="palette-bg" data-action="palette-bg"><div class="palette" role="dialog" aria-label="Suchen und erstellen">' +
+    '<div class="palette-in">' + icon('sparkle', 'lg') + '<input id="pal-in" placeholder="Aufgabe eingeben oder suchen…  z. B. „Angebot senden morgen @anna #website !hoch 2h“" value="' + esc(prefill || '') + '"></div>' +
+    '<div class="palette-preview" id="pal-prev"></div><div class="palette-list" id="pal-list"></div>' +
+    '<div class="palette-foot"><span><code>@person</code> zuweisen</span><span><code>+team</code></span><span><code>#projekt/tag</code></span>' +
+    '<span><code>!hoch</code></span><span><code>morgen · freitag · 15.11.</code></span><span><code>2h</code></span><span><code>jeden montag</code></span>' +
+    '<span style="margin-left:auto">↵ anlegen · Strg+↵ anlegen & öffnen</span></div></div></div>';
+  const input = $('#pal-in');
+  input.focus();
+  input.addEventListener('input', drawPalette);
+  input.addEventListener('keydown', e => {
+    const n = palState.items.length;
+    if (e.key === 'ArrowDown') { palState.hover = (palState.hover + 1) % n; drawPalette(true); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { palState.hover = (palState.hover - 1 + n) % n; drawPalette(true); e.preventDefault(); }
+    if (e.key === 'Enter') { e.preventDefault(); runPaletteItem(palState.items[palState.hover], e.ctrlKey || e.metaKey); }
+  });
+  drawPalette();
+}
+A.palette = () => openPalette();
+A['palette-bg'] = (el, e) => { if (e.target === el) closePalette(); };
+function closePalette() { $('#palette-root').innerHTML = ''; palState = null; }
+
+function drawPalette(keepHover) {
+  const q = $('#pal-in').value;
+  const parsed = Shared.parse(q, parseCtx());
+  const items = [];
+  if (q.trim()) items.push({ kind: 'create', parsed: parsed, html: icon('plus') + '<span>Aufgabe anlegen: <b>' + esc(parsed.title) + '</b></span>' });
+  const ql = q.trim().toLowerCase();
+  const nav = [
+    { kind: 'nav', view: 'home', label: 'Meine Aufgaben', ic: icon('home') },
+    { kind: 'nav', view: 'all', label: 'Alle Aufgaben', ic: icon('inbox') },
+    { kind: 'nav', view: 'calendar', label: 'Teamkalender', ic: icon('calendar') },
+    { kind: 'nav', view: 'capacity', label: 'Kapazität', ic: icon('gauge') },
+    { kind: 'nav', view: 'settings', label: 'Einstellungen', ic: icon('settings') },
+  ].concat(S.teams.map(t => ({ kind: 'nav', view: 'team', id: t.id, label: t.name, ic: '<span class="emoji">' + esc(t.icon || '👥') + '</span>' })))
+    .concat(S.projects.map(p => ({ kind: 'nav', view: 'project', id: p.id, label: p.name, ic: '<span class="emoji">' + esc(p.icon || '📁') + '</span>' })));
+  nav.filter(n => !ql || n.label.toLowerCase().indexOf(ql) >= 0).slice(0, ql ? 4 : 5)
+    .forEach(n => items.push(Object.assign(n, { html: n.ic + '<span>' + esc(n.label) + '</span><small>Öffnen</small>' })));
+  if (ql) {
+    S.tasks.filter(t => t.title.toLowerCase().indexOf(ql) >= 0).slice(0, 6).forEach(t => items.push({
+      kind: 'task', id: t.id, html: '<span class="check' + (isDone(t) ? ' on' : '') + '" style="margin:0"></span><span>' + esc(t.title) + '</span><small>' + esc(fmtDate(t.dueDate)) + '</small>',
+    }));
+  }
+  palState.items = items;
+  if (!keepHover) palState.hover = 0;
+  $('#pal-prev').innerHTML = parsed.tokens.map(tokenChip).join('');
+  $('#pal-list').innerHTML = items.map((it, i) => '<button class="pop-item' + (i === palState.hover ? ' hover' : '') + '" data-action="pal-item" data-i="' + i + '">' + it.html + '</button>').join('');
+}
+A['pal-item'] = (el, e) => runPaletteItem(palState.items[Number(el.dataset.i)], e.ctrlKey || e.metaKey);
+
+function runPaletteItem(it, open) {
+  if (!it) return;
+  if (it.kind === 'nav') { closePalette(); go(it.view, it.id); return; }
+  if (it.kind === 'task') { closePalette(); openPeek(it.id); return; }
+  const text = $('#pal-in').value;
+  const fromParse = p => {
+    const f = contextDefaults();
+    ['title', 'dueDate', 'startDate', 'priority', 'recurrence', 'projectId'].forEach(k => { if (p[k]) f[k] = p[k]; });
+    if (p.estimate) f.estimate = p.estimate;
+    if (p.assignees && p.assignees.length) f.assignees = p.assignees;
+    if (p.teams && p.teams.length) f.teams = (f.teams || []).concat(p.teams);
+    if (p.tags && p.tags.length) f.tags = p.tags;
+    return f;
+  };
+  closePalette();
+  const go2 = p => createTask(fromParse(p), { open: open }).then(t => {
+    if (t && !open) toast('Angelegt: ' + t.title, { action: { label: 'Öffnen', fn: () => openPeek(t.id) } });
+  });
+  if (S.ai.enabled) {
+    toast('KI analysiert die Eingabe…');
+    call('ai.parse', { text: text }).then(go2).catch(() => go2(it.parsed));
+  } else go2(it.parsed);
+}
+A['new-task'] = el => {
+  const preset = el && el.dataset.preset ? JSON.parse(el.dataset.preset) : {};
+  createTask(contextDefaults(Object.assign({ title: '' }, preset)), { open: true });
+};
+</script>

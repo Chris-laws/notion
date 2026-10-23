@@ -1,0 +1,84 @@
+/**
+ * Entry points of the web app.
+ * The browser talks to the server through a single function, api(), which
+ * dispatches to the route table below and always returns a JSON string.
+ */
+function doGet() {
+  const user = Auth.currentUser();
+  const tpl = HtmlService.createTemplateFromFile('Index');
+  tpl.appName = Config.get('APP_NAME');
+  tpl.userEmail = user.email;
+  return tpl.evaluate()
+    .setTitle(Config.get('APP_NAME'))
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setFaviconUrl('https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsrounded/task_alt/default/48px.svg');
+}
+
+/** Used by the HTML templates: <?!= include('Styles') ?> */
+function include(name) {
+  return HtmlService.createHtmlOutputFromFile(name).getContent();
+}
+
+/** Shared constants and the quick-add parser, injected into the page. */
+function clientLib() {
+  return 'var Shared = (' + SharedFactory.toString() + ')();';
+}
+
+const ROUTES = {
+  'bootstrap': () => App.bootstrap(),
+  'tasks.list': () => Tasks.list(),
+  'tasks.save': p => Tasks.save(p),
+  'tasks.move': p => Tasks.move(p),
+  'tasks.remove': p => Tasks.remove(p.id),
+  'comments.list': p => Tasks.comments(p.taskId),
+  'comments.add': p => Tasks.addComment(p),
+  'teams.save': p => Teams.save(p),
+  'teams.remove': p => Teams.remove(p.id),
+  'projects.save': p => Projects.save(p),
+  'projects.remove': p => Projects.remove(p.id),
+  'users.save': p => Users.save(p),
+  'calendar.range': p => Calendar.range(p),
+  'events.save': p => Calendar.saveEvent(p),
+  'events.remove': p => Calendar.removeEvent(p.id),
+  'absences.save': p => Calendar.saveAbsence(p),
+  'absences.remove': p => Calendar.removeAbsence(p.id),
+  'companyHolidays.save': p => Calendar.saveCompanyHoliday(p),
+  'companyHolidays.remove': p => Calendar.removeCompanyHoliday(p.id),
+  'capacity': p => Capacity.forTeam(p),
+  'ai.status': () => Ai.status(),
+  'ai.parse': p => Ai.parse(p),
+  'ai.suggestAssignee': p => Ai.suggestAssignee(p),
+  'ai.breakdown': p => Ai.breakdown(p),
+  'ai.briefing': () => Ai.briefing(),
+};
+
+function api(method, payload) {
+  try {
+    Db.reset();
+    const route = ROUTES[method];
+    if (!route) throw new Error('Unbekannte Aktion: ' + method);
+    const data = route(payload ? JSON.parse(payload) : {});
+    return JSON.stringify({ ok: true, data: data === undefined ? null : data });
+  } catch (e) {
+    console.error(method, e && e.stack);
+    return JSON.stringify({ ok: false, error: (e && e.message) || String(e) });
+  }
+}
+
+const App = {
+  bootstrap() {
+    const me = Auth.currentUser();
+    const ctx = Access.context(me);
+    return {
+      appName: Config.get('APP_NAME'),
+      today: Util.today(),
+      me: Object.assign({}, me, { admin: ctx.admin }),
+      users: Users.list(),
+      teams: Db.all('Teams'),
+      projects: Db.all('Projects'),
+      tasks: Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx)),
+      companyHolidays: Db.all('CompanyHolidays'),
+      ai: Ai.status(),
+    };
+  },
+};

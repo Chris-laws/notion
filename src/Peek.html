@@ -1,0 +1,248 @@
+<script>
+/* ==========================================================================
+   Task side peek (Notion-style page preview): properties, description,
+   sub-tasks, comments and the smart helpers.
+   ========================================================================== */
+
+function openPeek(id) {
+  if (!task(id)) return;
+  S.peekId = id;
+  S.comments = null;
+  S.suggest = null;
+  S.breakdown = null;
+  render({ peek: true });
+  call('comments.list', { taskId: id }).then(list => {
+    if (S.peekId !== id) return;
+    S.comments = { taskId: id, list: list };
+    renderPeek();
+  }).catch(() => { S.comments = { taskId: id, list: [] }; renderPeek(); });
+  const title = $('#peek .peek-title');
+  if (title && task(id).title === 'Ohne Titel') { title.value = ''; title.focus(); }
+}
+function closePeek() {
+  S.peekId = null;
+  S.peekFull = false;
+  render();
+}
+A['close-peek'] = () => closePeek();
+A['peek-full'] = () => { S.peekFull = !S.peekFull; renderPeek(); };
+
+function propRow(t, field, ic, label, value) {
+  return '<div class="prop"><div class="k">' + icon(ic) + esc(label) + '</div>' +
+    '<button class="v" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + field + '">' + (value || '<span class="faint">Leer</span>') + '</button></div>';
+}
+
+function renderPeek() {
+  const el = $('#peek');
+  const t = S.peekId && task(S.peekId);
+  if (!t) { el.hidden = true; el.innerHTML = ''; return; }
+  const active = document.activeElement;
+  const keepFocus = active && el.contains(active) && active.dataset && active.dataset.keep;
+  const caret = keepFocus ? [active.dataset.keep, active.selectionStart] : null;
+  const scroll = $('.peek-scroll', el) ? $('.peek-scroll', el).scrollTop : 0;
+  el.hidden = false;
+  el.classList.toggle('full', S.peekFull);
+  const parent = t.parentId && task(t.parentId);
+  const subs = subtasks(t.id).sort(bySort);
+  const rec = Shared.RECURRENCES.find(r => r.key === t.recurrence);
+
+  const props =
+    propRow(t, 'status', 'status', 'Status', statusTag(t.status)) +
+    propRow(t, 'assignees', 'user', 'Zugewiesen', t.assignees.map(person).join('')) +
+    propRow(t, 'priority', 'flag', 'Priorität', prioTag(t.priority)) +
+    propRow(t, 'dueDate', 'calendar', 'Fällig', t.dueDate ? dueTag(t) + '<span class="faint" style="font-size:12px">' + esc(fmtDate(t.dueDate, { absolute: true })) + '</span>' : '') +
+    propRow(t, 'startDate', 'clock', 'Start', t.startDate ? esc(fmtDate(t.startDate, { absolute: true })) : '') +
+    propRow(t, 'projectId', 'folder', 'Projekt', projectChip(project(t.projectId))) +
+    propRow(t, 'teams', 'users', 'Teams', t.teams.map(id => teamChip(team(id))).join('')) +
+    propRow(t, 'estimate', 'hourglass', 'Aufwand', esc(fmtHours(t.estimate))) +
+    propRow(t, 'tags', 'tag', 'Tags', t.tags.map(tagChip).join('')) +
+    propRow(t, 'recurrence', 'repeat', 'Wiederholung', t.recurrence ? esc(rec.label) : '');
+
+  let smart = '<div class="ai-row">' +
+    '<button class="ai-btn" data-action="ai-suggest">' + icon('sparkle', 'sm') + 'Wer hat Kapazität?</button>' +
+    '<button class="ai-btn" data-action="ai-breakdown">' + icon('sparkle', 'sm') + 'In Teilaufgaben zerlegen</button></div>';
+  if (S.suggest && S.suggest.taskId === t.id) {
+    const d = S.suggest.data;
+    smart += '<div class="suggest"><div class="sh"><span>Freie Kapazität in KW ' + Shared.isoWeek(d.week) + '</span>' +
+      '<button class="icon-btn" data-action="suggest-close">' + icon('x', 'sm') + '</button></div>' +
+      d.candidates.map(c => '<button class="opt" data-action="suggest-pick" data-email="' + esc(c.email) + '">' + avatar(c.email) +
+        '<div style="flex:1;min-width:0"><b>' + esc(c.name) + '</b> <span class="faint">· ' + (c.free > 0 ? fmtNum(c.free) + ' h frei' : 'ausgelastet') + '</span>' +
+        '<small>' + esc(c.reasons.join(' · ')) + '</small></div>' +
+        (t.assignees.indexOf(c.email) >= 0 ? '<span class="tag c-green">zugewiesen</span>' : '<span class="btn sm outline">Zuweisen</span>') + '</button>').join('') + '</div>';
+  }
+  if (S.breakdown && S.breakdown.taskId === t.id) {
+    const b = S.breakdown.data;
+    smart += '<div class="suggest"><div class="sh"><span>Vorschlag für Teilaufgaben</span><button class="icon-btn" data-action="breakdown-close">' + icon('x', 'sm') + '</button></div>' +
+      (b.configured ? '<form data-on-submit="breakdown">' + b.subtasks.map((s, i) =>
+        '<label class="opt"><input type="checkbox" name="pick" value="' + i + '" checked><span style="flex:1">' + esc(s.title) + '</span><span class="faint">' + esc(fmtHours(s.estimate)) + '</span></label>').join('') +
+        '<div style="padding:6px"><button class="btn sm primary" type="submit">Übernehmen</button></div></form>'
+        : '<div class="notice" style="margin:4px">' + esc(b.hint) + '</div>') + '</div>';
+  }
+
+  const comments = S.comments && S.comments.taskId === t.id ? S.comments.list : null;
+  el.innerHTML =
+    '<div class="peek-top">' +
+    '<button class="icon-btn" data-action="close-peek" title="Schließen (Esc)">' + icon('x') + '</button>' +
+    '<button class="icon-btn" data-action="peek-full" title="' + (S.peekFull ? 'Als Seitenleiste' : 'Ganze Seite') + '">' + icon(S.peekFull ? 'shrink' : 'expand') + '</button>' +
+    (parent ? '<button class="btn sm" data-action="open-task" data-id="' + esc(parent.id) + '">' + icon('left', 'sm') + esc(parent.title) + '</button>' : '') +
+    '<div class="spacer"></div>' +
+    '<button class="btn sm" data-action="toggle-done" data-id="' + esc(t.id) + '">' + (isDone(t) ? icon('repeat', 'sm') + 'Wieder öffnen' : icon('check', 'sm') + 'Erledigt') + '</button>' +
+    '<button class="icon-btn" data-action="peek-more" title="Mehr">' + icon('more') + '</button></div>' +
+    '<div class="peek-scroll"><div class="peek-body">' +
+    '<textarea class="peek-title" rows="1" data-keep="title" data-on-input="peek-title" placeholder="Ohne Titel">' + esc(t.title === 'Ohne Titel' ? '' : t.title) + '</textarea>' +
+    '<div class="props">' + props + '</div>' + smart +
+    '<div class="divider"></div>' +
+    '<textarea class="desc" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
+    '<div class="section-label">' + icon('sub', 'sm') + 'Unteraufgaben' + (subs.length ? ' <span class="faint">' + subs.filter(isDone).length + '/' + subs.length + '</span>' : '') + '</div>' +
+    subs.map(s => '<div class="subtask"><span class="check' + (isDone(s) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(s.id) + '"></span>' +
+      '<span class="t' + (isDone(s) ? ' done' : '') + '" data-action="open-task" data-id="' + esc(s.id) + '">' + esc(s.title) + '</span>' +
+      (s.assignees.length ? avatars(s.assignees, 2) : '') + dueTag(s) + '</div>').join('') +
+    '<div class="inline-add">' + icon('plus', 'sm faint') + '<input data-keep="sub" data-on-keydown="add-subtask" placeholder="Unteraufgabe hinzufügen und Enter drücken"></div>' +
+    '<div class="section-label">' + icon('msg', 'sm') + 'Kommentare</div>' +
+    (comments === null ? '<div class="skeleton" style="width:60%"></div>' : comments.map(c =>
+      '<div class="comment">' + avatar(c.author) + '<div class="body"><div class="head"><b>' + esc(user(c.author).name) + '</b><span class="muted">' + esc(timeAgo(c.createdAt)) + '</span></div>' +
+      '<div class="text">' + esc(c.body) + '</div></div></div>').join('')) +
+    '<form class="comment-form" data-on-submit="comment">' + avatar(S.me.email) +
+    '<textarea class="textarea" name="body" data-keep="comment" data-on-keydown="comment-key" placeholder="Kommentar schreiben…" rows="1"></textarea>' +
+    '<button class="btn outline" type="submit">Senden</button></form>' +
+    '<div class="meta-foot">Erstellt von ' + esc(user(t.createdBy).name) + ' · ' + esc(timeAgo(t.createdAt)) +
+    (t.updatedAt && t.updatedAt !== t.createdAt ? ' · zuletzt geändert ' + esc(timeAgo(t.updatedAt)) : '') +
+    (t.completedAt ? ' · erledigt ' + esc(timeAgo(t.completedAt)) : '') + '</div>' +
+    '</div></div>';
+  $$('#peek textarea').forEach(autosize);
+  $('.peek-scroll', el).scrollTop = scroll;
+  if (caret) {
+    const n = $('[data-keep="' + caret[0] + '"]', el);
+    if (n) { n.focus(); try { n.setSelectionRange(caret[1], caret[1]); } catch (e) { /* input type */ } }
+  }
+}
+function autosize(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 'px';
+}
+
+/* ----- inline editing (saves without re-rendering the peek) ----- */
+const pendingSave = {};
+function saveQuiet(id, patch) {
+  const t = task(id);
+  if (!t) return;
+  Object.assign(t, patch);
+  pendingSave[id] = Object.assign(pendingSave[id] || {}, patch);
+  flushQuiet(id);
+}
+const flushQuiet = debounce(id => {
+  const patch = pendingSave[id];
+  delete pendingSave[id];
+  if (!patch) return;
+  call('tasks.save', Object.assign({ id: id }, patch))
+    .then(changed => { applyTasks(changed); render({ peek: false }); })
+    .catch(fail);
+}, 600);
+ON.input['peek-title'] = el => {
+  autosize(el);
+  saveQuiet(S.peekId, { title: el.value });
+  const card = $('[data-drag-id="' + S.peekId + '"] .card-title span');
+  if (card) card.textContent = el.value;
+};
+ON.input['peek-desc'] = el => { autosize(el); saveQuiet(S.peekId, { description: el.value }); };
+
+ON.keydown['add-subtask'] = (el, e) => {
+  if (e.key !== 'Enter' || !el.value.trim()) return;
+  e.preventDefault();
+  const parent = task(S.peekId);
+  const title = el.value.trim();
+  el.value = '';
+  call('tasks.save', {
+    title: title, parentId: parent.id, projectId: parent.projectId, teams: parent.teams,
+    assignees: parent.assignees, dueDate: parent.dueDate,
+  }).then(changed => {
+    applyTasks(changed);
+    render({ peek: false });
+    renderPeek();
+    const n = $('[data-keep="sub"]');
+    if (n) n.focus();
+  }).catch(fail);
+};
+
+ON.keydown['comment-key'] = (el, e) => {
+  autosize(el);
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ON.submit.comment(el.form); }
+};
+ON.submit.comment = form => {
+  const body = form.body.value.trim();
+  if (!body) return;
+  const id = S.peekId;
+  form.body.value = '';
+  call('comments.add', { taskId: id, body: body }).then(c => {
+    if (S.comments && S.comments.taskId === id) S.comments.list.push(c);
+    renderPeek();
+  }).catch(fail);
+};
+
+/* ----- more menu ----- */
+A['peek-more'] = el => {
+  const t = task(S.peekId);
+  openMenu(el, [
+    { value: 'dup', html: icon('layers', 'sm') + '<span>Duplizieren</span>', search: '' },
+    { value: 'sub', html: icon('sub', 'sm') + '<span>Zu Unteraufgabe von…</span>', search: '' },
+    { value: 'del', html: '<span style="color:var(--danger);display:flex;gap:8px;align-items:center">' + icon('trash', 'sm') + 'Löschen</span>', search: '' },
+  ], {
+    search: false,
+    onPick: v => {
+      if (v === 'dup') {
+        const copy = {};
+        ['title', 'description', 'status', 'priority', 'projectId', 'teams', 'assignees', 'tags', 'startDate', 'dueDate', 'estimate', 'parentId', 'recurrence']
+          .forEach(k => { copy[k] = t[k]; });
+        copy.title = t.title + ' (Kopie)';
+        createTask(copy, { open: true });
+      }
+      if (v === 'sub') {
+        openMenu(el, [{ value: '', html: '<span class="faint">Keine (oberste Ebene)</span>', search: 'keine' }]
+          .concat(S.tasks.filter(x => x.id !== t.id && x.parentId !== t.id && !x.parentId).map(x => ({ value: x.id, html: '<span>' + esc(x.title) + '</span>', search: x.title }))),
+        { selected: [t.parentId], onPick: p => patchTask(t.id, { parentId: p }) });
+      }
+      if (v === 'del') {
+        confirmDelete('„' + t.title + '“' + (subtasks(t.id).length ? ' und ihre Unteraufgaben' : '') + ' löschen?', () =>
+          call('tasks.remove', { id: t.id }).then(ids => { dropTasks(ids); closePeek(); toast('Gelöscht'); }));
+      }
+    },
+  });
+};
+
+/* ----- smart helpers ----- */
+A['ai-suggest'] = () => {
+  const id = S.peekId;
+  call('ai.suggestAssignee', { id: id }).then(d => { S.suggest = { taskId: id, data: d }; renderPeek(); }).catch(fail);
+};
+A['suggest-close'] = () => { S.suggest = null; renderPeek(); };
+A['suggest-pick'] = el => {
+  const t = task(S.peekId);
+  if (t.assignees.indexOf(el.dataset.email) >= 0) return;
+  patchTask(t.id, { assignees: t.assignees.concat([el.dataset.email]) });
+};
+A['ai-breakdown'] = () => {
+  const id = S.peekId;
+  if (!S.ai.enabled) {
+    S.breakdown = { taskId: id, data: { configured: false, hint: 'Die automatische Zerlegung nutzt Vertex AI. Sobald VERTEX_API_KEY in den Skripteigenschaften hinterlegt ist, schlägt Gemini hier Teilaufgaben mit Aufwand vor.' } };
+    renderPeek();
+    return;
+  }
+  toast('Gemini denkt nach…');
+  call('ai.breakdown', { id: id }).then(d => { S.breakdown = { taskId: id, data: d }; renderPeek(); }).catch(fail);
+};
+A['breakdown-close'] = () => { S.breakdown = null; renderPeek(); };
+ON.submit.breakdown = form => {
+  const parent = task(S.peekId);
+  const picks = formValues(form).pick || [];
+  const subs = S.breakdown.data.subtasks;
+  let chain = Promise.resolve();
+  picks.forEach(i => {
+    const s = subs[Number(i)];
+    chain = chain.then(() => call('tasks.save', {
+      title: s.title, estimate: s.estimate, parentId: parent.id, projectId: parent.projectId,
+      teams: parent.teams, assignees: parent.assignees,
+    }).then(applyTasks));
+  });
+  chain.then(() => { S.breakdown = null; toast(picks.length + ' Unteraufgaben angelegt'); render(); }).catch(fail);
+};
+</script>

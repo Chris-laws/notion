@@ -1,0 +1,488 @@
+<script>
+'use strict';
+/* ==========================================================================
+   Core: state, server calls, helpers, routing, sidebar, top bar.
+   Rendering is plain template strings; clicks are delegated through
+   data-action attributes to the handlers in the A object.
+   ========================================================================== */
+
+const S = {
+  appName: 'Taskraum',
+  me: null,
+  users: [],
+  teams: [],
+  projects: [],
+  tasks: [],
+  companyHolidays: [],
+  ai: { enabled: false },
+  route: { view: 'home' },
+  peekId: null,
+  peekFull: false,
+  cal: { cursor: null, teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {} },
+  cap: { teamId: '', from: null, weeks: 8, data: null, loading: false },
+  briefing: null,
+  collapsed: {},
+  busy: 0,
+};
+const A = {}; // click actions: A[name](el, event)
+const ON = { submit: {}, input: {}, change: {}, keydown: {} };
+
+/* ---------------- helpers ---------------- */
+const $ = (sel, root) => (root || document).querySelector(sel);
+const $$ = (sel, root) => Array.prototype.slice.call((root || document).querySelectorAll(sel));
+function esc(s) {
+  return String(s === undefined || s === null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function attr(obj) { return esc(JSON.stringify(obj)); }
+function debounce(fn, ms) {
+  let t;
+  return function () { const args = arguments; clearTimeout(t); t = setTimeout(() => fn.apply(null, args), ms); };
+}
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('tr:' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('tr:' + k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
+};
+function localToday() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const TODAY = () => localToday();
+const MONTHS = ['Jan', 'Feb', 'März', 'Apr', 'Mai', 'Juni', 'Juli', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const MONTHS_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const DOW = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const DOW_LONG = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+
+function fmtDate(iso, opts) {
+  if (!iso) return '';
+  const t = TODAY();
+  const diff = Shared.diffDays(t, iso);
+  if (!(opts && opts.absolute)) {
+    if (diff === 0) return 'Heute';
+    if (diff === 1) return 'Morgen';
+    if (diff === -1) return 'Gestern';
+    if (diff > 1 && diff < 7) return DOW_LONG[Shared.weekday(iso)];
+  }
+  const [y, m, d] = iso.split('-').map(Number);
+  return d + '. ' + MONTHS[m - 1] + (String(y) !== t.slice(0, 4) ? ' ' + y : '');
+}
+function fmtRange(a, b) {
+  if (!b || a === b) return fmtDate(a, { absolute: true });
+  return fmtDate(a, { absolute: true }) + ' – ' + fmtDate(b, { absolute: true });
+}
+function fmtHours(h) {
+  h = Number(h) || 0;
+  if (!h) return '';
+  if (h < 1) return Math.round(h * 60) + ' min';
+  return (Math.round(h * 10) / 10).toString().replace('.', ',') + ' h';
+}
+function timeAgo(iso) {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return 'gerade eben';
+  if (s < 3600) return 'vor ' + Math.floor(s / 60) + ' min';
+  if (s < 86400) return 'vor ' + Math.floor(s / 3600) + ' h';
+  return fmtDate(iso.slice(0, 10), { absolute: true });
+}
+function flag(cc) {
+  if (!cc || cc.length !== 2) return '';
+  return String.fromCodePoint.apply(null, cc.toUpperCase().split('').map(c => 127397 + c.charCodeAt(0)));
+}
+
+/* ---------------- lookups ---------------- */
+const user = email => S.users.find(u => u.email === email) || { email: email, name: (email || '?').split('@')[0], color: '#9b9a97' };
+const team = id => S.teams.find(t => t.id === id);
+const project = id => S.projects.find(p => p.id === id);
+const task = id => S.tasks.find(t => t.id === id);
+const statusOf = k => Shared.STATUSES.find(s => s.key === k) || Shared.STATUSES[1];
+const prioOf = k => Shared.PRIORITIES.find(p => p.key === k);
+const isDone = t => t.status === 'done';
+const isMine = t => t.assignees.indexOf(S.me.email) >= 0 || (!t.assignees.length && t.createdBy === S.me.email);
+const myTeams = () => S.teams.filter(t => t.lead === S.me.email || t.members.indexOf(S.me.email) >= 0);
+const teamMembers = t => [t.lead].concat(t.members).filter((e, i, a) => e && a.indexOf(e) === i);
+const projectMembers = p => (p.members && p.members.length ? p.members : (team(p.teamId) ? teamMembers(team(p.teamId)) : []));
+const subtasks = id => S.tasks.filter(t => t.parentId === id);
+const allTags = () => {
+  const set = {};
+  S.tasks.forEach(t => t.tags.forEach(x => { set[x] = true; }));
+  return Object.keys(set).sort((a, b) => a.localeCompare(b));
+};
+const TAG_COLORS = ['blue', 'green', 'purple', 'orange', 'pink', 'yellow', 'brown', 'red', 'gray'];
+function tagColor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return TAG_COLORS[h % TAG_COLORS.length];
+}
+
+/* ---------------- icons (Lucide, ISC licence) ---------------- */
+const ICONS = {
+  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  checksq: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  board: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v12"/>',
+  table: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  gauge: '<path d="M12 14 15.5 8.5"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  left: '<path d="m15 18-6-6 6-6"/>',
+  right: '<path d="m9 18 6-6-6-6"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  flag: '<path d="M4 22V4"/><path d="M4 4h13l-2 4 2 4H4"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  circle: '<circle cx="12" cy="12" r="9"/>',
+  status: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+  shrink: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
+  sort: '<path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+  text: '<path d="M4 7V5h16v2M9 19h6M12 5v14"/>',
+  sub: '<path d="M6 3v12a3 3 0 0 0 3 3h9"/><path d="m15 15 3 3-3 3"/>',
+  msg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+  plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+  hourglass: '<path d="M5 22h14M5 2h14M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2"/>',
+  open: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+};
+function icon(name, cls) {
+  return '<svg class="i ' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
+}
+
+/* ---------------- small renderers ---------------- */
+function initials(name) {
+  const p = String(name || '?').trim().split(/\s+/);
+  return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+}
+function avatar(email, cls) {
+  const u = user(email);
+  return '<span class="avatar ' + (cls || '') + '" style="background:' + esc(u.color || '#9b9a97') + '" title="' + esc(u.name) + '">' + esc(initials(u.name)) + '</span>';
+}
+function avatars(emails, max) {
+  max = max || 3;
+  const list = emails.slice(0, max).map(e => avatar(e)).join('');
+  const more = emails.length > max ? '<span class="avatar" style="background:var(--text-3)">+' + (emails.length - max) + '</span>' : '';
+  return '<span class="avatars">' + list + more + '</span>';
+}
+function person(email) {
+  return '<span class="person">' + avatar(email) + '<span>' + esc(user(email).name) + '</span></span>';
+}
+function statusTag(key) {
+  const s = statusOf(key);
+  return '<span class="tag c-' + s.color + '"><span class="dot"></span>' + esc(s.label) + '</span>';
+}
+function prioTag(key, short) {
+  const p = prioOf(key);
+  if (!p) return '';
+  const on = { urgent: 3, high: 3, medium: 2, low: 1 }[p.key];
+  const bars = key === 'urgent'
+    ? '<svg class="i sm" viewBox="0 0 24 24"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg>'
+    : '<span class="prio-bars">' + [1, 2, 3].map(i => '<i class="' + (i <= on ? 'on' : '') + '"></i>').join('') + '</span>';
+  return '<span class="prio prio-' + p.key + '">' + bars + (short ? '' : '<span>' + esc(p.label) + '</span>') + '</span>';
+}
+function dueTag(t) {
+  if (!t.dueDate) return '';
+  const today = TODAY();
+  const cls = !isDone(t) && t.dueDate < today ? 'overdue' : t.dueDate === today ? 'today' : '';
+  return '<span class="date ' + cls + '">' + icon('calendar', 'sm') + esc(fmtDate(t.dueDate)) + '</span>';
+}
+function tagChip(name) {
+  return '<span class="tag c-' + tagColor(name) + '">' + esc(name) + '</span>';
+}
+function projectChip(p) {
+  if (!p) return '';
+  return '<span class="nowrap">' + esc(p.icon || '📁') + ' ' + esc(p.name) + '</span>';
+}
+function teamChip(t) {
+  if (!t) return '';
+  return '<span class="tag c-' + esc(t.color || 'gray') + '">' + esc(t.icon || '') + ' ' + esc(t.name) + '</span>';
+}
+
+/* ---------------- server ---------------- */
+function call(method, payload) {
+  S.busy++;
+  syncDot();
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(raw => {
+        S.busy--; syncDot();
+        let res;
+        try { res = JSON.parse(raw); } catch (e) { return reject(new Error('Ungültige Antwort vom Server')); }
+        if (res.ok) resolve(res.data); else reject(new Error(res.error));
+      })
+      .withFailureHandler(err => { S.busy--; syncDot(); reject(err instanceof Error ? err : new Error(String(err))); })
+      .api(method, JSON.stringify(payload || {}));
+  });
+}
+function syncDot() {
+  const d = $('#sync');
+  if (d) d.classList.toggle('busy', S.busy > 0);
+}
+function fail(err) {
+  console.error(err);
+  toast(err && err.message ? err.message : String(err), { error: true });
+}
+
+/* ---------------- task data ---------------- */
+function applyTasks(list) {
+  (list || []).forEach(t => {
+    const i = S.tasks.findIndex(x => x.id === t.id);
+    if (i >= 0) S.tasks[i] = t; else S.tasks.push(t);
+  });
+}
+function dropTasks(ids) {
+  S.tasks = S.tasks.filter(t => ids.indexOf(t.id) < 0);
+}
+/** Optimistic update; reverts on error. */
+function patchTask(id, patch, opts) {
+  const t = task(id);
+  if (!t) return Promise.resolve();
+  const before = Object.assign({}, t);
+  Object.assign(t, patch);
+  if (!(opts && opts.silent)) render({ peek: !(opts && opts.keepPeek) });
+  return call('tasks.save', Object.assign({ id: id }, patch))
+    .then(changed => {
+      applyTasks(changed);
+      if (changed.length > 1) toast('Nächste Wiederholung angelegt: ' + fmtDate(changed[1].dueDate, { absolute: true }));
+      if (!(opts && opts.silent)) render({ peek: !(opts && opts.keepPeek) });
+      return changed;
+    })
+    .catch(err => { Object.assign(t, before); render(); fail(err); });
+}
+function createTask(fields, opts) {
+  return call('tasks.save', fields).then(changed => {
+    applyTasks(changed);
+    if (opts && opts.open) openPeek(changed[0].id);
+    else render();
+    return changed[0];
+  }).catch(fail);
+}
+/** Defaults for "+ Neu" depending on where the user is. */
+function contextDefaults(extra) {
+  const r = S.route;
+  const f = {};
+  if (r.view === 'project') f.projectId = r.id;
+  if (r.view === 'team') f.teams = [r.id];
+  if (r.view === 'home') f.assignees = [S.me.email];
+  return Object.assign(f, extra || {});
+}
+
+/* ---------------- routing ---------------- */
+function go(view, id, opts) {
+  S.route = { view: view, id: id || null };
+  if (!(opts && opts.keepPeek)) S.peekId = null;
+  store.set('route', S.route);
+  $('#app').classList.remove('side-open');
+  try {
+    if (google.script.history) google.script.history.push(S.route, { view: view, id: id || '' });
+  } catch (e) { /* preview */ }
+  render({ resetScroll: true });
+}
+A.nav = el => go(el.dataset.view, el.dataset.id);
+A['sidebar-open'] = () => $('#app').classList.add('side-open');
+A['sidebar-close'] = () => $('#app').classList.remove('side-open');
+
+/* ---------------- rendering ---------------- */
+function render(opts) {
+  opts = opts || {};
+  if (!S.me) return;
+  const view = $('#view');
+  const top = opts.resetScroll ? 0 : view.scrollTop;
+  const board = $('.board', view);
+  const left = board ? board.scrollLeft : 0;
+  renderSidebar();
+  renderTopbar();
+  const drafts = captureForms(view);
+  const html = Views.render();
+  if (html !== null) view.innerHTML = html;
+  restoreForms(view, drafts);
+  view.scrollTop = top;
+  const nb = $('.board', view);
+  if (nb && !opts.resetScroll) nb.scrollLeft = left;
+  if (opts.peek !== false) renderPeek();
+  Views.after && Views.after();
+}
+
+/** Keeps what the user typed into a form when data arriving in the background re-renders the page. */
+function captureForms(root) {
+  return $$('form[data-touched]', root).map(f => ({
+    key: f.getAttribute('data-on-submit'),
+    focus: document.activeElement && f.contains(document.activeElement) ? document.activeElement.name : null,
+    fields: $$('[name]', f).map(el => [el.name, el.type === 'checkbox' || el.type === 'radio' ? el.value : null, el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value]),
+  }));
+}
+function restoreForms(root, drafts) {
+  drafts.forEach(d => {
+    const f = $('form[data-on-submit="' + d.key + '"]', root);
+    if (!f) return;
+    f.setAttribute('data-touched', '1');
+    d.fields.forEach(x => {
+      const el = x[1] === null ? $('[name="' + x[0] + '"]', f) : $('[name="' + x[0] + '"][value="' + x[1] + '"]', f);
+      if (!el) return;
+      if (x[1] === null) el.value = x[2]; else el.checked = x[2];
+    });
+    if (d.focus && f.elements[d.focus] && f.elements[d.focus].focus) f.elements[d.focus].focus();
+  });
+}
+document.addEventListener('input', e => {
+  const f = e.target.closest && e.target.closest('#view form');
+  if (f) f.setAttribute('data-touched', '1');
+});
+
+function renderSidebar() {
+  const r = S.route;
+  const active = (v, id) => (r.view === v && (id === undefined || r.id === id) ? ' active' : '');
+  const mineOpen = S.tasks.filter(t => isMine(t) && !isDone(t)).length;
+  const navItem = (view, ic, label, extra, id) =>
+    '<button class="nav-item' + active(view, id) + '" data-action="nav" data-view="' + view + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + '>' +
+    ic + '<span class="nav-label">' + label + '</span>' + (extra || '') + '</button>';
+
+  const teamsHtml = S.teams.slice().sort((a, b) => a.name.localeCompare(b.name)).map(t => {
+    const collapsed = S.collapsed[t.id];
+    const projects = S.projects.filter(p => p.teamId === t.id && p.status !== 'done');
+    const mine = teamMembers(t).indexOf(S.me.email) >= 0;
+    return '<div class="' + (collapsed ? 'collapsed' : '') + '">' +
+      '<div style="display:flex;align-items:center">' +
+      '<button class="icon-btn" style="width:20px" data-action="toggle-team" data-id="' + esc(t.id) + '" aria-label="Ein-/ausklappen">' + icon('chevron', 'sm chev') + '</button>' +
+      navItem('team', '<span class="emoji">' + esc(t.icon || '👥') + '</span>', esc(t.name) + (mine ? '' : ' <span class="faint">·</span>'), '', t.id) +
+      '</div>' +
+      (collapsed ? '' : projects.map(p => '<div class="nav-sub">' +
+        navItem('project', '<span class="emoji">' + esc(p.icon || '📁') + '</span>', esc(p.name), '', p.id) + '</div>').join('') +
+        '<div class="nav-sub"><button class="nav-item faint" data-action="project-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + '<span class="nav-label">Projekt</span></button></div>') +
+      '</div>';
+  }).join('');
+
+  $('#sidebar').innerHTML =
+    '<div class="side-head"><div class="ws-mark">' + esc(S.appName.charAt(0)) + '</div><div class="ws-name">' + esc(S.appName) + '</div>' +
+    '<span id="sync" class="sync-dot" title="Synchronisiert"></span></div>' +
+    '<div class="side-scroll">' +
+    '<button class="side-search" data-action="palette">' + icon('search') + '<span>Suchen & erstellen</span><span class="kbd">Strg K</span></button>' +
+    navItem('home', icon('home'), 'Meine Aufgaben', mineOpen ? '<span class="count">' + mineOpen + '</span>' : '') +
+    navItem('all', icon('inbox'), 'Alle Aufgaben') +
+    navItem('calendar', icon('calendar'), 'Teamkalender') +
+    navItem('capacity', icon('gauge'), 'Kapazität') +
+    '<div class="side-section"><span>Teams</span><button class="icon-btn" data-action="team-new" title="Neues Team">' + icon('plus', 'sm') + '</button></div>' +
+    (teamsHtml || '<div class="faint" style="padding:4px 10px;font-size:13px">Noch keine Teams.</div>') +
+    '</div>' +
+    '<div class="side-foot"><button class="me-row" data-action="nav" data-view="settings">' + avatar(S.me.email, 'lg') +
+    '<div class="me-meta"><div style="font-weight:600">' + esc(S.me.name) + '</div><div class="faint" style="font-size:12px">' +
+    esc(flag(S.me.country) + ' ' + (S.me.region || S.me.country || '')) + ' · Einstellungen</div></div></button></div>';
+  syncDot();
+}
+A['toggle-team'] = el => { S.collapsed[el.dataset.id] = !S.collapsed[el.dataset.id]; store.set('collapsed', S.collapsed); renderSidebar(); };
+
+function renderTopbar() {
+  const r = S.route;
+  const crumbs = [];
+  if (r.view === 'home') crumbs.push(['Meine Aufgaben']);
+  if (r.view === 'all') crumbs.push(['Alle Aufgaben']);
+  if (r.view === 'calendar') crumbs.push(['Teamkalender']);
+  if (r.view === 'capacity') crumbs.push(['Kapazität']);
+  if (r.view === 'settings') crumbs.push(['Einstellungen']);
+  if (r.view === 'team' && team(r.id)) crumbs.push([(team(r.id).icon || '') + ' ' + team(r.id).name]);
+  if (r.view === 'project' && project(r.id)) {
+    const p = project(r.id);
+    const t = team(p.teamId);
+    if (t) crumbs.push([(t.icon || '') + ' ' + t.name, 'team', t.id]);
+    crumbs.push([(p.icon || '') + ' ' + p.name]);
+  }
+  $('#topbar').innerHTML =
+    '<button class="icon-btn menu-btn" data-action="sidebar-open" aria-label="Menü">' + icon('menu') + '</button>' +
+    '<nav class="crumbs">' + crumbs.map((c, i) => (i ? '<span class="sep">/</span>' : '') +
+      (c[1] ? '<button data-action="nav" data-view="' + c[1] + '" data-id="' + esc(c[2]) + '">' + esc(c[0]) + '</button>'
+        : '<button class="current">' + esc(c[0]) + '</button>')).join('') + '</nav>' +
+    '<div class="spacer"></div>' +
+    (S.ai.enabled ? '<span class="tag c-purple" title="Vertex AI aktiv">' + icon('sparkle', 'sm') + 'KI aktiv</span>' : '') +
+    '<button class="btn" data-action="palette" title="Suchen (Strg+K)">' + icon('search') + '</button>' +
+    '<button class="btn primary" data-action="new-task">' + icon('plus') + 'Neu</button>';
+}
+
+/* ---------------- global events ---------------- */
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action]');
+  if (!el || el.disabled) return;
+  const fn = A[el.dataset.action];
+  if (fn) {
+    if (el.tagName === 'A' || el.tagName === 'BUTTON') e.preventDefault();
+    fn(el, e);
+  }
+});
+['submit', 'input', 'change', 'keydown'].forEach(type => {
+  document.addEventListener(type, e => {
+    const el = e.target.closest('[data-on-' + type + ']');
+    if (!el) return;
+    const fn = ON[type][el.getAttribute('data-on-' + type)];
+    if (fn) {
+      if (type === 'submit') e.preventDefault();
+      fn(el, e);
+    }
+  });
+});
+document.addEventListener('keydown', e => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
+  if (e.key === 'Escape') {
+    if (closeTopLayer()) { e.preventDefault(); return; }
+    if (S.peekId && !typing) { closePeek(); return; }
+  }
+  if (typing) return;
+  if (e.key === 'c' || e.key === 'n') { e.preventDefault(); openPalette(); }
+  if (e.key === '/') { e.preventDefault(); openPalette(); }
+});
+
+/* ---------------- background sync ---------------- */
+function editing() {
+  const a = document.activeElement;
+  return (a && /INPUT|TEXTAREA/.test(a.tagName)) || $('#popover-root').children.length || $('#modal-root').children.length || dragState.id;
+}
+function refresh() {
+  if (document.visibilityState !== 'visible' || editing() || S.busy) return;
+  call('tasks.list').then(list => {
+    if (editing()) return;
+    S.tasks = list;
+    render();
+  }).catch(() => { /* next round */ });
+}
+setInterval(refresh, 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
+
+/* ---------------- start ---------------- */
+function boot() {
+  S.collapsed = store.get('collapsed', {});
+  call('bootstrap').then(d => {
+    Object.assign(S, d);
+    S.appName = d.appName || S.appName;
+    document.title = S.appName;
+    $('#app').classList.remove('is-loading');
+    const start = params => {
+      const last = store.get('route', null);
+      if (params.view) S.route = { view: params.view, id: params.id || null };
+      else if (last && last.view && (!last.id || team(last.id) || project(last.id))) S.route = last;
+      render({ resetScroll: true });
+      if (params.task && task(params.task)) openPeek(params.task);
+    };
+    try {
+      google.script.url.getLocation(loc => start(loc.parameter || {}));
+    } catch (e) { start({}); }
+    if (google.script.history) google.script.history.setChangeHandler(ev => {
+      if (ev.state && ev.state.view) { S.route = ev.state; render({ resetScroll: true }); }
+    });
+  }).catch(err => {
+    $('#view').innerHTML = '<div class="page"><div class="empty"><div class="big">🔒</div><h2>App konnte nicht geladen werden</h2>' +
+      '<p class="muted">' + esc(err.message) + '</p></div></div>';
+  });
+}
+window.addEventListener('load', boot);
+</script>

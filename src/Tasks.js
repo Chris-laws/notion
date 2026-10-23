@@ -1,0 +1,169 @@
+/** Tasks, sub-tasks and comments. */
+const Tasks = {
+  list() {
+    const me = Auth.currentUser();
+    const ctx = Access.context(me);
+    return Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx));
+  },
+
+  /**
+   * Creates or updates a task. Only the fields present in the payload are
+   * changed. Returns every task that changed (a finished recurring task
+   * creates its next occurrence).
+   */
+  save(p) {
+    const me = Auth.currentUser();
+    const ctx = Access.context(me);
+    const fields = Tasks.sanitize_(p);
+    const now = new Date().toISOString();
+    return Db.tx(() => {
+      Users.ensure(fields.assignees);
+      if (p.id) {
+        const prev = Db.get('Tasks', p.id);
+        if (!prev) throw new Error('Aufgabe nicht gefunden – evtl. wurde sie gelöscht.');
+        if (!Access.canSeeTask(prev, ctx)) throw new Error('Keine Berechtigung für diese Aufgabe.');
+        fields.updatedAt = now;
+        if (fields.status && fields.status !== prev.status) {
+          fields.completedAt = fields.status === 'done' ? now : '';
+        }
+        const next = Db.update('Tasks', p.id, fields);
+        const changed = [next];
+        if (prev.status !== 'done' && next.status === 'done' && next.recurrence) {
+          changed.push(Tasks.spawnNext_(next, me.email));
+        }
+        return changed;
+      }
+      if (fields.parentId && !Db.get('Tasks', fields.parentId)) throw new Error('Übergeordnete Aufgabe fehlt.');
+      const task = Object.assign({
+        id: Util.uid('t_'),
+        title: 'Ohne Titel',
+        description: '',
+        status: 'todo',
+        priority: '',
+        projectId: '',
+        teams: [],
+        assignees: [],
+        tags: [],
+        startDate: '',
+        dueDate: '',
+        estimate: 0,
+        parentId: '',
+        recurrence: '',
+        sort: Date.now(),
+        createdBy: me.email,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: '',
+      }, fields);
+      if (task.status === 'done') task.completedAt = now;
+      return [Db.insert('Tasks', task)];
+    });
+  },
+
+  spawnNext_(t, email) {
+    const due = Shared.nextOccurrence(t.dueDate || Util.today(), t.recurrence);
+    const shift = t.dueDate ? Shared.diffDays(t.dueDate, due) : 0;
+    const now = new Date().toISOString();
+    return Db.insert('Tasks', Object.assign({}, t, {
+      id: Util.uid('t_'),
+      status: 'todo',
+      dueDate: due,
+      startDate: t.startDate ? Shared.addDays(t.startDate, shift) : '',
+      createdBy: email,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: '',
+      sort: Date.now(),
+    }));
+  },
+
+  /** Board drag & drop: several tasks at once (new order / column). */
+  move(p) {
+    const items = (p.items || []).slice(0, 200);
+    let changed = [];
+    Db.tx(() => {
+      items.forEach(item => { changed = changed.concat(Tasks.save(item)); });
+    });
+    return changed;
+  },
+
+  remove(id) {
+    const me = Auth.currentUser();
+    const ctx = Access.context(me);
+    return Db.tx(() => {
+      const t = Db.get('Tasks', id);
+      if (!t) return [];
+      if (!Access.canDeleteTask(t, ctx)) throw new Error('Löschen dürfen nur die erstellende Person, Team-Leads und Admins.');
+      const removed = [];
+      const drop = taskId => {
+        Db.all('Tasks').filter(c => c.parentId === taskId).forEach(c => drop(c.id));
+        Db.all('Comments').filter(c => c.taskId === taskId).forEach(c => Db.remove('Comments', c.id));
+        Db.remove('Tasks', taskId);
+        removed.push(taskId);
+      };
+      drop(id);
+      return removed;
+    });
+  },
+
+  comments(taskId) {
+    const me = Auth.currentUser();
+    const t = Db.get('Tasks', taskId);
+    if (!t || !Access.canSeeTask(t, Access.context(me))) throw new Error('Keine Berechtigung.');
+    return Db.all('Comments').filter(c => c.taskId === taskId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  },
+
+  addComment(p) {
+    const me = Auth.currentUser();
+    const t = Db.get('Tasks', p.taskId);
+    if (!t || !Access.canSeeTask(t, Access.context(me))) throw new Error('Keine Berechtigung.');
+    const body = String(p.body || '').trim().slice(0, 5000);
+    if (!body) throw new Error('Kommentar ist leer.');
+    return Db.insert('Comments', {
+      id: Util.uid('c_'), taskId: t.id, author: me.email, body: body, createdAt: new Date().toISOString(),
+    });
+  },
+
+  sanitize_(p) {
+    const f = {};
+    const has = k => Object.prototype.hasOwnProperty.call(p, k);
+    if (has('title')) f.title = String(p.title || '').replace(/\s+/g, ' ').trim().slice(0, 300) || 'Ohne Titel';
+    if (has('description')) f.description = String(p.description || '').slice(0, 20000);
+    if (has('status')) {
+      if (!Shared.STATUSES.some(s => s.key === p.status)) throw new Error('Unbekannter Status.');
+      f.status = p.status;
+    }
+    if (has('priority')) f.priority = Shared.PRIORITIES.some(s => s.key === p.priority) ? p.priority : '';
+    if (has('projectId')) {
+      if (p.projectId && !Db.get('Projects', p.projectId)) throw new Error('Projekt nicht gefunden.');
+      f.projectId = p.projectId || '';
+    }
+    if (has('teams')) {
+      f.teams = (p.teams || []).filter((id, i, a) => a.indexOf(id) === i && Db.get('Teams', id));
+    }
+    if (has('assignees')) f.assignees = cleanEmails_(p.assignees);
+    if (has('tags')) {
+      f.tags = (p.tags || []).map(s => String(s).trim().slice(0, 30)).filter(Boolean)
+        .filter((s, i, a) => a.indexOf(s) === i).slice(0, 20);
+    }
+    ['startDate', 'dueDate'].forEach(k => {
+      if (has(k)) f[k] = Shared.isDate(p[k]) ? p[k] : '';
+    });
+    if (has('estimate')) f.estimate = Math.max(0, Math.min(1000, Math.round((Number(p.estimate) || 0) * 100) / 100));
+    if (has('parentId')) f.parentId = p.parentId || '';
+    if (has('recurrence')) f.recurrence = Shared.RECURRENCES.some(r => r.key === p.recurrence) ? p.recurrence : '';
+    if (has('sort')) f.sort = Number(p.sort) || 0;
+    if (f.parentId && f.parentId === p.id) throw new Error('Eine Aufgabe kann nicht ihre eigene Unteraufgabe sein.');
+    return f;
+  },
+};
+
+const Util = {
+  uid(prefix) {
+    return (prefix || '') + Utilities.getUuid().replace(/-/g, '').slice(0, 14);
+  },
+  today() {
+    return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  },
+};

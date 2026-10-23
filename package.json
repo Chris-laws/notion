@@ -1,0 +1,13 @@
+{
+  "name": "taskraum",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Notion-artiges Team-Task-Management mit smartem Kalender als Google Apps Script Web-App",
+  "scripts": {
+    "test": "node dev/test.js",
+    "preview": "node dev/build-preview.js",
+    "push": "clasp push",
+    "deploy": "clasp push && clasp deploy"
+  },
+  "devDependencies": {}
+}

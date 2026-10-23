@@ -1,0 +1,15 @@
+{
+  "timeZone": "Europe/Berlin",
+  "runtimeVersion": "V8",
+  "exceptionLogging": "STACKDRIVER",
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "DOMAIN"
+  },
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/userinfo.email"
+  ]
+}

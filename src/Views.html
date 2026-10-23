@@ -1,0 +1,820 @@
+<script>
+/* ==========================================================================
+   Pages and database layouts (list, board, table, calendar), team calendar,
+   capacity planning, teams, projects and settings.
+   ========================================================================== */
+
+const Views = {
+  render() {
+    const r = S.route;
+    switch (r.view) {
+      case 'home': return homePage();
+      case 'all': return allPage();
+      case 'team': return team(r.id) ? teamPage(team(r.id)) : notFound();
+      case 'project': return project(r.id) ? projectPage(project(r.id)) : notFound();
+      case 'calendar': return calendarPage();
+      case 'capacity': return capacityPage();
+      case 'settings': return settingsPage();
+      default: return homePage();
+    }
+  },
+  after() { bindDrag(); },
+};
+function notFound() {
+  return '<div class="page"><div class="empty"><div class="big">🔍</div>Diese Seite gibt es nicht mehr.<br><br>' +
+    '<button class="btn outline" data-action="nav" data-view="home">Zu meinen Aufgaben</button></div></div>';
+}
+
+/* ---------------- database (task collection) ---------------- */
+const LAYOUTS = [
+  { key: 'list', label: 'Liste', ic: 'list' },
+  { key: 'board', label: 'Board', ic: 'board' },
+  { key: 'table', label: 'Tabelle', ic: 'table' },
+  { key: 'calendar', label: 'Kalender', ic: 'calendar' },
+];
+const GROUPS = [
+  { key: 'status', label: 'Status' }, { key: 'priority', label: 'Priorität' },
+  { key: 'assignee', label: 'Person' }, { key: 'project', label: 'Projekt' },
+];
+function dbKey() { return S.route.view + ':' + (S.route.id || ''); }
+function prefs() {
+  if (!S.db) S.db = store.get('db', {});
+  const k = dbKey();
+  if (!S.db[k]) {
+    S.db[k] = {
+      layout: S.route.view === 'home' ? 'list' : 'board', groupBy: 'status', who: 'all', prio: [],
+      showDone: S.route.view !== 'home', search: '', sort: { key: 'dueDate', dir: 1 },
+    };
+  }
+  return S.db[k];
+}
+function setPrefs(patch) {
+  Object.assign(prefs(), patch);
+  store.set('db', S.db);
+  render();
+}
+function applyFilters(list, p) {
+  const q = (p.search || '').trim().toLowerCase();
+  return list.filter(t => {
+    if (q && (t.title + ' ' + t.tags.join(' ')).toLowerCase().indexOf(q) < 0) return false;
+    if (p.who === 'me' && t.assignees.indexOf(S.me.email) < 0) return false;
+    if (p.who === 'none' && t.assignees.length) return false;
+    if (p.who && p.who.indexOf('@') > 0 && t.assignees.indexOf(p.who) < 0) return false;
+    if (p.prio.length && p.prio.indexOf(t.priority) < 0) return false;
+    return true;
+  });
+}
+function bySort(a, b) { return (a.sort || 0) - (b.sort || 0) || (a.createdAt < b.createdAt ? -1 : 1); }
+function rankPrio(t) { return (prioOf(t.priority) || { rank: 9 }).rank; }
+
+function database(tasks, opts) {
+  const p = prefs();
+  opts = opts || {};
+  const filtered = applyFilters(tasks, p);
+  const whoLabel = p.who === 'all' ? '' : p.who === 'me' ? 'Mir zugewiesen' : p.who === 'none' ? 'Nicht zugewiesen' : user(p.who).name;
+  const bar =
+    '<div class="db-bar"><div class="tabs">' + LAYOUTS.map(l =>
+      '<button class="tab' + (p.layout === l.key ? ' active' : '') + '" data-action="layout" data-v="' + l.key + '">' + icon(l.ic) + l.label + '</button>').join('') + '</div>' +
+    '<input class="db-search' + (p.search ? ' open' : '') + '" placeholder="Suchen…" value="' + esc(p.search) + '" data-on-input="db-search">' +
+    '<button class="btn sm" data-action="db-search-open" title="Suchen">' + icon('search') + '</button>' +
+    '<button class="btn sm" data-action="db-who">' + icon('user') + 'Person</button>' +
+    '<button class="btn sm" data-action="db-prio">' + icon('flag') + 'Priorität</button>' +
+    (p.layout === 'board' ? '<button class="btn sm" data-action="db-group">' + icon('layers') + 'Gruppe: ' + esc(GROUPS.find(g => g.key === p.groupBy).label) + '</button>' : '') +
+    (p.layout !== 'board' ? '<button class="btn sm' + (p.showDone ? ' active' : '') + '" data-action="db-done">' + icon('checksq') + 'Erledigte</button>' : '') +
+    '<button class="btn sm primary" data-action="new-task">' + icon('plus') + 'Neu</button></div>';
+  const chips = [];
+  if (whoLabel) chips.push('<button class="fchip" data-action="db-clear" data-k="who">' + icon('user', 'sm') + esc(whoLabel) + icon('x', 'sm') + '</button>');
+  if (p.prio.length) chips.push('<button class="fchip" data-action="db-clear" data-k="prio">' + icon('flag', 'sm') + esc(p.prio.map(k => (prioOf(k) || { label: 'Keine' }).label).join(', ')) + icon('x', 'sm') + '</button>');
+  const chipsHtml = chips.length ? '<div class="filter-chips">' + chips.join('') + '</div>' : '';
+
+  let body;
+  const visibleDone = p.showDone ? filtered : filtered.filter(t => !isDone(t));
+  if (p.layout === 'board') body = boardHtml(filtered.filter(t => !t.parentId || opts.includeSub), p, opts);
+  else if (p.layout === 'table') body = tableHtml(visibleDone.filter(t => !t.parentId || opts.includeSub), p, opts);
+  else if (p.layout === 'calendar') body = taskCalendarHtml(visibleDone, opts);
+  else body = listHtml(visibleDone, opts);
+  return bar + chipsHtml + body;
+}
+A.layout = el => setPrefs({ layout: el.dataset.v });
+A['db-done'] = () => setPrefs({ showDone: !prefs().showDone });
+A['db-clear'] = el => setPrefs(el.dataset.k === 'who' ? { who: 'all' } : { prio: [] });
+A['db-search-open'] = () => { const i = $('.db-search'); i.classList.add('open'); i.focus(); };
+ON.input['db-search'] = debounce(el => {
+  prefs().search = el.value;
+  store.set('db', S.db);
+  const pos = el.selectionStart;
+  render();
+  const n = $('.db-search');
+  if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+}, 200);
+A['db-who'] = el => openMenu(el, [
+  { value: 'all', html: icon('users', 'sm') + '<span>Alle</span>', search: 'alle' },
+  { value: 'me', html: icon('user', 'sm') + '<span>Mir zugewiesen</span>', search: 'ich mir' },
+  { value: 'none', html: icon('circle', 'sm') + '<span>Nicht zugewiesen</span>', search: 'niemand' },
+].concat(peopleItems()), { selected: [prefs().who], onPick: v => setPrefs({ who: v }) });
+A['db-prio'] = el => openMenu(el, Shared.PRIORITIES.map(p => ({ value: p.key, html: prioTag(p.key), search: p.label }))
+  .concat([{ value: '', html: '<span class="faint">Keine</span>', search: 'keine' }]),
+{ multi: true, search: false, selected: prefs().prio, onPick: (v, sel) => { prefs().prio = sel; store.set('db', S.db); render(); } });
+A['db-group'] = el => openMenu(el, GROUPS.map(g => ({ value: g.key, html: '<span>' + g.label + '</span>', search: g.label })),
+  { selected: [prefs().groupBy], search: false, onPick: v => setPrefs({ groupBy: v }) });
+
+/* ----- card ----- */
+function metaHtml(t, opts) {
+  const subs = subtasks(t.id);
+  const parts = [];
+  if (t.priority) parts.push(prioTag(t.priority));
+  if (t.dueDate) parts.push(dueTag(t));
+  if (t.estimate) parts.push('<span class="date">' + icon('hourglass', 'sm') + esc(fmtHours(t.estimate)) + '</span>');
+  if (subs.length) parts.push('<span class="date">' + icon('sub', 'sm') + subs.filter(isDone).length + '/' + subs.length + '</span>');
+  if (t.recurrence) parts.push('<span class="date" title="Wiederholt sich">' + icon('repeat', 'sm') + '</span>');
+  if (!(opts && opts.hideProject) && t.projectId && project(t.projectId)) parts.push(projectChip(project(t.projectId)));
+  t.tags.slice(0, 3).forEach(x => parts.push(tagChip(x)));
+  return parts.join('');
+}
+function cardHtml(t, opts) {
+  const teamsHtml = t.teams.map(id => team(id)).filter(Boolean).slice(0, 2).map(x => '<span class="faint" style="font-size:12px">' + esc(x.icon || '') + ' ' + esc(x.name) + '</span>').join(' ');
+  const foot = (t.assignees.length ? avatars(t.assignees) : '') + (teamsHtml ? '<span>' + teamsHtml + '</span>' : '');
+  return '<div class="card' + (S.peekId === t.id ? ' selected' : '') + '" draggable="true" data-drag-id="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '">' +
+    '<div class="card-title' + (isDone(t) ? ' done' : '') + '"><span>' + esc(t.title) + '</span></div>' +
+    '<div class="card-meta">' + metaHtml(t, opts) + '</div>' +
+    (foot ? '<div class="card-foot">' + foot + '</div>' : '') + '</div>';
+}
+A['open-task'] = el => openPeek(el.dataset.id);
+A['toggle-done'] = (el, e) => {
+  e.stopPropagation();
+  const t = task(el.dataset.id);
+  if (!t) return;
+  patchTask(t.id, { status: isDone(t) ? 'todo' : 'done' });
+};
+
+/* ----- board ----- */
+function boardColumns(tasks, p) {
+  if (p.groupBy === 'priority') {
+    return Shared.PRIORITIES.map(x => ({ value: x.key, head: prioTag(x.key), preset: { priority: x.key } }))
+      .concat([{ value: '', head: '<span class="faint">Keine Priorität</span>', preset: { priority: '' } }])
+      .map(c => Object.assign(c, { tasks: tasks.filter(t => (t.priority || '') === c.value) }));
+  }
+  if (p.groupBy === 'assignee') {
+    const emails = [S.me.email];
+    tasks.forEach(t => t.assignees.forEach(e => { if (emails.indexOf(e) < 0) emails.push(e); }));
+    return emails.map(e => ({ value: e, head: person(e), preset: { assignees: [e] }, tasks: tasks.filter(t => t.assignees.indexOf(e) >= 0) }))
+      .concat([{ value: '', head: '<span class="faint">Nicht zugewiesen</span>', preset: { assignees: [] }, tasks: tasks.filter(t => !t.assignees.length) }]);
+  }
+  if (p.groupBy === 'project') {
+    const ids = [];
+    tasks.forEach(t => { if (t.projectId && ids.indexOf(t.projectId) < 0 && project(t.projectId)) ids.push(t.projectId); });
+    return ids.map(id => ({ value: id, head: projectChip(project(id)), preset: { projectId: id }, tasks: tasks.filter(t => t.projectId === id) }))
+      .concat([{ value: '', head: '<span class="faint">Ohne Projekt</span>', preset: { projectId: '' }, tasks: tasks.filter(t => !t.projectId) }]);
+  }
+  return Shared.STATUSES.map(s => ({ value: s.key, head: statusTag(s.key), preset: { status: s.key }, tasks: tasks.filter(t => t.status === s.key) }));
+}
+function boardHtml(tasks, p, opts) {
+  const cols = boardColumns(tasks, p);
+  return '<div class="board">' + cols.map(c => {
+    const list = c.tasks.slice().sort(bySort);
+    return '<div class="col" data-drop-group="' + esc(p.groupBy) + '" data-drop-value="' + esc(c.value) + '">' +
+      '<div class="col-head">' + c.head + '<span class="n">' + list.length + '</span>' +
+      '<button class="icon-btn" data-action="new-task" data-preset="' + attr(c.preset) + '" title="Neu">' + icon('plus', 'sm') + '</button></div>' +
+      list.map(t => cardHtml(t, opts)).join('') +
+      '<button class="add-row" data-action="new-task" data-preset="' + attr(c.preset) + '">' + icon('plus', 'sm') + 'Neu</button></div>';
+  }).join('') + '</div>';
+}
+
+/* ----- drag & drop (board + calendar) ----- */
+const dragState = { id: null, from: null };
+function bindDrag() {
+  $$('[data-drag-id]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      dragState.id = el.dataset.dragId;
+      const col = el.closest('[data-drop-value]');
+      dragState.from = col ? col.dataset.dropValue : null;
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', dragState.id); } catch (err) { /* IE */ }
+      setTimeout(() => el.classList.add('dragging'), 0);
+    });
+    el.addEventListener('dragend', () => { el.classList.remove('dragging'); dragState.id = null; $$('.drop').forEach(x => x.classList.remove('drop')); });
+  });
+  $$('[data-drop-value], [data-drop-date]').forEach(zone => {
+    zone.addEventListener('dragover', e => { if (dragState.id) { e.preventDefault(); zone.classList.add('drop'); } });
+    zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drop'); });
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drop');
+      const id = dragState.id;
+      dragState.id = null;
+      const t = task(id);
+      if (!t) return;
+      if (zone.dataset.dropDate) return dropOnDate(t, zone.dataset.dropDate);
+      dropOnColumn(t, zone, e.clientY);
+    });
+  });
+}
+function dropOnDate(t, date) {
+  if (t.dueDate === date) return;
+  const patch = { dueDate: date };
+  if (t.startDate && t.dueDate) patch.startDate = Shared.addDays(t.startDate, Shared.diffDays(t.dueDate, date));
+  patchTask(t.id, patch);
+}
+function dropOnColumn(t, zone, y) {
+  const field = zone.dataset.dropGroup;
+  const value = zone.dataset.dropValue;
+  const cards = $$('.card', zone).filter(c => c.dataset.dragId !== t.id);
+  let idx = cards.findIndex(c => { const r = c.getBoundingClientRect(); return y < r.top + r.height / 2; });
+  if (idx < 0) idx = cards.length;
+  const before = cards[idx - 1] && task(cards[idx - 1].dataset.dragId);
+  const after = cards[idx] && task(cards[idx].dataset.dragId);
+  let sort;
+  if (before && after) sort = (before.sort + after.sort) / 2;
+  else if (before) sort = before.sort + 1000;
+  else if (after) sort = after.sort - 1000;
+  else sort = Date.now();
+  const patch = { sort: sort };
+  if (field === 'status') patch.status = value;
+  if (field === 'priority') patch.priority = value;
+  if (field === 'project') patch.projectId = value;
+  if (field === 'assignee') {
+    let list = t.assignees.filter(e => e !== dragState.from);
+    if (value && list.indexOf(value) < 0) list.push(value);
+    if (!value) list = [];
+    patch.assignees = list;
+  }
+  patchTask(t.id, patch);
+}
+
+/* ----- table ----- */
+const COLUMNS = [
+  { key: 'status', label: 'Status', ic: 'status', cell: t => statusTag(t.status) },
+  { key: 'assignees', label: 'Zugewiesen', ic: 'user', cell: t => (t.assignees.length === 1 ? person(t.assignees[0]) : avatars(t.assignees, 4)) },
+  { key: 'priority', label: 'Priorität', ic: 'flag', cell: t => prioTag(t.priority) },
+  { key: 'dueDate', label: 'Fällig', ic: 'calendar', cell: t => dueTag(t) },
+  { key: 'projectId', label: 'Projekt', ic: 'folder', cell: t => projectChip(project(t.projectId)) },
+  { key: 'teams', label: 'Teams', ic: 'users', cell: t => t.teams.map(id => teamChip(team(id))).join('') },
+  { key: 'estimate', label: 'Aufwand', ic: 'hourglass', cell: t => esc(fmtHours(t.estimate)) },
+  { key: 'tags', label: 'Tags', ic: 'tag', cell: t => t.tags.map(tagChip).join('') },
+];
+function sortValue(t, key) {
+  switch (key) {
+    case 'title': return t.title.toLowerCase();
+    case 'status': return Shared.STATUSES.findIndex(s => s.key === t.status);
+    case 'priority': return rankPrio(t);
+    case 'dueDate': return t.dueDate || '9999';
+    case 'assignees': return t.assignees.map(e => user(e).name).join(',') || '~';
+    case 'projectId': return t.projectId ? (project(t.projectId) || {}).name || '' : '~';
+    case 'estimate': return t.estimate || 0;
+    default: return '';
+  }
+}
+function tableHtml(tasks, p, opts) {
+  const s = p.sort || { key: 'dueDate', dir: 1 };
+  const list = tasks.slice().sort((a, b) => {
+    const x = sortValue(a, s.key), y = sortValue(b, s.key);
+    return (x < y ? -1 : x > y ? 1 : 0) * s.dir || bySort(a, b);
+  });
+  const cols = COLUMNS.filter(c => !(opts.hideProject && c.key === 'projectId'));
+  const ind = k => (s.key === k ? '<span class="sort-ind">' + (s.dir > 0 ? '▲' : '▼') + '</span>' : '');
+  return '<div class="table-wrap"><table class="db"><thead><tr>' +
+    '<th data-action="sort" data-k="title" style="min-width:300px">' + icon('text', 'sm') + ' Titel' + ind('title') + '</th>' +
+    cols.map(c => '<th data-action="sort" data-k="' + c.key + '">' + icon(c.ic, 'sm') + ' ' + c.label + ind(c.key) + '</th>').join('') +
+    '</tr></thead><tbody>' + list.map(t =>
+    '<tr><td><div class="title-cell" data-action="open-task" data-id="' + esc(t.id) + '">' +
+      '<span class="check' + (isDone(t) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(t.id) + '" role="checkbox" aria-checked="' + isDone(t) + '"></span>' +
+      '<span' + (isDone(t) ? ' class="faint" style="text-decoration:line-through"' : '') + '>' + esc(t.title) + '</span>' +
+      '<span class="open">' + icon('open', 'sm') + 'Öffnen</span></div></td>' +
+      cols.map(c => '<td><div class="cell" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + c.key + '">' + c.cell(t) + '</div></td>').join('') +
+      '</tr>').join('') +
+    '</tbody></table></div><button class="add-row" data-action="new-task">' + icon('plus', 'sm') + 'Neu</button>';
+}
+A.sort = el => {
+  const p = prefs();
+  const k = el.dataset.k;
+  setPrefs({ sort: { key: k, dir: p.sort && p.sort.key === k ? -p.sort.dir : 1 } });
+};
+
+/* ----- list ----- */
+function listRow(t, opts) {
+  return '<div class="lrow" data-action="open-task" data-id="' + esc(t.id) + '">' +
+    '<span class="check' + (isDone(t) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(t.id) + '" role="checkbox" aria-checked="' + isDone(t) + '"></span>' +
+    '<div class="t"><div class="title' + (isDone(t) ? ' done' : '') + '">' + esc(t.title) +
+    (t.parentId && task(t.parentId) ? ' <span class="faint" style="font-weight:400;font-size:12.5px">↳ ' + esc(task(t.parentId).title) + '</span>' : '') + '</div>' +
+    '<div class="card-meta">' + metaHtml(t, opts) + '</div></div>' +
+    '<div class="side">' + (t.assignees.length ? avatars(t.assignees) : '') + '</div></div>';
+}
+function listHtml(tasks, opts) {
+  const today = TODAY();
+  const weekEnd = Shared.addDays(Shared.mondayOf(today), 6);
+  let groups;
+  if (S.route.view === 'home') {
+    groups = [
+      { label: 'Überfällig', color: 'red', f: t => !isDone(t) && t.dueDate && t.dueDate < today },
+      { label: 'Heute', color: 'blue', f: t => !isDone(t) && t.dueDate === today },
+      { label: 'Diese Woche', color: 'purple', f: t => !isDone(t) && t.dueDate > today && t.dueDate <= weekEnd },
+      { label: 'Später', color: 'gray', f: t => !isDone(t) && t.dueDate > weekEnd },
+      { label: 'Ohne Datum', color: 'gray', f: t => !isDone(t) && !t.dueDate },
+      { label: 'Erledigt', color: 'green', f: isDone },
+    ];
+  } else {
+    groups = Shared.STATUSES.map(s => ({ label: s.label, color: s.color, f: t => t.status === s.key }));
+  }
+  const html = groups.map(g => {
+    const list = tasks.filter(g.f).sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || rankPrio(a) - rankPrio(b) || bySort(a, b));
+    if (!list.length) return '';
+    return '<div class="group"><div class="group-head"><span class="tag c-' + g.color + '"><span class="dot"></span>' + esc(g.label) + '</span><span class="n">' + list.length + '</span></div>' +
+      list.map(t => listRow(t, opts)).join('') + '</div>';
+  }).join('');
+  return html || emptyState(opts.empty);
+}
+function emptyState(text) {
+  return '<div class="empty"><div class="big">✨</div>' + esc(text || 'Keine Aufgaben hier.') +
+    '<br><br><button class="btn outline" data-action="palette">' + icon('plus') + 'Aufgabe anlegen</button></div>';
+}
+
+/* ---------------- month calendar (shared) ---------------- */
+function monthDays(cursor) {
+  const first = cursor.slice(0, 8) + '01';
+  const start = Shared.mondayOf(first);
+  const last = Shared.endOfMonth(first);
+  const end = Shared.addDays(Shared.mondayOf(last), 6);
+  const days = [];
+  for (let d = start; d <= end; d = Shared.addDays(d, 1)) days.push(d);
+  return days;
+}
+function calCursor() {
+  if (!S.cal.cursor) S.cal.cursor = TODAY().slice(0, 8) + '01';
+  return S.cal.cursor;
+}
+function calKey(from, to, teamId) { return from + '|' + to + '|' + (teamId || ''); }
+/** Returns cached range data or starts loading it (and re-renders when done). */
+function calEnsure(from, to, teamId) {
+  const key = calKey(from, to, teamId);
+  const hit = S.cal.cache[key];
+  if (hit && hit !== 'loading') return hit;
+  if (!hit) {
+    S.cal.cache[key] = 'loading';
+    call('calendar.range', { from: from, to: to, teamId: teamId || '' })
+      .then(d => { S.cal.cache[key] = d; render({ peek: false }); })
+      .catch(err => { delete S.cal.cache[key]; fail(err); });
+  }
+  return null;
+}
+function calReload() { S.cal.cache = {}; S.cap.data = null; render(); }
+function calFind(kind, id) {
+  let hit = null;
+  Object.keys(S.cal.cache).forEach(k => {
+    const d = S.cal.cache[k];
+    if (d && d[kind]) hit = hit || d[kind].find(x => x.id === id);
+  });
+  return hit;
+}
+function monthHtml(o) {
+  const days = monthDays(o.cursor);
+  const month = o.cursor.slice(0, 7);
+  const today = TODAY();
+  const data = o.data || { events: [], holidays: [], absences: [] };
+  const show = o.show || { tasks: true, events: true, absences: true, holidays: true };
+  return '<div class="cal">' + ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(d => '<div class="cal-dow">' + d + '</div>').join('') +
+    days.map(d => {
+      const wd = Shared.weekday(d);
+      const hol = show.holidays ? dedupeHolidays(data.holidays.filter(h => h.date === d && (!o.people || h.affects.some(e => o.people.indexOf(e) >= 0)))) : [];
+      const items = [];
+      hol.forEach(h => items.push('<div class="ev hol" title="' + esc(h.title) + '">🎉 <span>' + esc(h.label) + '</span></div>'));
+      if (show.events) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d).forEach(e => {
+        const ty = Shared.EVENT_TYPES.find(x => x.key === e.type) || Shared.EVENT_TYPES[0];
+        items.push('<div class="ev c-' + ty.color + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(ty.label + ': ' + e.title) + '">' +
+          (e.type === 'milestone' ? '◆ ' : '') + '<span>' + esc(e.title) + '</span></div>');
+      });
+      if (show.absences) data.absences.filter(a => a.startDate <= d && a.endDate >= d && wd !== 0 && wd !== 6 && (!o.people || o.people.indexOf(a.email) >= 0)).forEach(a => {
+        const ty = Shared.ABSENCE_TYPES.find(x => x.key === a.type) || Shared.ABSENCE_TYPES[3];
+        items.push('<div class="ev c-' + ty.color + '" data-action="absence-edit" data-id="' + esc(a.id) + '" title="' + esc(user(a.email).name + ': ' + ty.label) + '">' +
+          avatar(a.email) + '<span>' + esc(user(a.email).name.split(' ')[0]) + ' · ' + esc(ty.label) + '</span></div>');
+      });
+      if (show.tasks) (o.tasks || []).filter(t => t.dueDate === d).sort((a, b) => rankPrio(a) - rankPrio(b)).forEach(t => {
+        items.push('<div class="ev task' + (isDone(t) ? ' done' : '') + '" draggable="true" data-drag-id="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" title="' + esc(t.title) + '">' +
+          (t.priority ? prioTag(t.priority, true) : '') + '<span>' + esc(t.title) + '</span></div>');
+      });
+      const max = 4;
+      const shown = items.slice(0, max).join('') + (items.length > max ? '<div class="ev more">+' + (items.length - max) + ' weitere</div>' : '');
+      const cls = ['cal-day', d.slice(0, 7) !== month ? 'other' : '', d === today ? 'today' : '', wd === 0 || wd === 6 ? 'weekend' : '', hol.length ? 'holiday' : ''].join(' ');
+      return '<div class="' + cls + '" data-drop-date="' + d + '" data-action="cal-day" data-date="' + d + '">' +
+        '<div class="daytop"><span class="num">' + Number(d.slice(8)) + (d.slice(8) === '01' ? '. ' + MONTHS[Number(d.slice(5, 7)) - 1] : '') + '</span>' +
+        '<span class="icon-btn add" title="Aufgabe an diesem Tag">' + icon('plus', 'sm') + '</span></div>' + shown + '</div>';
+    }).join('') + '</div>';
+}
+/** One line per holiday name: "🇩🇪 🇦🇹 Allerheiligen (3)". */
+function dedupeHolidays(list) {
+  const map = {};
+  list.forEach(h => {
+    const k = h.name;
+    if (!map[k]) map[k] = { label: h.name, countries: [], affects: [] };
+    if (map[k].countries.indexOf(h.country) < 0) map[k].countries.push(h.country);
+    (h.affects || []).forEach(e => { if (map[k].affects.indexOf(e) < 0) map[k].affects.push(e); });
+  });
+  return Object.keys(map).map(k => {
+    const m = map[k];
+    const flags = m.countries.map(c => (c === '*' ? '🏢' : flag(c))).join(' ');
+    return {
+      label: flags + ' ' + m.label,
+      title: m.label + ' – frei: ' + (m.affects.map(e => user(e).name).join(', ') || 'niemand im Team'),
+    };
+  });
+}
+A['cal-day'] = (el, e) => {
+  if (e.target.closest('.ev')) return;
+  const date = el.dataset.date;
+  const add = e.target.closest('.add');
+  if (S.route.view === 'calendar' && !add) {
+    openMenu(el, [
+      { value: 'task', html: icon('checksq', 'sm') + '<span>Aufgabe am ' + esc(fmtDate(date, { absolute: true })) + '</span>', search: '' },
+      { value: 'event', html: icon('calendar', 'sm') + '<span>Termin / Meilenstein</span>', search: '' },
+      { value: 'absence', html: icon('plane', 'sm') + '<span>Abwesenheit</span>', search: '' },
+    ], {
+      search: false, onPick: v => {
+        if (v === 'task') createTask(contextDefaults({ title: '', dueDate: date }), { open: true });
+        if (v === 'event') eventModal(null, date);
+        if (v === 'absence') absenceModal({ type: 'vacation', email: S.me.email, startDate: date });
+      },
+    });
+    return;
+  }
+  createTask(contextDefaults({ title: '', dueDate: date }), { open: true });
+};
+A['cal-prev'] = () => { S.cal.cursor = Shared.addMonths(calCursor(), -1); render(); };
+A['cal-next'] = () => { S.cal.cursor = Shared.addMonths(calCursor(), 1); render(); };
+A['cal-today'] = () => { S.cal.cursor = TODAY().slice(0, 8) + '01'; render(); };
+function calNav() {
+  const c = calCursor();
+  return '<div class="cal-head"><div class="cal-title">' + MONTHS_LONG[Number(c.slice(5, 7)) - 1] + ' ' + c.slice(0, 4) + '</div>' +
+    '<button class="btn sm outline" data-action="cal-today">Heute</button>' +
+    '<button class="icon-btn" data-action="cal-prev" aria-label="Vorheriger Monat">' + icon('left') + '</button>' +
+    '<button class="icon-btn" data-action="cal-next" aria-label="Nächster Monat">' + icon('right') + '</button></div>';
+}
+/** Calendar layout of a task database: tasks + holidays of the people involved. */
+function taskCalendarHtml(tasks, opts) {
+  const days = monthDays(calCursor());
+  const data = calEnsure(days[0], days[days.length - 1], '');
+  const undated = tasks.filter(t => !t.dueDate && !isDone(t)).length;
+  return calNav() + monthHtml({ cursor: calCursor(), tasks: tasks, data: data, people: opts.people, show: { tasks: true, holidays: true, absences: true, events: false } }) +
+    (undated ? '<p class="hint" style="margin-top:10px">' + undated + ' offene Aufgabe(n) ohne Fälligkeitsdatum werden hier nicht angezeigt.</p>' : '');
+}
+
+/* ---------------- pages ---------------- */
+function homePage() {
+  const h = new Date().getHours();
+  const hello = h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
+  const t = TODAY();
+  const mine = S.tasks.filter(isMine);
+  if (!S.briefing) {
+    S.briefing = 'loading';
+    call('ai.briefing').then(b => { S.briefing = b; render({ peek: false }); }).catch(() => { S.briefing = null; });
+  }
+  const b = S.briefing && S.briefing !== 'loading' ? S.briefing : null;
+  const util = b ? b.utilization : null;
+  return '<div class="page">' +
+    '<div class="faint" style="font-weight:500">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div>' +
+    '<div class="greet">' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '</div>' +
+    '<div class="brief"><div class="spark">' + icon('sparkle') + '</div><div class="txt">' +
+    (b ? esc(b.text) : '<div class="skeleton" style="width:80%;margin:6px 0"></div><div class="skeleton" style="width:55%"></div>') +
+    (b && b.focus.length ? '<div class="focus">' + b.focus.map(f => '<button data-action="open-task" data-id="' + esc(f.id) + '">' +
+      (f.priority ? prioTag(f.priority, true) : icon('circle', 'sm')) + esc(f.title) + '</button>').join('') + '</div>' : '') +
+    (b ? '<div class="src">' + (b.source === 'ai' ? 'Erstellt mit Vertex AI' : 'Automatische Zusammenfassung · ' + esc(S.ai.hint || '')) + '</div>' : '') +
+    '</div><button class="icon-btn" data-action="brief-reload" title="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>' +
+    (b ? '<div class="stat-grid">' +
+      stat('Überfällig', b.overdue, b.overdue > 0) + stat('Heute fällig', b.today) + stat('Diese Woche', b.week) +
+      stat('Auslastung KW ' + Shared.isoWeek(t), (util > 900 ? '–' : util + '<small> %</small>'), util > 100, b.planned + ' von ' + b.available + ' h') +
+      '</div>' : '') +
+    database(mine, { people: [S.me.email], empty: 'Nichts zu tun – genieß den Moment oder leg los mit Strg+K.' }) +
+    '</div>';
+}
+function stat(label, val, warn, sub) {
+  return '<div class="stat' + (warn ? ' warn' : '') + '"><div class="lbl">' + esc(label) + '</div><div class="val">' + val + '</div>' +
+    (sub ? '<div class="hint">' + esc(sub) + '</div>' : '') + '</div>';
+}
+A['brief-reload'] = () => { S.briefing = null; render({ peek: false }); };
+
+function allPage() {
+  return '<div class="page wide"><div class="page-icon">🗂️</div><h1 class="page-title">Alle Aufgaben</h1>' +
+    '<p class="page-sub">Alles, was du sehen darfst: deine Aufgaben, die deiner Teams und deiner Projekte.</p>' +
+    database(S.tasks, {}) + '</div>';
+}
+
+function teamTasks(t) {
+  const pids = S.projects.filter(p => p.teamId === t.id).map(p => p.id);
+  return S.tasks.filter(x => x.teams.indexOf(t.id) >= 0 || pids.indexOf(x.projectId) >= 0);
+}
+function teamPage(t) {
+  const tab = S.teamTab || 'tasks';
+  const members = teamMembers(t);
+  const projects = S.projects.filter(p => p.teamId === t.id);
+  const tasks = teamTasks(t);
+  let body = '';
+  if (tab === 'tasks') body = database(tasks, { people: members });
+  if (tab === 'projects') body = '<div class="grid">' + projects.map(projectCard).join('') +
+    '<button class="pcard new" data-action="project-new" data-team="' + esc(t.id) + '">' + icon('plus') + 'Neues Projekt</button></div>';
+  if (tab === 'members') body = '<div class="members-list">' + members.map(e => {
+    const u = user(e);
+    const open = S.tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
+    return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:500">' + esc(u.name) +
+      (e === t.lead ? ' <span class="tag c-blue">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
+      '<span class="muted" style="font-size:13px">' + esc(flag(u.country) + ' ' + (u.region || u.country || '')) + '</span>' +
+      '<span class="muted" style="font-size:13px;width:90px;text-align:right">' + (u.hoursPerWeek || 0) + ' h/Woche</span>' +
+      '<span class="muted" style="font-size:13px;width:90px;text-align:right">' + open + ' offen</span></div>';
+  }).join('') + '</div>';
+  return '<div class="page wide">' +
+    '<div class="page-icon">' + esc(t.icon || '👥') + '</div><h1 class="page-title">' + esc(t.name) + '</h1>' +
+    (t.description ? '<p class="page-sub">' + esc(t.description) + '</p>' : '') +
+    '<div class="page-meta">' + avatars(members, 6) + '<span>' + members.length + ' Mitglieder</span><span>·</span><span>Lead: ' + esc(user(t.lead).name) + '</span>' +
+    '<span>·</span><span>' + projects.length + ' Projekte</span>' +
+    '<button class="btn sm outline" data-action="team-edit" data-id="' + esc(t.id) + '">' + icon('settings', 'sm') + 'Bearbeiten</button>' +
+    '<button class="btn sm outline" data-action="team-capacity" data-id="' + esc(t.id) + '">' + icon('gauge', 'sm') + 'Kapazität</button>' +
+    '<button class="btn sm outline" data-action="team-calendar" data-id="' + esc(t.id) + '">' + icon('calendar', 'sm') + 'Kalender</button></div>' +
+    '<div class="db-bar" style="margin-bottom:18px"><div class="tabs">' +
+    [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length], ['members', 'Mitglieder', 'users', members.length]]
+      .map(x => '<button class="tab' + (tab === x[0] ? ' active' : '') + '" data-action="team-tab" data-v="' + x[0] + '">' + icon(x[2]) + x[1] + ' <span class="faint">' + x[3] + '</span></button>').join('') +
+    '</div></div>' + body + '</div>';
+}
+A['team-tab'] = el => { S.teamTab = el.dataset.v; render(); };
+A['team-capacity'] = el => { S.cap.teamId = el.dataset.id; S.cap.data = null; go('capacity'); };
+A['team-calendar'] = el => { S.cal.teamId = el.dataset.id; go('calendar'); };
+
+function projectCard(p) {
+  const tasks = S.tasks.filter(t => t.projectId === p.id && !t.parentId);
+  const done = tasks.filter(isDone).length;
+  const pct = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+  const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
+  return '<button class="pcard" data-action="nav" data-view="project" data-id="' + esc(p.id) + '">' +
+    '<div class="t"><span style="font-size:20px">' + esc(p.icon || '📁') + '</span>' + esc(p.name) + '</div>' +
+    (p.description ? '<div class="d">' + esc(p.description) + '</div>' : '') +
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="tag c-' + st.color + '"><span class="dot"></span>' + esc(st.label) + '</span>' +
+    (p.endDate ? '<span class="date">' + icon('flag', 'sm') + esc(fmtDate(p.endDate, { absolute: true })) + '</span>' : '') + '</div>' +
+    '<div class="progress"><i style="width:' + pct + '%"></i></div>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center"><span class="faint" style="font-size:12px">' + done + '/' + tasks.length + ' erledigt</span>' +
+    avatars(projectMembers(p), 4) + '</div></button>';
+}
+
+function projectPage(p) {
+  const t = team(p.teamId);
+  const tasks = S.tasks.filter(x => x.projectId === p.id);
+  const top = tasks.filter(x => !x.parentId);
+  const done = top.filter(isDone).length;
+  const pct = top.length ? Math.round(done / top.length * 100) : 0;
+  const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
+  const members = projectMembers(p);
+  const hours = top.filter(x => !isDone(x)).reduce((s, x) => s + (x.estimate || 0), 0);
+  return '<div class="page wide">' +
+    '<div class="page-icon">' + esc(p.icon || '📁') + '</div><h1 class="page-title">' + esc(p.name) + '</h1>' +
+    (p.description ? '<p class="page-sub">' + esc(p.description) + '</p>' : '') +
+    '<div class="page-meta"><span class="tag c-' + st.color + '"><span class="dot"></span>' + esc(st.label) + '</span>' +
+    (t ? '<button class="btn sm" data-action="nav" data-view="team" data-id="' + esc(t.id) + '">' + esc((t.icon || '') + ' ' + t.name) + '</button>' : '') +
+    (p.startDate || p.endDate ? '<span class="date">' + icon('calendar', 'sm') + esc(fmtRange(p.startDate || p.endDate, p.endDate)) + '</span>' : '') +
+    '<span>' + avatars(members, 6) + '</span><span>' + (p.members.length ? members.length + ' Mitglieder' : 'Ganzes Team') + '</span>' +
+    '<span style="display:inline-flex;align-items:center;gap:8px;min-width:140px"><span class="progress" style="flex:1;width:90px"><i style="width:' + pct + '%"></i></span>' + pct + ' %</span>' +
+    (hours ? '<span class="date">' + icon('hourglass', 'sm') + esc(fmtHours(hours)) + ' offen</span>' : '') +
+    '<button class="btn sm outline" data-action="project-edit" data-id="' + esc(p.id) + '">' + icon('settings', 'sm') + 'Bearbeiten</button></div>' +
+    database(tasks, { hideProject: true, people: members }) + '</div>';
+}
+
+/* ---------------- team calendar ---------------- */
+function calendarPage() {
+  const days = monthDays(calCursor());
+  const teamId = S.cal.teamId && team(S.cal.teamId) ? S.cal.teamId : '';
+  const data = calEnsure(days[0], days[days.length - 1], teamId);
+  const t = TODAY();
+  const upcoming = calEnsure(t, Shared.addDays(t, 90), teamId);
+  const people = teamId ? teamMembers(team(teamId)) : null;
+  const tasks = S.tasks.filter(x => x.dueDate && (!people || x.assignees.some(e => people.indexOf(e) >= 0) || x.teams.indexOf(teamId) >= 0));
+  const show = S.cal.show;
+  const toggle = (k, label, sw) => '<button class="btn sm' + (show[k] ? ' active' : '') + '" data-action="cal-show" data-k="' + k + '"><span class="sw" style="background:' + sw + ';width:10px;height:10px;border-radius:3px;display:inline-block"></span>' + label + '</button>';
+  const side = upcoming ? sidePanel(upcoming, people) : '<div class="skeleton"></div>';
+  return '<div class="page wide"><div class="page-icon">📅</div><h1 class="page-title">Teamkalender</h1>' +
+    '<p class="page-sub">Aufgaben, Termine, Abwesenheiten und gesetzliche Feiertage aller Länder deines Teams – die Grundlage für die Kapazitätsplanung.</p>' +
+    '<div class="db-bar"><div class="tabs">' +
+    '<button class="btn sm outline" data-action="cal-team">' + icon('users', 'sm') + esc(teamId ? team(teamId).name : 'Alle Personen') + icon('chevron', 'sm') + '</button></div>' +
+    toggle('tasks', 'Aufgaben', 'var(--bg-card);box-shadow:var(--shadow-card)') + toggle('events', 'Termine', 'var(--dot-blue)') +
+    toggle('absences', 'Abwesenheiten', 'var(--dot-green)') + toggle('holidays', 'Feiertage', 'var(--dot-yellow)') +
+    '<button class="btn sm" data-action="absence-new">' + icon('plane', 'sm') + 'Abwesenheit</button>' +
+    '<button class="btn sm primary" data-action="event-new">' + icon('plus', 'sm') + 'Termin</button></div>' +
+    '<div class="cal-layout"><div>' + calNav() +
+    monthHtml({ cursor: calCursor(), tasks: tasks, data: data, show: show }) + '</div>' +
+    '<aside class="side-panel">' + side + '</aside></div></div>';
+}
+function sidePanel(d, people) {
+  const t = TODAY();
+  const hol = {};
+  d.holidays.forEach(h => {
+    if (!h.affects.length) return;
+    const k = h.date + h.name;
+    if (!hol[k]) hol[k] = { date: h.date, name: h.name, countries: [], affects: [] };
+    if (hol[k].countries.indexOf(h.country) < 0) hol[k].countries.push(h.country);
+    h.affects.forEach(e => { if (hol[k].affects.indexOf(e) < 0) hol[k].affects.push(e); });
+  });
+  const hl = Object.keys(hol).map(k => hol[k]).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8);
+  const abs = d.absences.filter(a => a.endDate >= t).sort((a, b) => a.startDate.localeCompare(b.startDate)).slice(0, 8);
+  const dayBox = date => '<div class="d"><b>' + Number(date.slice(8)) + '</b><small>' + MONTHS[Number(date.slice(5, 7)) - 1] + '</small></div>';
+  return '<h3>Nächste Feiertage</h3><div class="hlist">' + (hl.map(h =>
+    '<div class="hitem">' + dayBox(h.date) + '<div class="what"><div>' + esc(h.countries.map(c => (c === '*' ? '🏢' : flag(c))).join(' ') + ' ' + h.name) + '</div>' +
+    '<div class="muted">' + DOW_LONG[Shared.weekday(h.date)] + ' · frei: ' + esc(h.affects.map(e => user(e).name.split(' ')[0]).join(', ')) + '</div></div></div>').join('') ||
+    '<div class="faint" style="font-size:13px;padding:0 8px">Keine Feiertage in den nächsten 90 Tagen.</div>') + '</div>' +
+    '<h3>Abwesenheiten</h3><div class="hlist">' + (abs.map(a => {
+      const ty = Shared.ABSENCE_TYPES.find(x => x.key === a.type) || Shared.ABSENCE_TYPES[3];
+      return '<div class="hitem" data-action="absence-edit" data-id="' + esc(a.id) + '" style="cursor:pointer">' + dayBox(a.startDate) +
+        '<div class="what"><div class="person">' + avatar(a.email) + '<span>' + esc(user(a.email).name) + '</span></div>' +
+        '<div class="muted">' + esc(ty.label) + ' · ' + esc(fmtRange(a.startDate, a.endDate)) + '</div></div></div>';
+    }).join('') || '<div class="faint" style="font-size:13px;padding:0 8px">Niemand ist abwesend.</div>') + '</div>';
+}
+A['cal-show'] = el => { S.cal.show[el.dataset.k] = !S.cal.show[el.dataset.k]; render(); };
+A['cal-team'] = el => openMenu(el, [{ value: '', html: icon('users', 'sm') + '<span>Alle Personen</span>', search: 'alle' }]
+  .concat(S.teams.map(t => ({ value: t.id, html: teamChip(t), search: t.name }))),
+{ selected: [S.cal.teamId || ''], onPick: v => { S.cal.teamId = v; render(); } });
+
+/* ---------------- capacity ---------------- */
+function capacityPage() {
+  const c = S.cap;
+  if (!c.from) c.from = Shared.mondayOf(TODAY());
+  const teamId = c.teamId && team(c.teamId) ? c.teamId : '';
+  const key = [teamId, c.from, c.weeks].join('|');
+  if (!c.data || c.key !== key) {
+    if (!c.loading || c.loadingKey !== key) {
+      c.loading = true;
+      c.loadingKey = key;
+      call('capacity', { teamId: teamId, from: c.from, weeks: c.weeks })
+        .then(d => { c.data = d; c.key = key; c.loading = false; if (S.route.view === 'capacity') render({ peek: false }); })
+        .catch(err => { c.loading = false; fail(err); });
+    }
+  }
+  const d = c.data && c.key === key ? c.data : null;
+  const head = '<div class="page wide"><div class="page-icon">📊</div><h1 class="page-title">Kapazität</h1>' +
+    '<p class="page-sub">Verfügbare Stunden pro Person und Woche – abzüglich gesetzlicher Feiertage im jeweiligen Land/Bundesland und eingetragener Abwesenheiten – verglichen mit dem geschätzten Aufwand offener Aufgaben.</p>' +
+    '<div class="db-bar"><div class="tabs">' +
+    '<button class="btn sm outline" data-action="cap-team">' + icon('users', 'sm') + esc(teamId ? team(teamId).name : 'Alle Personen') + icon('chevron', 'sm') + '</button>' +
+    '<button class="btn sm outline" data-action="cap-weeks">' + c.weeks + ' Wochen' + icon('chevron', 'sm') + '</button></div>' +
+    '<button class="btn sm outline" data-action="cap-today">Diese Woche</button>' +
+    '<button class="icon-btn" data-action="cap-prev">' + icon('left') + '</button><button class="icon-btn" data-action="cap-next">' + icon('right') + '</button>' +
+    '<button class="btn sm" data-action="absence-new">' + icon('plane', 'sm') + 'Abwesenheit</button></div>';
+  if (!d) return head + '<div class="skeleton" style="height:240px;border-radius:10px"></div></div>';
+
+  const sum = (k, n) => d.totals.slice(0, n).reduce((s, x) => s + x[k], 0);
+  const n4 = Math.min(4, d.totals.length);
+  const avail = Math.round(sum('available', n4));
+  const plan = Math.round(sum('planned', n4));
+  const util = avail ? Math.round(plan / avail * 100) : 0;
+  const holCount = dedupeByDate(d.holidays).length;
+  const stats = '<div class="stat-grid">' +
+    stat('Verfügbar (' + n4 + ' Wo.)', avail + '<small> h</small>') + stat('Verplant', plan + '<small> h</small>') +
+    stat('Auslastung', util + '<small> %</small>', util > 100) + stat('Feiertage im Zeitraum', holCount, false, 'über ' + uniq(d.holidays.map(h => h.country)).length + ' Länder') + '</div>';
+
+  const cell = w => {
+    const cls = !w.planned ? 'cap-0' : w.utilization > 100 ? 'cap-over' : w.utilization >= 85 ? 'cap-high' : w.utilization >= 40 ? 'cap-ok' : 'cap-low';
+    const notes = [];
+    if (w.holidays.length) notes.push('<span title="' + esc(w.holidays.map(h => fmtDate(h.date, { absolute: true }) + ' ' + h.name).join('\n')) + '">🎉 ' + w.holidays.length + '</span>');
+    if (w.absentDays) notes.push('<span title="Abwesend">🌴 ' + w.absentDays + '</span>');
+    return '<div class="capcell ' + cls + '"><b>' + (w.available ? Math.min(w.utilization, 999) + ' %' : '–') + '</b>' +
+      '<div class="bar"><i style="width:' + Math.min(100, w.available ? w.utilization : (w.planned ? 100 : 0)) + '%"></i></div>' +
+      '<div class="notes"><span>' + fmtNum(w.planned) + ' / ' + fmtNum(w.available) + ' h</span>' + notes.join('') + '</div></div>';
+  };
+  const table = '<div class="cap-wrap"><table class="cap"><thead><tr><th class="who">Person</th>' +
+    d.weeks.map(w => '<th>KW ' + w.kw + '<small>' + esc(fmtDate(w.start, { absolute: true })) + ' – ' + esc(fmtDate(Shared.addDays(w.start, 4), { absolute: true })) + '</small></th>').join('') +
+    '</tr></thead><tbody>' + d.members.map(m =>
+      '<tr><td class="who"><div class="person">' + avatar(m.email) + '<div style="line-height:1.25;min-width:0"><div style="font-weight:500">' + esc(m.name) + '</div>' +
+      '<div class="faint" style="font-size:12px">' + esc(flag(m.country) + ' ' + (m.region || m.country || '–')) + ' · ' + m.hoursPerWeek + ' h' +
+      (m.unscheduled ? ' · <span title="Offener Aufwand ohne Fälligkeitsdatum">' + fmtNum(m.unscheduled) + ' h ungeplant</span>' : '') + '</div></div></div></td>' +
+      m.weeks.map(w => '<td>' + cell(w) + '</td>').join('') + '</tr>').join('') +
+    '</tbody><tfoot><tr><td class="who">Gesamt</td>' + d.totals.map(w => '<td>' + cell(Object.assign({ holidays: [], absentDays: 0 }, w)) + '</td>').join('') + '</tr></tfoot></table></div>';
+  const legend = '<div class="legend"><span><span class="sw cap-low"></span>unter 40 %</span><span><span class="sw cap-ok"></span>40–85 %</span>' +
+    '<span><span class="sw cap-high"></span>85–100 %</span><span><span class="sw cap-over"></span>überbucht</span><span>🎉 Feiertage</span><span>🌴 Abwesenheitstage</span>' +
+    '<span class="faint">Aufwand = Schätzung offener Aufgaben, verteilt auf die Arbeitstage zwischen Start und Fälligkeit; Überfälliges zählt in die aktuelle Woche.</span></div>';
+  const holList = dedupeByDate(d.holidays).map(h => '<div class="li"><span class="faint nowrap" style="width:110px">' + esc(DOW[Shared.weekday(h.date)] + ', ' + fmtDate(h.date, { absolute: true })) + '</span>' +
+    '<span class="grow">' + esc(h.countries.map(flag).join(' ') + ' ' + h.name) + '</span>' + avatars(h.affects, 6) + '</div>').join('');
+  return head + stats + table + legend +
+    (holList ? '<div class="h2">' + icon('globe') + 'Feiertage, die die Kapazität reduzieren</div><div class="list-plain">' + holList + '</div>' : '') + '</div>';
+}
+function fmtNum(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
+function uniq(a) { return a.filter((x, i) => a.indexOf(x) === i); }
+function dedupeByDate(list) {
+  const map = {};
+  list.forEach(h => {
+    const k = h.date + '|' + h.name;
+    if (!map[k]) map[k] = { date: h.date, name: h.name, countries: [], affects: [] };
+    if (map[k].countries.indexOf(h.country) < 0) map[k].countries.push(h.country);
+    h.affects.forEach(e => { if (map[k].affects.indexOf(e) < 0) map[k].affects.push(e); });
+  });
+  return Object.keys(map).map(k => map[k]).sort((a, b) => a.date.localeCompare(b.date));
+}
+A['cap-team'] = el => openMenu(el, [{ value: '', html: icon('users', 'sm') + '<span>Alle Personen</span>', search: 'alle' }]
+  .concat(S.teams.map(t => ({ value: t.id, html: teamChip(t), search: t.name }))),
+{ selected: [S.cap.teamId || ''], onPick: v => { S.cap.teamId = v; render(); } });
+A['cap-weeks'] = el => openMenu(el, [4, 8, 12, 26].map(n => ({ value: n, html: '<span>' + n + ' Wochen</span>', search: '' })),
+  { selected: [S.cap.weeks], search: false, onPick: v => { S.cap.weeks = v; render(); } });
+A['cap-prev'] = () => { S.cap.from = Shared.addDays(S.cap.from, -7); render(); };
+A['cap-next'] = () => { S.cap.from = Shared.addDays(S.cap.from, 7); render(); };
+A['cap-today'] = () => { S.cap.from = Shared.mondayOf(TODAY()); render(); };
+
+/* ---------------- settings ---------------- */
+const COUNTRIES = [['DE', 'Deutschland'], ['AT', 'Österreich'], ['CH', 'Schweiz'], ['US', 'USA'], ['GB', 'Vereinigtes Königreich'],
+  ['FR', 'Frankreich'], ['IT', 'Italien'], ['ES', 'Spanien'], ['NL', 'Niederlande'], ['BE', 'Belgien'], ['LU', 'Luxemburg'],
+  ['PL', 'Polen'], ['CZ', 'Tschechien'], ['DK', 'Dänemark'], ['SE', 'Schweden'], ['NO', 'Norwegen'], ['FI', 'Finnland'],
+  ['IE', 'Irland'], ['PT', 'Portugal'], ['HU', 'Ungarn'], ['RO', 'Rumänien'], ['HR', 'Kroatien'], ['GR', 'Griechenland'],
+  ['TR', 'Türkei'], ['UA', 'Ukraine'], ['RS', 'Serbien'], ['CA', 'Kanada'], ['MX', 'Mexiko'], ['BR', 'Brasilien'],
+  ['AR', 'Argentinien'], ['CN', 'China'], ['JP', 'Japan'], ['KR', 'Südkorea'], ['SG', 'Singapur'], ['AU', 'Australien'],
+  ['NZ', 'Neuseeland'], ['ZA', 'Südafrika']];
+const DE_STATES = [['DE-BW', 'Baden-Württemberg'], ['DE-BY', 'Bayern'], ['DE-BE', 'Berlin'], ['DE-BB', 'Brandenburg'], ['DE-HB', 'Bremen'],
+  ['DE-HH', 'Hamburg'], ['DE-HE', 'Hessen'], ['DE-MV', 'Mecklenburg-Vorpommern'], ['DE-NI', 'Niedersachsen'], ['DE-NW', 'Nordrhein-Westfalen'],
+  ['DE-RP', 'Rheinland-Pfalz'], ['DE-SL', 'Saarland'], ['DE-SN', 'Sachsen'], ['DE-ST', 'Sachsen-Anhalt'], ['DE-SH', 'Schleswig-Holstein'], ['DE-TH', 'Thüringen']];
+const AVATAR_COLORS = ['#e16b5c', '#e5894a', '#d9a72a', '#5aa36b', '#3e8ed0', '#7a6ad8', '#c45fa0', '#4aa8a8', '#8a7a6a'];
+
+function settingsPage() {
+  const me = S.me;
+  const days = String(me.workDays || '').split(',');
+  const t = TODAY();
+  const abs = calEnsure(Shared.addDays(t, -30), Shared.addDays(t, 365), '');
+  const myAbs = abs ? abs.absences.filter(a => a.email === me.email && a.endDate >= t) : null;
+  const profile = '<form data-on-submit="profile" class="settings-grid">' +
+    field('Name', '<input class="input" name="name" value="' + esc(me.name) + '">') +
+    divField('Farbe', '<input type="hidden" name="color" value="' + esc(me.color) + '"><div class="color-row">' + AVATAR_COLORS.map(c =>
+      '<button type="button" class="' + (c === me.color ? 'on' : '') + '" style="background:' + c + '" data-action="pick-color" data-v="' + c + '"></button>').join('') + '</div>') +
+    field('Land (für Feiertage)', '<select class="select" name="country">' + COUNTRIES.map(c => '<option value="' + c[0] + '"' + (c[0] === me.country ? ' selected' : '') + '>' + flag(c[0]) + ' ' + c[1] + '</option>').join('') + '</select>') +
+    field('Bundesland / Region', '<input class="input" name="region" list="regions" value="' + esc(me.region || '') + '" placeholder="z. B. DE-BY, CH-ZH, US-CA">' +
+      '<datalist id="regions">' + DE_STATES.map(s => '<option value="' + s[0] + '">' + s[1] + '</option>').join('') + '</datalist>') +
+    field('Wochenstunden', '<input class="input" type="number" min="0" max="80" step="0.5" name="hoursPerWeek" value="' + esc(me.hoursPerWeek) + '">') +
+    divField('Arbeitstage', '<div class="days">' + [1, 2, 3, 4, 5, 6, 0].map(d => '<label><input type="checkbox" name="workDays" value="' + d + '"' + (days.indexOf(String(d)) >= 0 ? ' checked' : '') + '><span>' + DOW[d] + '</span></label>').join('') + '</div>') +
+    '<div><button class="btn primary" type="submit">Profil speichern</button></div></form>';
+
+  const absHtml = myAbs === null ? '<div class="skeleton"></div>' : (myAbs.map(a => {
+    const ty = Shared.ABSENCE_TYPES.find(x => x.key === a.type) || Shared.ABSENCE_TYPES[3];
+    return '<div class="li"><span class="tag c-' + ty.color + '">' + esc(ty.label) + '</span><span class="grow">' + esc(fmtRange(a.startDate, a.endDate)) +
+      (a.note ? ' <span class="faint">· ' + esc(a.note) + '</span>' : '') + '</span>' +
+      '<button class="btn sm" data-action="absence-edit" data-id="' + esc(a.id) + '">Bearbeiten</button></div>';
+  }).join('') || '<div class="faint" style="padding:6px 8px">Keine geplanten Abwesenheiten.</div>');
+
+  const ai = '<div class="notice">' + (S.ai.enabled
+    ? '✅ <b>Vertex AI ist aktiv</b> (Modell <code>' + esc(S.ai.model) + '</code>). Briefing, Quick-Add und Aufgaben-Zerlegung nutzen Gemini.'
+    : '🔌 <b>Regelbasierter Modus.</b> Alle smarten Funktionen laufen bereits mit Regeln (Quick-Add-Parser, Kapazitäts-Vorschläge, Briefing). ' +
+      'Für KI: im Apps-Script-Projekt unter <i>Projekteinstellungen → Skripteigenschaften</i> den Wert <code>VERTEX_API_KEY</code> setzen ' +
+      '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optional <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.') + '</div>';
+
+  let admin = '';
+  if (me.admin) {
+    admin = '<div class="h2">' + icon('users') + 'Personen <span class="faint" style="font-weight:400">· Admin</span></div><div class="list-plain">' +
+      S.users.slice().sort((a, b) => a.name.localeCompare(b.name)).map(u => '<div class="li">' + avatar(u.email) + '<span class="grow">' + esc(u.name) +
+        ' <span class="faint">' + esc(u.email) + '</span></span><span class="faint">' + esc(flag(u.country) + ' ' + (u.region || u.country || '')) + ' · ' + u.hoursPerWeek + ' h</span>' +
+        '<button class="btn sm' + (u.role === 'admin' ? ' active' : '') + '" data-action="user-role" data-email="' + esc(u.email) + '"' + (u.email === me.email ? ' disabled' : '') + '>' + (u.role === 'admin' ? 'Admin' : 'Mitglied') + '</button>' +
+        '<button class="btn sm" data-action="user-edit" data-email="' + esc(u.email) + '">Bearbeiten</button></div>').join('') + '</div>' +
+      '<button class="btn sm outline" data-action="user-invite" style="margin-top:8px">' + icon('plus', 'sm') + 'Person hinzufügen</button>' +
+      '<div class="h2">' + icon('globe') + 'Firmen-Feiertage <span class="faint" style="font-weight:400">· zusätzlich zu den gesetzlichen</span></div><div class="list-plain">' +
+      (S.companyHolidays.slice().sort((a, b) => a.date.localeCompare(b.date)).map(h => '<div class="li"><span class="faint nowrap" style="width:110px">' + esc(fmtDate(h.date, { absolute: true })) + '</span>' +
+        '<span class="grow">' + esc(h.name) + ' <span class="faint">' + esc(h.countries.length ? h.countries.join(', ') : 'alle Länder') + '</span></span>' +
+        '<button class="btn sm danger" data-action="ch-remove" data-id="' + esc(h.id) + '">Entfernen</button></div>').join('') || '<div class="faint" style="padding:6px 8px">Keine.</div>') +
+      '</div><button class="btn sm outline" data-action="ch-new" style="margin-top:8px">' + icon('plus', 'sm') + 'Firmen-Feiertag</button>';
+  }
+  return '<div class="page"><div class="page-icon">⚙️</div><h1 class="page-title">Einstellungen</h1>' +
+    '<p class="page-sub">Angemeldet über Google als <b>' + esc(me.email) + '</b>. Land, Region, Wochenstunden und Arbeitstage bestimmen deine Kapazität.</p>' +
+    '<div class="h2">' + icon('user') + 'Profil</div>' + profile +
+    '<div class="h2">' + icon('plane') + 'Meine Abwesenheiten</div><div class="list-plain">' + absHtml + '</div>' +
+    '<button class="btn sm outline" data-action="absence-new" style="margin-top:8px">' + icon('plus', 'sm') + 'Abwesenheit eintragen</button>' +
+    '<div class="h2">' + icon('sparkle') + 'Smarte Funktionen</div>' + ai + admin + '</div>';
+}
+ON.submit.profile = form => {
+  const v = formValues(form);
+  call('users.save', v).then(u => {
+    form.removeAttribute('data-touched');
+    Object.assign(S.me, u);
+    applyUser(u);
+    S.cap.data = null; S.cal.cache = {}; S.briefing = null;
+    toast('Profil gespeichert');
+    render();
+  }).catch(fail);
+};
+function applyUser(u) {
+  const i = S.users.findIndex(x => x.email === u.email);
+  if (i >= 0) S.users[i] = u; else S.users.push(u);
+}
+A['user-role'] = el => {
+  const u = user(el.dataset.email);
+  call('users.save', { email: u.email, role: u.role === 'admin' ? 'member' : 'admin' }).then(x => { applyUser(x); render(); }).catch(fail);
+};
+function userModal(u) {
+  const isNew = !u;
+  u = u || { country: S.me.country, hoursPerWeek: 40, workDays: '1,2,3,4,5' };
+  const days = String(u.workDays || '').split(',');
+  openModal({
+    title: isNew ? 'Person hinzufügen' : u.name + ' bearbeiten',
+    body: (isNew ? field('E-Mail (Google-Konto)', '<input class="input" name="email" type="email" required>') : '<input type="hidden" name="email" value="' + esc(u.email) + '">') +
+      field('Name', '<input class="input" name="name" value="' + esc(u.name || '') + '">') +
+      '<div class="row">' + field('Land', '<select class="select" name="country">' + COUNTRIES.map(c => '<option value="' + c[0] + '"' + (c[0] === u.country ? ' selected' : '') + '>' + c[1] + '</option>').join('') + '</select>') +
+      field('Region', '<input class="input" name="region" list="regions2" value="' + esc(u.region || '') + '"><datalist id="regions2">' + DE_STATES.map(s => '<option value="' + s[0] + '">' + s[1] + '</option>').join('') + '</datalist>') + '</div>' +
+      field('Wochenstunden', '<input class="input" type="number" name="hoursPerWeek" min="0" max="80" step="0.5" value="' + esc(u.hoursPerWeek) + '">') +
+      divField('Arbeitstage', '<div class="days">' + [1, 2, 3, 4, 5, 6, 0].map(d => '<label><input type="checkbox" name="workDays" value="' + d + '"' + (days.indexOf(String(d)) >= 0 ? ' checked' : '') + '><span>' + DOW[d] + '</span></label>').join('') + '</div>'),
+    danger: !isNew && u.email !== S.me.email ? { label: 'Deaktivieren', onClick: () => call('users.save', { email: u.email, active: false }).then(() => { closeModal(); reloadAll(); }).catch(fail) } : null,
+    onSubmit: v => call('users.save', v).then(x => { applyUser(x); S.cap.data = null; render(); }),
+  });
+}
+A['user-edit'] = el => userModal(user(el.dataset.email));
+A['user-invite'] = () => userModal(null);
+A['ch-new'] = () => openModal({
+  title: 'Firmen-Feiertag',
+  body: '<div class="row">' + field('Datum', '<input class="input" type="date" name="date" required>') + field('Name', '<input class="input" name="name" required placeholder="z. B. Betriebsausflug">') + '</div>' +
+    field('Nur für Länder (optional, kommagetrennt)', '<input class="input" name="countries" placeholder="z. B. DE, AT">'),
+  onSubmit: v => call('companyHolidays.save', { date: v.date, name: v.name, countries: v.countries.split(/[,\s]+/).filter(Boolean) })
+    .then(h => { S.companyHolidays.push(h); calReload(); }),
+});
+A['ch-remove'] = el => call('companyHolidays.remove', { id: el.dataset.id })
+  .then(() => { S.companyHolidays = S.companyHolidays.filter(h => h.id !== el.dataset.id); calReload(); }).catch(fail);
+</script>
