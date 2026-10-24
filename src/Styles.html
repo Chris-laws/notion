@@ -390,8 +390,17 @@ table.db tr:hover .title-cell .open { opacity: 1; }
 
 /* calendar page fills the window; only its boxes scroll */
 #view:has(.cal-fit) { overflow: hidden; }
+@media (min-width: 861px) {
+  .app.no-topbar .topbar { display: none; }
+  .app.no-topbar .page { padding-top: 16px; }
+}
 .page.cal-fit { height: 100%; display: flex; flex-direction: column; padding-bottom: 16px; }
 .cal-fit > .cal-top { flex: none; }
+/* calendar header as one slim row so the grid gets the height */
+.cal-fit .cal-top { align-items: center; gap: 10px 16px; padding: 10px 16px; margin-bottom: 12px; }
+.cal-fit .cal-top-l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-width: 0; }
+.cal-fit .cal-top-l .page-title { font-size: 20px; }
+.cal-fit .cal-top-r { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .cal-body { flex: 1; min-height: 0; }
 .cal-fit .cal-full { height: 100%; overflow: auto; }
 .cal-fit .cal-full:has(.cal-plan) { overflow: hidden; }

@@ -524,15 +524,18 @@ function renderTopbar() {
     if (t) crumbs.push({ html: mark(t) + esc(t.name), view: 'team', id: t.id });
     crumbs.push({ html: mark(p) + esc(p.name) });
   }
+  // The calendar needs the height: no search or "new task" bar there (phones keep the menu button).
+  const cal = r.view === 'calendar';
+  $('#app').classList.toggle('no-topbar', cal);
   setHtml($('#topbar'),
     '<button class="icon-btn menu-btn" data-action="sidebar-open" aria-label="Menü">' + icon('menu') + '</button>' +
     '<nav class="crumbs">' + crumbs.map((c, i) => (i ? '<span class="sep">/</span>' : '') +
       (c.view ? '<button data-action="nav" data-view="' + c.view + '" data-id="' + esc(c.id) + '">' + c.html + '</button>'
         : '<button class="current">' + c.html + '</button>')).join('') + '</nav>' +
-    '<button class="top-search" data-action="palette">' + icon('search', 'sm') + '<span>Aufgaben und Projekte suchen</span><span class="kbd">⌘K</span></button>' +
+    (cal ? '' : '<button class="top-search" data-action="palette">' + icon('search', 'sm') + '<span>Aufgaben und Projekte suchen</span><span class="kbd">⌘K</span></button>') +
     '<div class="spacer"></div>' +
-    (S.ai.enabled ? '<span class="chip accent">' + icon('sparkle', 'sm') + 'KI aktiv</span>' : '') +
-    (['home', 'all', 'dash'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : ''));
+    (S.ai.enabled && !cal ? '<span class="chip accent">' + icon('sparkle', 'sm') + 'KI aktiv</span>' : '') +
+    (['home', 'all', 'dash', 'calendar'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : ''));
 }
 
 /* ---------------- global events ---------------- */
