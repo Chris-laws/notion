@@ -1367,15 +1367,16 @@ function capacityPage() {
     }
   }
   const d = c.data && c.key === key ? c.data : null;
-  const head = '<div class="page wide">' +
-    pageHead('Verfügbarkeit', 'Urlaub aus dem Teamkalender, Feiertage je Land und Bundesland eingerechnet. Ab ' +
-      ((d && d.threshold) || 50) + ' % Abwesenheit im Team gibt es eine Warnung.', '',
-      '<button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button>') +
-    '<div class="db-bar"><div class="tabs">' + scopeButton('cap-team', teamId) +
-    '<div class="seg" style="margin-left:6px">' + [4, 6, 8, 13].map(n => '<button class="' + (weeks === n ? 'on' : '') + '" data-action="cap-weeks" data-n="' + n + '">' + n + ' Wo.</button>').join('') + '</div></div>' +
+  // Same layout as the calendar: one slim header row, the page does not scroll, the table and side panels do.
+  const head = '<div class="page wide cal-fit cap-fit">' +
+    '<div class="card-w cal-top"><div class="cal-top-l"><h1 class="page-title" title="' + esc('Urlaub aus dem Teamkalender, Feiertage je Land und Bundesland eingerechnet. Ab ' +
+      ((d && d.threshold) || 50) + ' % Abwesenheit im Team gibt es eine Warnung.') + '">Verfügbarkeit</h1>' +
+    '<div class="cal-ctl">' + scopeButton('cap-team', teamId) +
+    '<div class="seg">' + [4, 6, 8, 13].map(n => '<button class="' + (weeks === n ? 'on' : '') + '" data-action="cap-weeks" data-n="' + n + '">' + n + ' Wo.</button>').join('') + '</div>' +
     '<button class="icon-btn" data-action="cap-prev" aria-label="Früher">' + icon('left') + '</button>' +
     '<button class="btn outline sm" data-action="cap-today">Diese Woche</button>' +
-    '<button class="icon-btn" data-action="cap-next" aria-label="Später">' + icon('right') + '</button></div>';
+    '<button class="icon-btn" data-action="cap-next" aria-label="Später">' + icon('right') + '</button></div></div>' +
+    '<div class="cal-top-r"><button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button></div></div>';
   if (!d) return head + '<div class="skeleton" style="height:260px;border-radius:12px"></div></div>';
 
   const work = d.days.filter(x => { const wd = Shared.weekday(x); return wd !== 0 && wd !== 6; });
@@ -1407,8 +1408,9 @@ function capacityPage() {
     '<span><span class="sw" style="background:var(--holiday)"></span>Feiertag</span><span><span class="sw blk off" style="display:inline-block;width:10px;height:10px;margin:0 6px 0 0"></span>kein Arbeitstag (Teilzeit)</span></div>';
   const extra = calEnsure(d.from, d.to, teamId);
   const scope = teamId ? teamMembers(team(teamId)) : null;
-  return head + banner + '<div class="av-wrap"><table class="av"><thead>' + th + '</thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>' + legend +
-    (extra ? '<div class="panels-row">' + sidePanel(extra, scope, { noWarn: true, from: d.from }) + '</div>' : '') + '</div>';
+  return head + '<div class="cal-body"><div class="cal-layout"><div class="cal-main cap-main">' + banner +
+    '<div class="av-wrap" data-keep-scroll="av"><table class="av"><thead>' + th + '</thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>' + legend + '</div>' +
+    '<div class="cal-side" data-keep-scroll="side">' + (extra ? sidePanel(extra, scope, { noWarn: true, from: d.from }) : '<div class="panel"><div class="skeleton"></div></div>') + '</div></div></div></div>';
 }
 function fmtNum(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
 function uniq(a) { return a.filter((x, i) => a.indexOf(x) === i); }
