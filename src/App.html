@@ -387,13 +387,24 @@ function render(opts) {
   renderTopbar();
   const drafts = captureForms(view);
   const html = Views.render();
-  if (html !== null) view.innerHTML = html;
+  // Only route changes play the page fade-in; data updates swap content in place.
+  view.classList.toggle('enter', !!opts.resetScroll);
+  const swapped = html === null || setHtml(view, html);
   restoreForms(view, drafts);
   view.scrollTop = top;
   const nb = $('.board', view);
   if (nb && !opts.resetScroll) nb.scrollLeft = left;
   if (opts.peek !== false) renderPeek();
-  Views.after && Views.after();
+  // after() binds listeners to the fresh markup, so skip it when nothing was replaced.
+  if (swapped && Views.after) Views.after();
+}
+
+/** Replaces an element's content only when the markup changed (no flicker; hover, focus and scroll survive). */
+function setHtml(el, html) {
+  if (el.__html === html) return false;
+  el.innerHTML = html;
+  el.__html = html;
+  return true;
 }
 
 /** Keeps what the user typed into a form when data arriving in the background re-renders the page. */
@@ -444,7 +455,7 @@ function renderSidebar() {
       '</div>';
   }).join('');
 
-  $('#sidebar').innerHTML =
+  setHtml($('#sidebar'),
     '<div class="side-head"><div class="ws-mark">' + icon('check') + '</div><div class="ws-name">' + esc(S.appName) + '</div>' +
     '<span id="sync" class="sync-dot" title="Synchronisiert"></span>' +
     '<button class="icon-btn rail-toggle" data-action="rail-toggle" title="Seitenleiste ein-/ausklappen">' + icon('menu') + '</button></div>' +
@@ -461,7 +472,7 @@ function renderSidebar() {
     '</div>' +
     '<div class="side-foot"><button class="me-row" data-action="nav" data-view="settings">' + avatar(S.me.email, 'lg') +
     '<div class="me-meta"><div style="font-weight:500">' + esc(S.me.name) + '</div><div class="faint">' +
-    esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button></div>';
+    esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button></div>');
   syncDot();
 }
 A['rail-toggle'] = () => { S.rail = !S.rail; store.set('rail', S.rail); renderSidebar(); };
@@ -479,7 +490,7 @@ function renderTopbar() {
     if (t) crumbs.push({ html: mark(t) + esc(t.name), view: 'team', id: t.id });
     crumbs.push({ html: mark(p) + esc(p.name) });
   }
-  $('#topbar').innerHTML =
+  setHtml($('#topbar'),
     '<button class="icon-btn menu-btn" data-action="sidebar-open" aria-label="Menü">' + icon('menu') + '</button>' +
     '<nav class="crumbs">' + crumbs.map((c, i) => (i ? '<span class="sep">/</span>' : '') +
       (c.view ? '<button data-action="nav" data-view="' + c.view + '" data-id="' + esc(c.id) + '">' + c.html + '</button>'
@@ -487,7 +498,7 @@ function renderTopbar() {
     '<button class="top-search" data-action="palette">' + icon('search', 'sm') + '<span>Aufgaben und Projekte suchen</span><span class="kbd">⌘K</span></button>' +
     '<div class="spacer"></div>' +
     (S.ai.enabled ? '<span class="chip accent">' + icon('sparkle', 'sm') + 'KI aktiv</span>' : '') +
-    (['home', 'all', 'dash'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : '');
+    (['home', 'all', 'dash'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : ''));
 }
 
 /* ---------------- global events ---------------- */

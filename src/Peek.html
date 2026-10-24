@@ -89,7 +89,7 @@ function propRow(t, field, ic, label, value) {
 function renderPeek() {
   const el = $('#peek');
   const t = S.peekId && task(S.peekId);
-  if (!t) { el.hidden = true; el.innerHTML = ''; $('#app').classList.remove('peek-full'); return; }
+  if (!t) { el.hidden = true; setHtml(el, ''); $('#app').classList.remove('peek-full'); return; }
   const active = document.activeElement;
   const keepFocus = active && el.contains(active) && active.dataset && active.dataset.keep;
   const caret = keepFocus ? [active.dataset.keep, active.selectionStart] : null;
@@ -155,7 +155,7 @@ function renderPeek() {
     const dp = (label, field, inner, extra) => '<div class="card-w dp"><div class="dpl">' + label + (extra || '') + '</div>' +
       '<button class="dpv" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + field + '">' + (inner || '<span class="faint">Leer</span>') + icon('chevron', 'sm') + '</button></div>';
     const over = !isDone(t) && t.dueDate && t.dueDate < TODAY();
-    el.innerHTML = '<div class="dt-scroll"><div class="dt-wrap">' +
+    setHtml(el, '<div class="dt-scroll"><div class="dt-wrap">' +
       '<div class="card-w dt-head"><button class="round-btn" data-action="peek-full" title="Zurück">' + icon('back') + '</button>' +
       '<div class="dt-main"><textarea class="peek-title" rows="1" data-keep="title" data-on-input="peek-title" placeholder="Ohne Titel">' + esc(t.title === 'Ohne Titel' ? '' : t.title) + '</textarea>' +
       '<div class="dt-chips">' + statusTag(t.status) + prioTag(t.priority) +
@@ -184,9 +184,9 @@ function renderPeek() {
       '<div class="card-w"><h3>' + icon('layers', 'sm') + 'Details</h3><div class="props" style="margin:0;background:none;padding:0">' + props.split('<div class="prop">').filter(x => /Zugewiesen|Projekt|Teams|Aufwand|Tags|Wiederholung/.test(x)).map(x => '<div class="prop">' + x).join('') + '</div></div>' +
       '<div class="card-w"><h3>' + icon('sparkle', 'sm') + 'Smarte Hilfen</h3>' + smart + '</div>' +
       '<div class="card-w"><h3>' + icon('msg', 'sm') + 'Kommentare<span class="n">' + (comments ? comments.length : 0) + '</span></h3>' + commentsList + commentForm + '</div>' +
-      foot + '</div></div></div></div>';
+      foot + '</div></div></div></div>');
   } else {
-  el.innerHTML =
+  setHtml(el,
     '<div class="peek-top">' +
     '<button class="icon-btn" data-action="close-peek" title="Schließen (Esc)">' + icon('x') + '</button>' +
     '<button class="icon-btn" data-action="peek-full" title="Ganze Seite">' + icon('expand') + '</button>' +
@@ -201,7 +201,7 @@ function renderPeek() {
     '<textarea class="desc" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
     '<div class="section-label">' + icon('sub', 'sm') + 'Unteraufgaben' + (subs.length ? ' <span class="faint">' + subs.filter(isDone).length + '/' + subs.length + '</span>' : '') + '</div>' + subsList +
     '<div class="section-label">' + icon('msg', 'sm') + 'Kommentare</div>' + commentsList + commentForm + foot +
-    '</div></div>';
+    '</div></div>');
   }
   tickTimer();
   $$('#peek textarea').forEach(autosize);

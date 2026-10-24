@@ -201,7 +201,8 @@ svg.i.lg { width: 18px; height: 18px; }
 .seg button.on { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(18, 40, 90, .12); }
 
 /* ---------- page ---------- */
-.page { max-width: 1360px; margin: 0 auto; padding: 4px 24px 56px; animation: pagein .22s ease-out; }
+.page { max-width: 1360px; margin: 0 auto; padding: 4px 24px 56px; }
+#view.enter .page { animation: pagein .22s ease-out; }
 @keyframes pagein { from { opacity: 0; transform: translateY(5px); } }
 .page.wide { max-width: none; }
 .ph { margin-bottom: 4px; }
