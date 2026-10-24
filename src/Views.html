@@ -786,14 +786,14 @@ A['cal-day'] = (el, e) => {
       { value: 'event', html: icon('calendar', 'sm') + '<span>Termin oder Meilenstein</span>', search: '' },
     ], {
       search: false, onPick: v => {
-        if (v === 'task') createTask(contextDefaults({ title: '', dueDate: date }), { open: true });
+        if (v === 'task') newTaskModal(contextDefaults({ dueDate: date }));
         if (v === 'event') eventModal(null, date);
         if (v === 'absence') absenceModal({ type: 'vacation', email: S.me.email, startDate: date, endDate: date });
       },
     });
     return;
   }
-  createTask(contextDefaults({ title: '', dueDate: date }), { open: true });
+  newTaskModal(contextDefaults({ dueDate: date }));
 };
 A['day-away'] = (el, e) => {
   e.stopPropagation();
@@ -1053,33 +1053,31 @@ function reportData() {
 function reportCard() {
   const d = reportData();
   const r = S.report.range;
-  const seg = '<div class="seg sm">' + [['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat']].map(x =>
-    '<button class="' + (r === x[0] ? 'on' : '') + '" data-action="report-range" data-v="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
-  // calm by design: a short summary, what is new since the last visit, at most one quiet link
-  const head = '<div class="rep-head"><h3>' + icon('sparkle', 'sm') + 'Schnellreport</h3>' + seg + '<span class="grow"></span>' +
+  const RANGES = { day: 'Heute', week: 'Diese Woche', month: 'Dieser Monat' };
+  // one slim line: title, period as a small menu, source and refresh on the right
+  const head = '<div class="rep-head"><h3>' + icon('sparkle', 'sm') + 'Schnellreport</h3>' +
+    '<button class="rep-range" data-action="report-range-menu" title="Zeitraum wählen">' + RANGES[r] + icon('chevron', 'sm') + '</button>' +
+    '<span class="grow"></span>' +
     (d && !d.failed ? '<span class="rep-src">' + (d.source === 'ai' ? 'Gemini' : 'Automatisch') + ' · ' + esc(timeAgo(d.at)) + '</span>' : '') +
-    '<button class="icon-btn" data-action="report-reload" title="Aktualisieren" aria-label="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>';
-  if (!d) {
-    return '<div class="card-w rep">' + head + '<div class="skeleton" style="width:80%;margin-top:12px"></div><div class="skeleton" style="width:55%;margin-top:8px"></div></div>';
-  }
+    '<button class="icon-btn sm" data-action="report-reload" title="Aktualisieren" aria-label="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>';
+  if (!d) return '<div class="card-w rep">' + head + '<div class="skeleton" style="width:75%;margin-top:8px"></div></div>';
   const warns = d.warnings || [];
   const news = d.news || [];
-  const act = (d.actions || [])[0];
-  const NI = { task: 'checksq', comment: 'msg', absence: 'plane', project: 'folder', holiday: 'globe' };
   const pts = d.points || [];
+  const NI = { task: 'checksq', comment: 'msg', absence: 'plane', project: 'folder', holiday: 'globe' };
   const link = p => (p.taskId ? ' data-action="open-task" data-id="' + esc(p.taskId) + '" class="link"' : p.view ? ' data-action="nav" data-view="' + esc(p.view) + '" class="link"' : '');
   return '<div class="card-w rep">' + head +
-    '<p class="rep-text">' + esc(d.text) + '</p>' +
-    (pts.length ? '<ul class="rep-pts">' + pts.map(p => '<li' + link(p) + '>' + esc(p.text) + '</li>').join('') + '</ul>' : '') +
+    '<p class="rep-text">' + esc(d.text) +
+    (warns.length ? ' <button class="linkbtn warn" data-action="nav" data-view="capacity">' + icon('alert', 'sm') + warns.length + ' Team-Warnung' + (warns.length > 1 ? 'en' : '') + '</button>' : '') + '</p>' +
+    (pts.length ? '<ul class="rep-pts">' + pts.map(p => '<li' + link(p) + ' title="' + esc(p.text) + '">' + esc(p.text) + '</li>').join('') + '</ul>' : '') +
+    (news.length ? '<details class="rep-news"' + (S.report.newsOpen ? ' open' : '') + ' data-on-toggle="rep-news"><summary>Neu seit deinem letzten Besuch <span class="n">' + news.length + '</span></summary><ul>' + news.map(n =>
+      '<li' + link(n) + '>' + icon(NI[n.kind] || 'sparkle', 'sm') + '<span>' + esc(n.text) + '</span></li>').join('') + '</ul></details>' : '') +
     (d.source !== 'ai' && !d.failed ? '<div class="rep-dummy">Automatische Zusammenfassung · mit Gemini-Schlüssel entscheidet die KI, was wichtig ist</div>' : '') +
-    (news.length ? '<div class="rep-news"><div class="rep-sub">Neu seit deinem letzten Besuch</div><ul>' + news.map(n =>
-      '<li' + (n.taskId ? ' data-action="open-task" data-id="' + esc(n.taskId) + '" class="link"' : n.view ? ' data-action="nav" data-view="' + esc(n.view) + '" class="link"' : '') + '>' + icon(NI[n.kind] || 'sparkle', 'sm') + '<span>' + esc(n.text) + '</span></li>').join('') + '</ul></div>' : '') +
-    (warns.length || act ? '<div class="rep-foot">' +
-      (warns.length ? '<button class="linkbtn warn" data-action="nav" data-view="capacity">' + icon('alert', 'sm') + warns.length + ' Team-Warnung' + (warns.length > 1 ? 'en' : '') + '</button>' : '') +
-      (act ? '<button class="linkbtn" data-action="report-go" data-view="' + esc(act.view) + '" data-quick="' + esc(act.quick || '') + '">' + esc(act.label) + ' →</button>' : '') + '</div>' : '') +
     '</div>';
 }
-A['report-range'] = el => { S.report.range = el.dataset.v; store.set('reportRange', el.dataset.v); render({ peek: false }); };
+A['report-range-menu'] = el => openMenu(el, [['day', 'Heute'], ['week', 'Diese Woche'], ['month', 'Dieser Monat']].map(x => ({ value: x[0], html: '<span>' + x[1] + '</span>', search: x[1] })),
+  { selected: [S.report.range], search: false, onPick: v => A['report-range']({ dataset: { v: v } }) });
+document.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('rep-news')) S.report.newsOpen = e.target.open; }, true);A['report-range'] = el => { S.report.range = el.dataset.v; store.set('reportRange', el.dataset.v); render({ peek: false }); };
 A['report-reload'] = () => { S.reportDirty = true; render({ peek: false }); };
 A['report-go'] = el => {
   go(el.dataset.view);
@@ -1303,7 +1301,7 @@ A['wk-slot'] = (el, e) => {
   if (e.target.closest('.blk-p')) return;
   const y = e.clientY - el.getBoundingClientRect().top;
   const min = Math.max(PL.from, Math.min(PL.to - 30, PL.from + Math.floor(y / PL.hh * 2) * 30));
-  createTask(contextDefaults({ title: '', assignees: [S.me.email], dueDate: el.dataset.date, planDate: el.dataset.date, planStart: min }), { open: true });
+  newTaskModal(contextDefaults({ assignees: [S.me.email], dueDate: el.dataset.date, planDate: el.dataset.date, planStart: min }));
 };
 
 /** Heatmap: finished tasks per day over the last 52 weeks. */

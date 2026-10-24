@@ -292,7 +292,7 @@ A['peek-more'] = el => {
         ['title', 'description', 'status', 'priority', 'projectId', 'teams', 'assignees', 'tags', 'startDate', 'dueDate', 'estimate', 'parentId', 'recurrence']
           .forEach(k => { copy[k] = t[k]; });
         copy.title = t.title + ' (Kopie)';
-        createTask(copy, { open: true });
+        newTaskModal(copy);
       }
       if (v === 'sub') {
         openMenu(el, [{ value: '', html: '<span class="faint">Keine (oberste Ebene)</span>', search: 'keine' }]

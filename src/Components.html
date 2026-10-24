@@ -10,8 +10,9 @@ function toast(msg, opts) {
   const el = document.createElement('div');
   el.className = 'toast' + (opts.error ? ' err' : opts.warn ? ' warn' : '');
   if (opts.error) el.setAttribute('role', 'alert');
-  el.innerHTML = '<span>' + esc(msg) + '</span>' + (opts.action ? '<button>' + esc(opts.action.label) + '</button>' : '');
-  if (opts.action) el.querySelector('button').onclick = () => { opts.action.fn(); el.remove(); };
+  const actions = opts.actions || (opts.action ? [opts.action] : []);
+  el.innerHTML = '<span>' + esc(msg) + '</span>' + actions.map(a => '<button>' + esc(a.label) + '</button>').join('');
+  $$('button', el).forEach((b, i) => { b.onclick = () => { actions[i].fn(); el.remove(); }; });
   $('#toasts').appendChild(el);
   setTimeout(() => el.remove(), opts.duration || (opts.error || opts.warn ? 8000 : 3800));
 }
@@ -626,7 +627,7 @@ function openPalette(prefill) {
     '<div class="qa-legend"><span class="qa-date">morgen</span><small>Fällig</small><span class="qa-date">15.11.</span><small>Datum</small><span class="qa-assign">@anna</span><small>zuweisen</small>' +
     '<span class="qa-team">+team</span><small>Team</small><span class="qa-proj">#website</span><small>Projekt oder Tag</small><span class="qa-prio">!hoch</span><small>Priorität</small>' +
     '<span class="qa-est">2h</span><small>Aufwand</small><span class="qa-rec">jeden montag</span><small>Wiederholung</small></div>' +
-    '<div class="palette-foot"><span>↵ anlegen</span><span>Strg+↵ anlegen und öffnen</span><span>↑↓ auswählen</span><span style="margin-left:auto">Esc schließen</span></div></div></div>';
+    '<div class="palette-foot"><span>↵ prüfen und anlegen</span><span>Strg+↵ sofort anlegen</span><span>↑↓ auswählen</span><span style="margin-left:auto">Esc schließen</span></div></div></div>';
   const input = $('#pal-in');
   input.focus();
   input.addEventListener('input', drawPalette);
@@ -697,16 +698,64 @@ function runPaletteItem(it, open) {
     return f;
   };
   closePalette();
-  const go2 = p => createTask(fromParse(p), { open: open }).then(t => {
-    if (t && !open) toast('Angelegt: ' + t.title, { action: { label: 'Öffnen', fn: () => openPeek(t.id) } });
-  });
+  // Enter shows the recognised task in the confirm dialog; Ctrl/Cmd+Enter creates it right away
+  const go2 = p => (open ? confirmCreate(fromParse(p)) : newTaskModal(fromParse(p)));
   if (S.ai.enabled) {
     toast('KI analysiert die Eingabe…');
     call('ai.parse', { text: text }).then(go2).catch(() => go2(it.parsed));
   } else go2(it.parsed);
 }
 A['new-task'] = el => {
-  const preset = el && el.dataset.preset ? JSON.parse(el.dataset.preset) : {};
-  createTask(contextDefaults(Object.assign({ title: '' }, preset)), { open: true });
+  const preset = el && el.dataset && el.dataset.preset ? JSON.parse(el.dataset.preset) : {};
+  newTaskModal(contextDefaults(preset));
 };
+
+/* ---------------- new task: confirm before anything is saved ---------------- */
+/** Creates the task and offers "Öffnen" and "Rückgängig". */
+function confirmCreate(fields) {
+  return createTask(fields, { open: false }).then(t => {
+    if (!t) return;
+    toast('Aufgabe angelegt: ' + t.title, { duration: 7000, actions: [
+      { label: 'Öffnen', fn: () => openPeek(t.id) },
+      { label: 'Rückgängig', fn: () => { const x = task(t.id); if (x) deleteWithUndo(x); } },
+    ] });
+    return t;
+  });
+}
+/**
+ * Small form, filled from where the user is (project, team, day, time slot, quick-add text).
+ * Nothing reaches the server until "Aufgabe anlegen" (or Enter in the title) is pressed.
+ */
+function newTaskModal(preset) {
+  preset = Object.assign({}, preset || {});
+  const assignee = (preset.assignees && preset.assignees[0]) || S.me.email;
+  const projectOptions = [{ key: '', label: 'Kein Projekt' }];
+  S.teams.forEach(tm => S.projects.filter(p => p.teamId === tm.id && p.status !== 'done')
+    .forEach(p => projectOptions.push({ key: p.id, label: tm.name + ' › ' + p.name })));
+  const prioOptions = [{ key: '', label: 'Keine Priorität' }].concat(Shared.PRIORITIES.map(p => ({ key: p.key, label: p.label })));
+  const people = S.users.slice().sort((a, b) => (b.email === S.me.email) - (a.email === S.me.email) || a.name.localeCompare(b.name))
+    .map(u => ({ key: u.email, label: u.name + (u.email === S.me.email ? ' (ich)' : '') }));
+  openModal({
+    title: 'Neue Aufgabe', submitLabel: 'Aufgabe anlegen',
+    body: field('Titel', '<input class="input" name="title" required maxlength="300" value="' + esc(preset.title || '') + '" placeholder="Was ist zu tun?">' +
+        '<span class="field-err" hidden>Bitte einen Titel eingeben.</span>') +
+      '<div class="row">' + field('Zuständig', selectField('assignee', people, assignee)) +
+      field('Fällig', '<input class="input" type="date" name="dueDate" value="' + esc(preset.dueDate || '') + '">') + '</div>' +
+      '<div class="row">' + field('Projekt', selectField('projectId', projectOptions, preset.projectId || '')) +
+      field('Priorität', selectField('priority', prioOptions, preset.priority || '')) + '</div>' +
+      field('Aufwand (Stunden)', '<input class="input" type="number" min="0" step="0.25" name="estimate" value="' + esc(preset.estimate || '') + '" placeholder="z. B. 2">') +
+      (preset.planDate && preset.planStart ? '<p class="hint">Wird am ' + esc(fmtDate(preset.planDate, { absolute: true })) + ' um ' + fmtClock(preset.planStart) + ' eingeplant.</p>' : ''),
+    onSubmit: v => {
+      const title = String(v.title || '').trim();
+      if (!title) { const e = $('#modal-root .field-err'); if (e) e.hidden = false; return false; }
+      const fields = Object.assign({}, preset, {
+        title: title, assignees: [v.assignee || S.me.email], dueDate: v.dueDate || '',
+        projectId: v.projectId || '', priority: v.priority || '', estimate: Number(v.estimate) || 0,
+      });
+      if (!fields.dueDate) delete fields.dueDate;
+      confirmCreate(fields);
+      return true;
+    },
+  });
+}
 </script>
