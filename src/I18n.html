@@ -138,6 +138,17 @@ const EN = {
   'Zum Profil': 'Open profile', 'Lege ein Team an und füge Kolleg:innen hinzu.': 'Create a team and add colleagues.', 'Erste Aufgabe': 'First task',
   'Schreib einfach los, z. B. „Angebot prüfen morgen !hoch“.': 'Just type, e.g. “Review offer morgen !hoch”.', 'Kurzanleitung und Tastenkürzel': 'Quick guide and shortcuts',
   'Als erledigt markieren': 'Mark as done', 'Farbe wählen': 'Pick a colour', 'Klicken, um hier eine Aufgabe einzuplanen': 'Click to plan a task here',
+  'KI-Assistent': 'AI assistant', 'KI-Assistent: Aufgaben, Termine und Urlaub per Text anlegen': 'AI assistant: create tasks, events and time off from text',
+  'Beschreib in eigenen Worten, was angelegt werden soll: Aufgaben, Termine oder Urlaub. Du siehst vorher eine Vorschau und entscheidest.':
+    'Describe in your own words what to create: tasks, events or time off. You see a preview first and decide.',
+  'z. B. Lege für Anna morgen „Angebot prüfen“ an, 2h. Ich bin nächste Woche Montag bis Mittwoch im Urlaub.':
+    'e.g. Create “Review offer” for Anna tomorrow, 2h. I am on vacation next Monday to Wednesday.',
+  'Vorschlag erstellen': 'Create suggestion', 'Alles anlegen': 'Create all', 'Wird erkannt…': 'Recognising…', 'Abwesenheit': 'Absence',
+  'Nichts erkannt. Formuliere es etwas konkreter, z. B. mit Datum und Person.': 'Nothing recognised. Be a bit more specific, e.g. with a date and a person.',
+  'Nichts ausgewählt.': 'Nothing selected.', 'Rückgängig gemacht.': 'Undone.',
+  'Dummy-Vorschlag, KI noch nicht verbunden: Die Einträge wurden mit Regeln erkannt (ein Eintrag pro Satz). Für Gemini in den Skripteigenschaften ':
+    'Dummy suggestion, AI not connected yet: entries were recognised by rules (one per sentence). For Gemini, set ',
+  'setzen.': 'in the script properties.',
   'Alle offenen': 'All open', 'Anstehend': 'Upcoming', 'Projekt suchen…': 'Search project…', 'Name oder E-Mail suchen…': 'Search name or e-mail…',
   'Rückgängig': 'Undo', 'Person hinzufügen': 'Add person',
   'Design: wie System': 'Theme: system', 'Design: Hell': 'Theme: light', 'Design: Dunkel': 'Theme: dark',
@@ -175,7 +186,7 @@ const PATTERNS = [
   [/^(.+) · (\d+) Tage? weg$/, (m, x, n) => x + ' · ' + n + (n === '1' ? ' day' : ' days') + ' away'],
   [/^(.+) \(([A-Z]{2})\)$/, (m, x, cc) => trText(x) + ' (' + cc + ')'],
   [/^([\d,.]+) von ([\d,.]+) h$/, '$1 of $2 h'], [/^(\d+) % von (.+) geplant$/, '$1 % of $2 planned'],
-  [/^Alle \((\d+)\)$/, 'All ($1)'], [/^„(.+)“ gelöscht$/, '“$1” deleted'],
+  [/^Alle \((\d+)\)$/, 'All ($1)'], [/^(\d+) Einträge? angelegt$/, (m, n) => n + (n === '1' ? ' entry' : ' entries') + ' created'], [/^„(.+)“ gelöscht$/, '“$1” deleted'],
   [/^Suchen oder neue Aufgabe anlegen \(Tastenkürzel: (\w+) \+ K\)$/, (m, k) => 'Search or create a task (shortcut: ' + (k === 'Strg' ? 'Ctrl' : k) + ' + K)'],
   [/^Da ist etwas schiefgelaufen\. Bitte die Seite neu laden\. Wenn es bleibt, melde es mit dieser Meldung: (.+)$/, 'Something went wrong. Please reload the page. If it keeps happening, report it with this message: $1'],
   [/^▲ (\d+) mehr als letzte Woche$/, '▲ $1 more than last week'], [/^▼ (\d+) weniger als letzte Woche$/, '▼ $1 fewer than last week'],

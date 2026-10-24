@@ -47,6 +47,7 @@ const ROUTES = {
   'availability': p => Availability.forTeam(p),
   'ai.status': () => Ai.status(),
   'ai.parse': p => Ai.parse(p),
+  'ai.assist': p => Ai.assist(p),
   'ai.suggestAssignee': p => Ai.suggestAssignee(p),
   'ai.breakdown': p => Ai.breakdown(p),
   'ai.briefing': p => Ai.briefing(p),

@@ -52,6 +52,74 @@ const Ai = {
     }
   },
 
+  /**
+   * Assistant: turns free text ("Anna morgen Angebot prüfen 2h, ich bin Mo–Mi im Urlaub") into
+   * previews of tasks, events and absences. Nothing is saved here; the client shows the cards
+   * and creates what the user keeps. Without a key a rule-based dummy suggests one task per sentence.
+   */
+  assist(p) {
+    const me = Auth.currentUser();
+    const ctx = Ai.parseContext_(me);
+    const text = String((p && p.text) || '').slice(0, 4000);
+    if (!text.trim()) throw new Error('Bitte beschreibe, was angelegt werden soll.');
+    if (!Ai.enabled()) return { source: 'rules', items: Ai.assistRules_(text, ctx) };
+    try {
+      const res = Ai.generate_([
+        'Du bist der Assistent eines Team-Task-Managers. Zerlege die Eingabe in einzelne Einträge zum Anlegen.',
+        'Heute ist ' + ctx.today + ' (' + ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][Shared.weekday(ctx.today)] + '). Ich bin ' + ctx.me + '.',
+        'Personen: ' + JSON.stringify(ctx.users),
+        'Teams: ' + JSON.stringify(ctx.teams),
+        'Projekte: ' + JSON.stringify(ctx.projects),
+        'Antworte als JSON: {"items":[' +
+          '{"type":"task","title":string,"dueDate":"yyyy-MM-dd"|"","assignees":[email],"projectId":string,"priority":"urgent"|"high"|"medium"|"low"|"","estimate":Stunden,"recurrence":"daily"|"weekdays"|"weekly"|"monthly"|""}' +
+          ' | {"type":"event","title":string,"eventType":"meeting"|"milestone"|"deadline"|"offsite","startDate":"yyyy-MM-dd","endDate":"yyyy-MM-dd","teamId":string}' +
+          ' | {"type":"absence","absenceType":"vacation"|"sick"|"training"|"other","startDate":"yyyy-MM-dd","endDate":"yyyy-MM-dd","email":email}]}',
+        'Nur Personen, Teams und Projekte aus den Listen verwenden. Keine Einträge erfinden, die nicht in der Eingabe stehen.',
+        'Eingabe: ' + text,
+      ].join('\n'), true);
+      const items = Ai.validateAssist_(res, ctx);
+      return items.length ? { source: 'ai', items: items } : { source: 'rules', items: Ai.assistRules_(text, ctx) };
+    } catch (e) {
+      return { source: 'rules', warning: e.message, items: Ai.assistRules_(text, ctx) };
+    }
+  },
+
+  /** Dummy without AI: one entry per line or sentence, using the quick-add parser. */
+  assistRules_(text, ctx) {
+    return text.split(/\n|;|(?:\.\s+)|\s+und dann\s+/i).map(s => s.trim()).filter(s => s.length > 2).slice(0, 15).map(s => {
+      const parsed = Shared.parse(s, ctx);
+      if (/\b(urlaub|abwesend|krank|fortbildung)\b/i.test(s)) {
+        const start = parsed.startDate || parsed.dueDate || ctx.today;
+        return { type: 'absence', absenceType: /krank/i.test(s) ? 'sick' : /fortbildung/i.test(s) ? 'training' : 'vacation',
+          startDate: start, endDate: parsed.dueDate && parsed.dueDate >= start ? parsed.dueDate : start, email: ctx.me };
+      }
+      return Object.assign({ type: 'task' }, Ai.validateParsed_(parsed, ctx), { title: parsed.title || s.slice(0, 200) });
+    });
+  },
+
+  validateAssist_(r, ctx) {
+    const list = r && Array.isArray(r.items) ? r.items.slice(0, 20) : [];
+    return list.map(it => {
+      if (!it || typeof it !== 'object') return null;
+      if (it.type === 'event') {
+        if (!it.title || !Shared.isDate(it.startDate)) return null;
+        return { type: 'event', title: String(it.title).slice(0, 200), startDate: it.startDate,
+          endDate: Shared.isDate(it.endDate) && it.endDate >= it.startDate ? it.endDate : it.startDate,
+          eventType: Shared.EVENT_TYPES.some(x => x.key === it.eventType) ? it.eventType : 'meeting',
+          teamId: ctx.teams.some(t => t.id === it.teamId) ? it.teamId : '' };
+      }
+      if (it.type === 'absence') {
+        if (!Shared.isDate(it.startDate)) return null;
+        return { type: 'absence', startDate: it.startDate,
+          endDate: Shared.isDate(it.endDate) && it.endDate >= it.startDate ? it.endDate : it.startDate,
+          absenceType: Shared.ABSENCE_TYPES.some(x => x.key === it.absenceType) ? it.absenceType : 'vacation',
+          email: ctx.users.some(u => u.email === it.email) ? it.email : ctx.me };
+      }
+      const task = Ai.validateParsed_(it, ctx);
+      return task.title ? Object.assign({ type: 'task' }, task) : null;
+    }).filter(Boolean);
+  },
+
   parseContext_(me) {
     return {
       today: Util.today(),

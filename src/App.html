@@ -552,7 +552,7 @@ function renderSidebar() {
     '<span id="sync" class="sync-dot" title="Wird gespeichert …"></span>' +
     '<button class="icon-btn rail-toggle" data-action="rail-toggle" title="Seitenleiste ein-/ausklappen">' + icon('menu') + '</button></div>' +
     '<div class="side-scroll">' +
-    '<button class="side-search" data-action="palette" title="' + SEARCH_HINT + '">' + icon('search', 'sm') + '<span class="grow">Suchen …</span></button>' +
+    '<button class="side-search side-ai" data-action="assistant" title="KI-Assistent: Aufgaben, Termine und Urlaub per Text anlegen">' + icon('sparkle', 'sm') + '<span class="grow">KI-Assistent</span></button>' +
     navItem('dash', icon('home'), 'Übersicht') +
     navItem('home', icon('checksq'), 'Meine Aufgaben', mineOpen ? '<span class="count">' + mineOpen + '</span>' : '') +
     navItem('all', icon('inbox'), 'Alle Aufgaben') +
@@ -581,12 +581,14 @@ A.help = () => {
         '<li><b>Aufgaben anlegen</b> über „Neue Aufgabe“ oder die Suche. Jede Aufgabe gehört einer Person, ohne Auswahl dir.</li>' +
         '<li><b>Planen</b> im Kalender: Aufgaben aus der linken Liste ins Wochenraster ziehen.</li>' +
         '<li><b>Urlaub eintragen</b> im Kalender oder unter Verfügbarkeit. Feiertage kommen automatisch aus Land und Region in deinem Profil.</li>' +
-        '<li><b>Überblick</b> auf der Übersicht: Fokus heute, Auslastung der nächsten Wochen, erledigte Aufgaben.</li>',
+        '<li><b>Überblick</b> auf der Übersicht: Fokus heute, Auslastung der nächsten Wochen, erledigte Aufgaben.</li>' +
+        '<li><b>KI-Assistent</b> (oben links): in eigenen Worten schreiben, z. B. „Anna morgen Angebot prüfen, 2h, ich bin Mo–Mi im Urlaub“. Du prüfst die Vorschau und legst alles mit einem Klick an.</li>',
       '<li><b>Create a team</b> (sidebar → Teams → +) and add colleagues under <i>Members</i>.</li>' +
         '<li><b>Create tasks</b> with “New task” or the search. Every task belongs to someone, to you if nobody is picked.</li>' +
         '<li><b>Plan</b> in the calendar: drag tasks from the list on the left into the week grid.</li>' +
         '<li><b>Add vacation</b> in the calendar or under Availability. Public holidays come from the country and region in your profile.</li>' +
-        '<li><b>Overview</b> on the dashboard: today’s focus, workload for the next weeks, tasks done.</li>') + '</ol>' +
+        '<li><b>Overview</b> on the dashboard: today’s focus, workload for the next weeks, tasks done.</li>' +
+        '<li><b>AI assistant</b> (top left): write in your own words, e.g. “Anna review offer tomorrow, 2h, I am off Mon–Wed”. Check the preview and create everything in one click.</li>') + '</ol>' +
       '<h4>' + L('Tastenkürzel', 'Keyboard shortcuts') + '</h4><table class="keys">' +
       row([k, 'K'], L('Suchen oder neue Aufgabe anlegen', 'Search or create a task')) + row(['N'], L('Neue Aufgabe', 'New task')) +
       row(['Esc'], L('Fenster oder Detailansicht schließen', 'Close a window or the task panel')) + row(['?'], L('Diese Hilfe', 'This help')) +

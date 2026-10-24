@@ -425,6 +425,88 @@ function absenceModal(a) {
 A['absence-new'] = () => absenceModal();
 A['absence-edit'] = (el, e) => { e.stopPropagation(); const a = calFind('absences', el.dataset.id); if (a) absenceModal(a); };
 
+/* ---------------- AI assistant ----------------
+   Free text in, preview cards out (task / event / absence). Every card can be edited or unticked;
+   "Alles anlegen" creates the kept ones and offers one undo for all of them. */
+let assistState = null;
+A.assistant = () => {
+  assistState = { items: [], source: '' };
+  openModal({
+    title: 'KI-Assistent', submitLabel: 'Alles anlegen',
+    body: '<p class="hint" style="margin:0 0 8px">Beschreib in eigenen Worten, was angelegt werden soll: Aufgaben, Termine oder Urlaub. Du siehst vorher eine Vorschau und entscheidest.</p>' +
+      '<textarea class="textarea ai-in" rows="4" placeholder="z. B. Lege für Anna morgen „Angebot prüfen“ an, 2h. Ich bin nächste Woche Montag bis Mittwoch im Urlaub."></textarea>' +
+      '<div class="ai-bar"><button type="button" class="btn outline" data-action="ai-run">' + icon('sparkle', 'sm') + 'Vorschlag erstellen</button>' +
+      '<span class="hint">' + (IS_MAC ? 'Cmd' : 'Strg') + ' + Enter</span></div><div id="ai-prev"></div>',
+    onSubmit: () => assistCreate(),
+    mount: m => {
+      $('.ai-in', m).addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); A['ai-run'](); } });
+      const edit = e => {
+        const el = e.target.closest('[data-ai-i]');
+        if (!el) return;
+        const it = assistState.items[Number(el.dataset.aiI)];
+        if (el.type === 'checkbox') { it.keep = el.checked; el.closest('.ai-card').classList.toggle('off', !el.checked); } else it[el.dataset.aiF] = el.value;
+      };
+      m.addEventListener('input', edit);
+      m.addEventListener('change', edit);
+    },
+  });
+};
+A['ai-run'] = () => {
+  const ta = $('#modal-root .ai-in');
+  if (!ta.value.trim()) { ta.focus(); return Promise.resolve(); }
+  $('#ai-prev').innerHTML = '<div class="ai-loading">' + icon('sparkle', 'sm') + (S.ai.enabled ? 'Gemini denkt nach…' : 'Wird erkannt…') + '</div>';
+  return call('ai.assist', { text: ta.value }).then(res => {
+    assistState = { items: res.items.map(x => Object.assign({ keep: true }, x)), source: res.source };
+    drawAssist();
+  }).catch(err => { $('#ai-prev').innerHTML = ''; fail(err); });
+};
+function drawAssist() {
+  const st = assistState;
+  const TYPES = { task: ['checksq', 'Aufgabe'], event: ['calendar', 'Termin'], absence: ['plane', 'Abwesenheit'] };
+  const date = (i, f, v, label) => '<label class="ai-d"><span>' + label + '</span><input class="input" type="date" data-ai-i="' + i + '" data-ai-f="' + f + '" value="' + esc(v || '') + '"></label>';
+  const card = (it, i) => {
+    const ty = TYPES[it.type] || TYPES.task;
+    const head = it.type === 'absence'
+      ? '<span class="ai-title">' + esc(absenceType(it.absenceType).label) + ' · ' + esc(user(it.email).name) + '</span>'
+      : '<input class="input ai-title" data-ai-i="' + i + '" data-ai-f="title" value="' + esc(it.title || '') + '">';
+    const meta = it.type === 'task'
+      ? date(i, 'dueDate', it.dueDate, 'Fällig') + '<span class="ai-meta">' + (it.assignees && it.assignees.length ? avatars(it.assignees, 3) : avatar(S.me.email)) +
+        (it.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(it.estimate)) + '</span>' : '') + (it.priority ? prioTag(it.priority) : '') +
+        (it.projectId && project(it.projectId) ? projectChip(project(it.projectId)) : '') + '</span>'
+      : date(i, 'startDate', it.startDate, 'Von') + date(i, 'endDate', it.endDate, 'Bis');
+    return '<div class="ai-card' + (it.keep ? '' : ' off') + '"><label class="ai-k"><input type="checkbox" data-ai-i="' + i + '"' + (it.keep ? ' checked' : '') + '></label>' +
+      '<div class="ai-main"><div class="ai-row"><span class="ai-type">' + icon(ty[0], 'sm') + ty[1] + '</span>' + head + '</div><div class="ai-row">' + meta + '</div></div></div>';
+  };
+  $('#ai-prev').innerHTML = (st.source === 'rules'
+    ? '<div class="notice">Dummy-Vorschlag, KI noch nicht verbunden: Die Einträge wurden mit Regeln erkannt (ein Eintrag pro Satz). Für Gemini in den Skripteigenschaften <code>VERTEX_API_KEY</code> setzen.</div>' : '') +
+    (st.items.length ? '<div class="ai-cards">' + st.items.map(card).join('') + '</div>' : '<div class="empty-w">Nichts erkannt. Formuliere es etwas konkreter, z. B. mit Datum und Person.</div>');
+}
+function assistCreate() {
+  if (!assistState || !assistState.items.length) return A['ai-run']().then(() => false);
+  const keep = assistState.items.filter(x => x.keep);
+  if (!keep.length) { toast('Nichts ausgewählt.'); return false; }
+  const created = [];
+  const jobs = keep.map(it => {
+    if (it.type === 'event') {
+      return call('events.save', { title: it.title, type: it.eventType, startDate: it.startDate, endDate: it.endDate, teamId: it.teamId })
+        .then(e => created.push(['events.remove', e.id]));
+    }
+    if (it.type === 'absence') {
+      return call('absences.save', { email: it.email, type: it.absenceType, startDate: it.startDate, endDate: it.endDate })
+        .then(a => created.push(['absences.remove', a.id]));
+    }
+    const f = { title: it.title || 'Ohne Titel' };
+    ['dueDate', 'assignees', 'projectId', 'priority', 'estimate', 'recurrence', 'tags', 'teams'].forEach(k => { if (it[k] && (!Array.isArray(it[k]) || it[k].length)) f[k] = it[k]; });
+    return Promise.resolve(createTask(f)).then(t => { if (t) created.push(['tasks.remove', t.id]); });
+  });
+  return Promise.all(jobs).then(() => {
+    S.cal.cache = {}; S.cap.data = null; S.briefing = null;
+    render();
+    toast(created.length + (created.length === 1 ? ' Eintrag angelegt' : ' Einträge angelegt'), { duration: 8000, action: { label: 'Rückgängig', fn: () =>
+      Promise.all(created.map(c => call(c[0], { id: c[1] }))).then(() => reloadAll()).then(() => toast('Rückgängig gemacht.')).catch(fail) } });
+  });
+}
+
 function confirmDelete(text, fn) {
   openModal({
     title: 'Wirklich löschen?',

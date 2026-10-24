@@ -297,6 +297,36 @@ test('AI placeholder: rules mode works without key', () => {
   assert.ok(brief.text.length > 10);
 });
 
+test('AI assistant: dummy without key, validated items with key', () => {
+  as(ME);
+  const d = call('ai.assist', { text: 'Angebot prüfen morgen @anna 2h. Ich bin übermorgen im Urlaub' });
+  assert.strictEqual(d.source, 'rules');
+  assert.strictEqual(d.items.length, 2);
+  assert.strictEqual(d.items[0].type, 'task');
+  assert.strictEqual(d.items[0].assignees[0], 'anna.schmidt@firma.de');
+  assert.strictEqual(d.items[0].estimate, 2);
+  assert.strictEqual(d.items[1].type, 'absence');
+  assert.strictEqual(d.items[1].email, ME);
+  assert.ok(fails('ai.assist', { text: '  ' }), 'empty text is rejected');
+
+  ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_API_KEY', 'test-key');
+  ctx.__GAS_FETCH__ = () => ({
+    getResponseCode: () => 200,
+    getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [
+      { type: 'task', title: 'Angebot prüfen', assignees: ['anna.schmidt@firma.de', 'fremd@evil.com'], estimate: 2 },
+      { type: 'event', title: 'Review', startDate: '2026-11-02', eventType: 'meeting' },
+      { type: 'absence', startDate: 'kaputt' },
+    ] }) }] } }] }),
+  });
+  const a = call('ai.assist', { text: 'egal' });
+  assert.strictEqual(a.source, 'ai');
+  assert.strictEqual(a.items.length, 2, 'invalid absence is dropped');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(a.items[0].assignees)), ['anna.schmidt@firma.de'], 'unknown people are dropped');
+  assert.strictEqual(a.items[1].endDate, '2026-11-02');
+  ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_API_KEY', 'PLATZHALTER_VERTEX_AI_API_KEY');
+  ctx.__GAS_FETCH__ = null;
+});
+
 test('AI uses Vertex when a key is configured', () => {
   as(ME);
   ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_API_KEY', 'test-key');
