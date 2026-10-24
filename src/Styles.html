@@ -12,7 +12,7 @@
   --border-strong: #d3dbe9;
   --text: #16223b;
   --text-2: #55617c;
-  --text-3: #8d98b0;
+  --text-3: #606b81;
   --accent: #0050aa;
   --accent-hover: #003f88;
   --accent-soft: #e7f0fc;
@@ -44,7 +44,7 @@
 :root[data-theme="dark"] {
   --canvas: #0a111d; --bg: #111a2b; --bg-subtle: #162135; --bg-hover: #1b2942; --bg-active: #1f3358; --bg-elevated: #162135;
   --border: #1e2c46; --border-strong: #2d3f63;
-  --text: #e9eefa; --text-2: #a2afc9; --text-3: #6d7c9a;
+  --text: #e9eefa; --text-2: #a2afc9; --text-3: #8593b0;
   --accent: #1d6fd8; --accent-hover: #3b86ea; --accent-soft: #12294f; --accent-text: #8fbfff;
   --yellow-soft: #3a3510; --yellow-ink: #ffe98a;
   --danger: #ff4f5a; --danger-soft: #3b1b22; --warning: #ffd84d; --warning-soft: #3a3510;
@@ -60,7 +60,7 @@
   :root:not([data-theme="light"]) {
     --canvas: #0a111d; --bg: #111a2b; --bg-subtle: #162135; --bg-hover: #1b2942; --bg-active: #1f3358; --bg-elevated: #162135;
     --border: #1e2c46; --border-strong: #2d3f63;
-    --text: #e9eefa; --text-2: #a2afc9; --text-3: #6d7c9a;
+    --text: #e9eefa; --text-2: #a2afc9; --text-3: #8593b0;
     --accent: #1d6fd8; --accent-hover: #3b86ea; --accent-soft: #12294f; --accent-text: #8fbfff;
     --yellow-soft: #3a3510; --yellow-ink: #ffe98a;
     --danger: #ff4f5a; --danger-soft: #3b1b22; --warning: #ffd84d; --warning-soft: #3a3510;
@@ -279,6 +279,27 @@ svg.i.lg { width: 18px; height: 18px; }
 .fchip .avatar { width: 18px; height: 18px; font-size: 9px; margin-left: -4px; }
 .fchip.add { padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); color: var(--text-2); }
 .filter-chips { margin-top: 10px; }
+.onboarding { margin-bottom: 14px; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.ob-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 10px; }
+.ob-step { display: flex; gap: 12px; align-items: flex-start; }
+.ob-step p { margin: 2px 0 8px; font-size: 13px; color: var(--text-2); }
+.ob-n { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--yellow); color: #3b3000; }
+@media (max-width: 860px) {
+  .ob-steps { grid-template-columns: 1fr; }
+  /* touch: at least 40px targets */
+  .icon-btn, .btn, .tbtn, .qtabs button, .seg button, .nav-item, .pop-item { min-height: 40px; }
+  .icon-btn { min-width: 40px; }
+  .add-p { opacity: 1; width: 32px; height: 32px; }
+}
+.help h4 { margin: 14px 0 6px; font-size: 14px; }
+.help h4:first-child { margin-top: 0; }
+.help ol { margin: 0; padding-left: 20px; font-size: 13.5px; line-height: 1.55; }
+.help table.keys { border-collapse: collapse; font-size: 13px; width: 100%; }
+.help table.keys td { padding: 5px 0; border-bottom: 1px solid var(--border); }
+.help table.keys td:first-child { width: 130px; white-space: nowrap; }
+.help kbd, .help code { font: inherit; font-size: 12px; font-weight: 600; background: var(--bg-hover); border-radius: 5px; padding: 1px 6px; }
+.net-banner { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 90; padding: 8px 16px; border-radius: 999px;
+  background: var(--danger); color: #fff; font-size: 13px; font-weight: 600; box-shadow: var(--shadow-pop); }
 /* dashboard: workload next 4 weeks */
 .wl-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) 92px 86px; align-items: center; gap: 12px; width: 100%; padding: 8px 6px; border-radius: 10px; }
 .wl-row:hover { background: var(--bg-hover); }
@@ -971,7 +992,7 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .sidebar.rail .side-foot { padding: 10px 8px; }
 .sidebar:not(.rail) .rail-toggle { display: none; }
 .rail-toggle { color: var(--text-3); }
-.top-search { display: flex; align-items: center; gap: 8px; width: min(440px, 38vw); height: 36px; padding: 0 12px; margin-left: 16px; border-radius: 12px; background: var(--bg); box-shadow: 0 0 0 1px var(--border); color: var(--text-3); font-size: 13px; }
+.top-search { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 36px; padding: 0 12px; margin: 0 8px 0 16px; border-radius: 12px; background: var(--bg); box-shadow: 0 0 0 1px var(--border); color: var(--text-3); font-size: 13px; }
 .top-search:hover { box-shadow: 0 0 0 1px var(--border-strong); color: var(--text-2); }
 .top-search span:first-of-type { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

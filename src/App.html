@@ -179,6 +179,7 @@ const ICONS = {
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   pie: '<path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>',
   back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   monitor: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
@@ -304,8 +305,25 @@ function syncDot() {
 }
 function fail(err) {
   console.error(err);
-  toast(err && err.message ? err.message : String(err), { error: true });
+  toast(friendlyError(err && err.message ? err.message : String(err)), { error: true });
 }
+/** Technical errors from Google become a sentence that says what happened and what to do. */
+function friendlyError(msg) {
+  if (!navigator.onLine || /NetworkError|Failed to fetch|network/i.test(msg)) return 'Keine Verbindung zum Server. Deine Änderung wurde nicht gespeichert – bitte Internet prüfen und erneut versuchen.';
+  if (/lock|timed? ?out|Zeitüberschreitung|Service invoked too many times|Rate Limit/i.test(msg)) return 'Der Server ist gerade ausgelastet. Bitte in ein paar Sekunden erneut versuchen.';
+  if (/authoriz|permission|Berechtigung/i.test(msg) && !/Keine Berechtigung|nur/i.test(msg)) return 'Dafür fehlt die Berechtigung. Bitte die Seite neu laden oder eine Admin-Person fragen.';
+  if (/ScriptError|Exception|undefined|null/i.test(msg)) return 'Da ist etwas schiefgelaufen. Bitte die Seite neu laden. Wenn es bleibt, melde es mit dieser Meldung: ' + msg;
+  return msg;
+}
+// connection status: a banner instead of silent failures
+function netBanner() {
+  let b = $('#net-banner');
+  if (navigator.onLine) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('div'); b.id = 'net-banner'; b.className = 'net-banner'; b.setAttribute('role', 'status'); document.body.appendChild(b); }
+  b.textContent = 'Offline – Änderungen werden erst gespeichert, wenn die Verbindung wieder da ist.';
+}
+window.addEventListener('online', () => { netBanner(); toast('Wieder online.'); refresh(); });
+window.addEventListener('offline', netBanner);
 
 /* ---------------- task data ---------------- */
 function applyTasks(list) {
@@ -375,6 +393,34 @@ function createTask(fields, opts) {
     fail(err);
   });
 }
+/**
+ * Delete with "Rückgängig" instead of a confirmation dialog: the task (and its sub-tasks) disappear at once,
+ * the server delete follows after a few seconds unless the user takes it back.
+ */
+const PENDING_DELETES = {};
+function deleteWithUndo(t) {
+  const ids = [t.id];
+  for (let i = 0; i < ids.length; i++) S.tasks.forEach(x => { if (x.parentId === ids[i] && ids.indexOf(x.id) < 0) ids.push(x.id); });
+  const removed = S.tasks.filter(x => ids.indexOf(x.id) >= 0);
+  dropTasks(ids);
+  if (ids.indexOf(S.peekId) >= 0) { S.peekId = null; S.peekFull = false; }
+  render();
+  const send = () => {
+    delete PENDING_DELETES[t.id];
+    call('tasks.remove', { id: t.id }).catch(err => { S.tasks = S.tasks.concat(removed); render(); fail(err); });
+  };
+  const timer = setTimeout(send, 6000);
+  PENDING_DELETES[t.id] = { timer: timer, send: send };
+  toast('„' + t.title + '“ gelöscht', { duration: 6000, action: { label: 'Rückgängig', fn: () => {
+    clearTimeout(timer);
+    delete PENDING_DELETES[t.id];
+    S.tasks = S.tasks.concat(removed);
+    render();
+  } } });
+}
+// leaving the page: send deletes that are still waiting for their undo window
+window.addEventListener('pagehide', () => Object.keys(PENDING_DELETES).forEach(id => { clearTimeout(PENDING_DELETES[id].timer); PENDING_DELETES[id].send(); }));
+
 /** Tasks created in this session; untouched ones are thrown away when their panel closes. */
 const FRESH = {};
 function discardIfBlank(id) {
@@ -506,7 +552,7 @@ function renderSidebar() {
     '<span id="sync" class="sync-dot" title="Wird gespeichert …"></span>' +
     '<button class="icon-btn rail-toggle" data-action="rail-toggle" title="Seitenleiste ein-/ausklappen">' + icon('menu') + '</button></div>' +
     '<div class="side-scroll">' +
-    '<button class="side-search" data-action="palette">' + icon('search', 'sm') + '<span class="grow">Suchen …</span><span class="kbd">⌘K</span></button>' +
+    '<button class="side-search" data-action="palette" title="' + SEARCH_HINT + '">' + icon('search', 'sm') + '<span class="grow">Suchen …</span></button>' +
     navItem('dash', icon('home'), 'Übersicht') +
     navItem('home', icon('checksq'), 'Meine Aufgaben', mineOpen ? '<span class="count">' + mineOpen + '</span>' : '') +
     navItem('all', icon('inbox'), 'Alle Aufgaben') +
@@ -520,9 +566,48 @@ function renderSidebar() {
     esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button></div>');
   syncDot();
 }
+const APP_VERSION = '1.14 · 24.10.2026';
+/** Help: short guide, shortcuts, quick-add syntax, version. Opens with the "?" button or key. */
+A.help = () => {
+  const en = LANG === 'en';
+  const L = (de, e) => (en ? e : de);
+  const k = IS_MAC ? 'Cmd' : L('Strg', 'Ctrl');
+  const row = (keys, what) => '<tr><td>' + keys.map(x => '<kbd>' + x + '</kbd>').join(' ') + '</td><td>' + what + '</td></tr>';
+  openModal({
+    title: L('Hilfe', 'Help'), submitLabel: L('Verstanden', 'Got it'),
+    body: '<div class="help" translate="no">' +
+      '<h4>' + L('So funktioniert Taskraum', 'How Taskraum works') + '</h4><ol>' +
+      L('<li><b>Team anlegen</b> (Seitenleiste → Teams → +) und Kolleg:innen unter <i>Mitglieder</i> hinzufügen.</li>' +
+        '<li><b>Aufgaben anlegen</b> über „Neue Aufgabe“ oder die Suche. Jede Aufgabe gehört einer Person, ohne Auswahl dir.</li>' +
+        '<li><b>Planen</b> im Kalender: Aufgaben aus der linken Liste ins Wochenraster ziehen.</li>' +
+        '<li><b>Urlaub eintragen</b> im Kalender oder unter Verfügbarkeit. Feiertage kommen automatisch aus Land und Region in deinem Profil.</li>' +
+        '<li><b>Überblick</b> auf der Übersicht: Fokus heute, Auslastung der nächsten Wochen, erledigte Aufgaben.</li>',
+      '<li><b>Create a team</b> (sidebar → Teams → +) and add colleagues under <i>Members</i>.</li>' +
+        '<li><b>Create tasks</b> with “New task” or the search. Every task belongs to someone, to you if nobody is picked.</li>' +
+        '<li><b>Plan</b> in the calendar: drag tasks from the list on the left into the week grid.</li>' +
+        '<li><b>Add vacation</b> in the calendar or under Availability. Public holidays come from the country and region in your profile.</li>' +
+        '<li><b>Overview</b> on the dashboard: today’s focus, workload for the next weeks, tasks done.</li>') + '</ol>' +
+      '<h4>' + L('Tastenkürzel', 'Keyboard shortcuts') + '</h4><table class="keys">' +
+      row([k, 'K'], L('Suchen oder neue Aufgabe anlegen', 'Search or create a task')) + row(['N'], L('Neue Aufgabe', 'New task')) +
+      row(['Esc'], L('Fenster oder Detailansicht schließen', 'Close a window or the task panel')) + row(['?'], L('Diese Hilfe', 'This help')) +
+      row(['1', '–', '5'], L('Kalender: Woche, Tag, Monat, Agenda, Heatmap', 'Calendar: week, day, month, agenda, heatmap')) +
+      row(['T'], L('Kalender: heute', 'Calendar: today')) + row(['←', '→'], L('Kalender: vor und zurück', 'Calendar: back and forward')) + '</table>' +
+      '<h4>' + L('Schnell-Eingabe in der Suche', 'Quick add in the search') + '</h4><p class="hint">' +
+      L('Einfach mitschreiben, Taskraum erkennt es: ', 'Just type it, Taskraum picks it up: ') +
+      '<code>' + L('morgen', 'morgen (tomorrow)') + '</code>, <code>15.11.</code>, <code>@anna</code> ' + L('(zuweisen)', '(assign)') + ', <code>#website</code> ' +
+      L('(Projekt oder Tag)', '(project or tag)') + ', <code>+team</code>, <code>!hoch</code> ' + L('(Priorität)', '(priority)') + ', <code>2h</code> ' +
+      L('(Aufwand)', '(estimate)') + ', <code>jeden montag</code> ' + L('(Wiederholung)', '(repeat)') + '.</p>' +
+      '<h4>' + L('Fragen oder Ideen?', 'Questions or ideas?') + '</h4><p class="hint">' +
+      L('Wende dich an deine Admin-Person. Sie sieht unter Einstellungen alle Personen und Firmen-Feiertage.', 'Ask your admin. Admins see all people and company holidays under Settings.') + '</p>' +
+      '<p class="hint">Version ' + APP_VERSION + '</p></div>',
+    onSubmit: () => true,
+  });
+};
+const IS_MAC =/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const SEARCH_HINT = 'Suchen oder neue Aufgabe anlegen (Tastenkürzel: ' + (IS_MAC ? 'Cmd' : 'Strg') + ' + K)';
 /** Theme and language: always top right (top bar, or the header card on calendar and availability). */
 function prefControls() {
-  return '<div class="prefs">' + themeButton() +
+  return '<div class="prefs"><button class="icon-btn theme-btn" data-action="help" title="Hilfe und Tastenkürzel" aria-label="Hilfe und Tastenkürzel">' + icon('help') + '</button>' + themeButton() +
     '<div class="lang-sw" role="group" aria-label="Sprache">' + ['de', 'en'].map(l =>
       '<button class="' + (LANG === l ? 'on' : '') + '" data-action="lang" data-lang="' + l + '">' + l.toUpperCase() + '</button>').join('') + '</div></div>';
 }
@@ -560,8 +645,7 @@ function renderTopbar() {
     '<nav class="crumbs">' + crumbs.map((c, i) => (i ? '<span class="sep">/</span>' : '') +
       (c.view ? '<button data-action="nav" data-view="' + c.view + '" data-id="' + esc(c.id) + '">' + c.html + '</button>'
         : '<button class="current">' + c.html + '</button>')).join('') + '</nav>' +
-    (cal ? '' : '<button class="top-search" data-action="palette">' + icon('search', 'sm') + '<span>Aufgaben und Projekte suchen</span><span class="kbd">⌘K</span></button>') +
-    '<div class="spacer"></div>' +
+    (cal ? '<div class="spacer"></div>' : '<button class="top-search" data-action="palette" title="' + SEARCH_HINT + '">' + icon('search', 'sm') + '<span>Aufgaben, Projekte und Personen suchen …</span></button>') +
     (S.ai.enabled && !cal ? '<span class="chip accent">' + icon('sparkle', 'sm') + 'KI aktiv</span>' : '') +
     (['home', 'all', 'dash', 'calendar', 'capacity'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : '') + prefControls());
 }
@@ -602,6 +686,7 @@ document.addEventListener('keydown', e => {
     if (e.key === 'ArrowLeft') { A['cal-prev'](); return; }
     if (e.key === 'ArrowRight') { A['cal-next'](); return; }
   }
+  if (e.key === '?') { e.preventDefault(); A.help(); return; }
   if (e.key === 'c' || e.key === 'n') { e.preventDefault(); openPalette(); }
   if (e.key === '/') { e.preventDefault(); openPalette(); }
 });

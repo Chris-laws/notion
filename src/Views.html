@@ -971,14 +971,14 @@ function dashPage() {
   const focus = open.filter(x => (x.dueDate && x.dueDate <= t) || x.planDate === t).sort((a, c) => (a.dueDate || '9') < (c.dueDate || '9') ? -1 : 1 || rankPrio(a) - rankPrio(c));
   const fcard = x => {
     const over = x.dueDate && x.dueDate < t;
-    return '<div class="fcard" data-action="open-task" data-id="' + esc(x.id) + '"><span class="check" data-action="toggle-done" data-id="' + esc(x.id) + '" role="checkbox" aria-checked="false"></span>' +
+    return '<div class="fcard" data-action="open-task" data-id="' + esc(x.id) + '"><span class="check" data-action="toggle-done" data-id="' + esc(x.id) + '" role="checkbox" aria-checked="false" title="Als erledigt markieren"></span>' +
       '<div class="fc-main"><div class="fc-t"><span>' + esc(x.title) + '</span>' + (over ? '<span class="fc-over">Überfällig</span>' : '') + '</div>' +
       '<div class="fc-m">' + statusTag(x.status) + prioTag(x.priority) + (x.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(x.estimate)) + '</span>' : '') +
       (x.dueDate ? '<span class="fc-d">Fällig ' + esc(fmtDate(x.dueDate, { absolute: true })) + '</span>' : '') + '</div></div></div>';
   };
   const focusCard = '<div class="card-w focus-card"><h3>' + icon('bolt', 'sm') + 'Heute im Fokus<button class="btn white sm more2" data-action="nav" data-view="home">Alle (' + focus.length + ')</button></h3>' +
     '<p class="hint" style="margin:-6px 0 12px">Aufgaben mit Fälligkeit oder Zeitblock heute und früher' + (b && b.available ? ' · Auslastung ' + util + ' %' : '') + '</p>' +
-    (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Nichts fällig. Mit ⌘K legst du die nächste Aufgabe an.</div>') + '</div>';
+    (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Heute ist nichts fällig. Neue Aufgaben legst du oben über „Neue Aufgabe“ an.</div>') + '</div>';
   return '<div class="page wide">' +
     '<div class="card-w dash-top"><div class="du">' + avatar(S.me.email, 'xl') + '<div><h1>' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '!</h1><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div></div></div>' +
     '<div class="dprog"><div><div class="pt">Dein Fortschritt heute</div><div class="ps">' + (doneToday + dueNow ? '<b>' + doneToday + ' von ' + (doneToday + dueNow) + '</b> Aufgaben erledigt' : 'Heute ist nichts fällig') + '</div></div>' +
@@ -987,7 +987,7 @@ function dashPage() {
     '<button class="icon-btn sq" data-action="brief-reload" title="Briefing aktualisieren">' + icon('sparkle') + '</button>' +
     '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
     '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>' +
-    '<div class="fit-body" data-keep-scroll="fit"><div class="brief-w">' + icon('sparkle', 'lg') + '<div class="txt">' +
+    '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + '<div class="brief-w">' + icon('sparkle', 'lg') + '<div class="txt">' +
     (b ? esc(b.text) : '<div class="skeleton" style="width:70%;margin:6px 0"></div><div class="skeleton" style="width:40%"></div>') +
     (b && b.focus.length ? '<div class="focus">' + b.focus.map(f => '<button data-action="open-task" data-id="' + esc(f.id) + '">' + (f.priority ? prioTag(f.priority, true) : glyph('todo')) + '<span>' + esc(f.title) + '</span></button>').join('') + '</div>' : '') +
     (b ? '<div class="src">' + (b.source === 'ai' ? 'Zusammengefasst von Vertex AI' : 'Automatisch zusammengefasst') + '</div>' : '') +
@@ -1002,6 +1002,17 @@ function dashPage() {
     (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true }) : '<div class="skeleton"></div>') + '</div>' +
     loadCard + doneCard +
     '</div></div></div>';
+}
+
+/** First start: while there is no team yet, the dashboard says what to do first. */
+function onboardingHtml() {
+  if (S.teams.length) return '';
+  const step = (n, title, text, btn) => '<div class="ob-step"><span class="ob-n">' + n + '</span><div><b>' + title + '</b><p>' + text + '</p>' + btn + '</div></div>';
+  return '<div class="card-w onboarding"><h3>' + icon('sparkle', 'sm') + 'Willkommen bei Taskraum – so geht’s los</h3><div class="ob-steps">' +
+    step(1, 'Profil prüfen', 'Land, Region und Arbeitszeit bestimmen Feiertage und deine Kapazität.', '<button class="btn sm outline" data-action="nav" data-view="settings">Zum Profil</button>') +
+    step(2, 'Team anlegen', 'Lege ein Team an und füge Kolleg:innen hinzu.', '<button class="btn sm primary" data-action="team-new">Team anlegen</button>') +
+    step(3, 'Erste Aufgabe', 'Schreib einfach los, z. B. „Angebot prüfen morgen !hoch“.', '<button class="btn sm outline" data-action="new-task">Neue Aufgabe</button>') +
+    '</div><button class="linkbtn" data-action="help">Kurzanleitung und Tastenkürzel</button></div>';
 }
 
 /**
@@ -1077,7 +1088,7 @@ A['cal-agenda'] = () => { S.cal.mode = 'agenda'; go('calendar'); };
 function homePage() {
   const mine = S.tasks.filter(isMine);
   return '<div class="page wide">' +
-    database(mine, { title: 'Meine Aufgaben', sub: 'Alles, was dir zugewiesen ist: persönlich, über Teams und in Projekten.', people: [S.me.email], empty: 'Nichts offen. Mit ⌘K legst du die nächste Aufgabe an.' }) + '</div>';
+    database(mine, { title: 'Meine Aufgaben', sub: 'Alles, was dir zugewiesen ist: persönlich, über Teams und in Projekten.', people: [S.me.email], empty: 'Nichts offen. Neue Aufgaben legst du über „Neue Aufgabe“ an.' }) + '</div>';
 }
 
 /* day planner: pick tasks from the list, drop them on the time line */
@@ -1168,7 +1179,7 @@ function timeGridHtml(days, o) {
   const cols = days.map(d => {
     const wd = Shared.weekday(d);
     const planned = S.tasks.filter(t => t.planDate === d && inScope(t));
-    return '<div class="wk-col' + (d === today ? ' today' : '') + (wd === 0 || wd === 6 ? ' weekend' : '') + '" data-plan-date="' + d + '" data-action="wk-slot" data-date="' + d + '">' + blocksHtml(planned) + nowLineHtml(d) + '</div>';
+    return '<div class="wk-col' + (d === today ? ' today' : '') + (wd === 0 || wd === 6 ? ' weekend' : '') + '" data-plan-date="' + d + '" data-action="wk-slot" data-date="' + d + '" title="Klicken, um hier eine Aufgabe einzuplanen">' + blocksHtml(planned) + nowLineHtml(d) + '</div>';
   }).join('');
   const h = (PL.to - PL.from) / 60 * PL.hh;
   return '<div class="card-w wk" data-keep-scroll="wk" style="--cols:' + days.length + ';--hh:' + PL.hh + 'px;--tlh:' + h + 'px">' +
@@ -1620,7 +1631,7 @@ function settingsPage() {
   const profile = '<form data-on-submit="profile" class="settings-grid">' +
     field('Name', '<input class="input" name="name" value="' + esc(me.name) + '">') +
     divField('Farbe', '<input type="hidden" name="color" value="' + esc(me.color) + '"><div class="color-row">' + AVATAR_COLORS.map(c =>
-      '<button type="button" class="' + (c === me.color ? 'on' : '') + '" style="background:' + c + '" data-action="pick-color" data-v="' + c + '"></button>').join('') + '</div>') +
+      '<button type="button" class="' + (c === me.color ? 'on' : '') + '" style="background:' + c + '" data-action="pick-color" data-v="' + c + '" title="Farbe wählen" aria-label="Farbe wählen"></button>').join('') + '</div>') +
     field('Land (für Feiertage)', countrySelect(me.country)) +
     divField('Bundesland / Region', '<div data-region-box>' + regionField(me.country, me.region || '') + '</div>') +
     field('Wochenstunden', '<input class="input" type="number" min="0" max="80" step="0.5" name="hoursPerWeek" value="' + esc(me.hoursPerWeek) + '">') +

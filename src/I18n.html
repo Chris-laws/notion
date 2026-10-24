@@ -35,8 +35,8 @@ const EN = {
   'Fortschritt': 'Progress', 'Aufgaben': 'Tasks', 'Aufgabenstatus': 'Task status', 'Als Nächstes fällig': 'Due next',
   'Nichts Offenes mit Datum.': 'Nothing open with a date.', 'Heute im Fokus': 'Today’s focus',
   'Aufgaben mit Fälligkeit oder Zeitblock heute und früher': 'Tasks due or scheduled today or earlier',
-  'Nichts fällig. Mit ⌘K legst du die nächste Aufgabe an.': 'Nothing due. Press ⌘K to add the next task.',
-  'Nichts offen. Mit ⌘K legst du die nächste Aufgabe an.': 'Nothing open. Press ⌘K to add the next task.',
+  'Heute ist nichts fällig. Neue Aufgaben legst du oben über „Neue Aufgabe“ an.': 'Nothing due today. Add new tasks with “New task” at the top.',
+  'Nichts offen. Neue Aufgaben legst du über „Neue Aufgabe“ an.': 'Nothing open. Add new tasks with “New task”.',
   'Alle Teams sind ausreichend besetzt.': 'All teams are sufficiently staffed.', 'Agenda, nächste 14 Tage': 'Agenda, next 14 days',
   'Alles ansehen': 'View all', 'Aktivität': 'Activity', 'Kurzstatistik': 'Quick stats', 'Abschlussquote': 'Completion rate',
   'Offene Aufgaben': 'Open tasks', 'Überfällige Aufgaben': 'Overdue tasks', 'Aufgabenverteilung': 'Task distribution',
@@ -127,6 +127,17 @@ const EN = {
   'Geplanter Aufwand deiner offenen Aufgaben gegen deine Arbeitszeit, Urlaub und Feiertage schon abgezogen. Der Strich ist deine Kapazität.':
     'Planned effort of your open tasks against your working time, vacation and holidays already deducted. The line is your capacity.',
   'Noch nichts erledigt. Sobald du Aufgaben abhakst, siehst du hier deinen Wochenverlauf.': 'Nothing done yet. Once you tick off tasks, your weekly trend shows up here.',
+  'Aufgaben, Projekte und Personen suchen …': 'Search tasks, projects and people …', 'Hilfe und Tastenkürzel': 'Help and shortcuts',
+  'Aufgaben ansehen': 'View tasks', 'Wieder online.': 'Back online.', 'Verstanden': 'Got it', 'Hilfe': 'Help',
+  'Offline – Änderungen werden erst gespeichert, wenn die Verbindung wieder da ist.': 'Offline – changes are saved once the connection is back.',
+  'Keine Verbindung zum Server. Deine Änderung wurde nicht gespeichert – bitte Internet prüfen und erneut versuchen.': 'No connection to the server. Your change was not saved – please check your internet and try again.',
+  'Der Server ist gerade ausgelastet. Bitte in ein paar Sekunden erneut versuchen.': 'The server is busy right now. Please try again in a few seconds.',
+  'Dafür fehlt die Berechtigung. Bitte die Seite neu laden oder eine Admin-Person fragen.': 'You are missing the permission for this. Please reload the page or ask an admin.',
+  'Willkommen bei Taskraum – so geht’s los': 'Welcome to Taskraum – getting started', 'Profil prüfen': 'Check your profile',
+  'Land, Region und Arbeitszeit bestimmen Feiertage und deine Kapazität.': 'Country, region and working hours set your holidays and capacity.',
+  'Zum Profil': 'Open profile', 'Lege ein Team an und füge Kolleg:innen hinzu.': 'Create a team and add colleagues.', 'Erste Aufgabe': 'First task',
+  'Schreib einfach los, z. B. „Angebot prüfen morgen !hoch“.': 'Just type, e.g. “Review offer morgen !hoch”.', 'Kurzanleitung und Tastenkürzel': 'Quick guide and shortcuts',
+  'Als erledigt markieren': 'Mark as done', 'Farbe wählen': 'Pick a colour', 'Klicken, um hier eine Aufgabe einzuplanen': 'Click to plan a task here',
   'Alle offenen': 'All open', 'Anstehend': 'Upcoming', 'Projekt suchen…': 'Search project…', 'Name oder E-Mail suchen…': 'Search name or e-mail…',
   'Rückgängig': 'Undo', 'Person hinzufügen': 'Add person',
   'Design: wie System': 'Theme: system', 'Design: Hell': 'Theme: light', 'Design: Dunkel': 'Theme: dark',
@@ -164,7 +175,9 @@ const PATTERNS = [
   [/^(.+) · (\d+) Tage? weg$/, (m, x, n) => x + ' · ' + n + (n === '1' ? ' day' : ' days') + ' away'],
   [/^(.+) \(([A-Z]{2})\)$/, (m, x, cc) => trText(x) + ' (' + cc + ')'],
   [/^([\d,.]+) von ([\d,.]+) h$/, '$1 of $2 h'], [/^(\d+) % von (.+) geplant$/, '$1 % of $2 planned'],
-  [/^Alle \((\d+)\)$/, 'All ($1)'],
+  [/^Alle \((\d+)\)$/, 'All ($1)'], [/^„(.+)“ gelöscht$/, '“$1” deleted'],
+  [/^Suchen oder neue Aufgabe anlegen \(Tastenkürzel: (\w+) \+ K\)$/, (m, k) => 'Search or create a task (shortcut: ' + (k === 'Strg' ? 'Ctrl' : k) + ' + K)'],
+  [/^Da ist etwas schiefgelaufen\. Bitte die Seite neu laden\. Wenn es bleibt, melde es mit dieser Meldung: (.+)$/, 'Something went wrong. Please reload the page. If it keeps happening, report it with this message: $1'],
   [/^▲ (\d+) mehr als letzte Woche$/, '▲ $1 more than last week'], [/^▼ (\d+) weniger als letzte Woche$/, '▼ $1 fewer than last week'],
   [/^Ø ([\d,.]+) pro Woche$/, 'Ø $1 per week'], [/^KW (\d+): (\d+) erledigt$/, 'Week $1: $2 done'],
   [/^(\d+) Aufgaben · (.+) h geplant · (.+) h verfügbar(.*)$/, (m, n, a, b, rest) => n + ' tasks · ' + a + ' h planned · ' + b + ' h available' +
@@ -234,7 +247,7 @@ function trDom(node) {
     if (v !== node.nodeValue) node.nodeValue = v;
     return;
   }
-  if (node.nodeType !== 1 || node.isContentEditable) return;
+  if (node.nodeType !== 1 || node.isContentEditable || node.getAttribute('translate') === 'no') return;
   TR_ATTRS.forEach(a => {
     const v = node.getAttribute(a);
     if (v) { const t = trText(v); if (t !== v) node.setAttribute(a, t); }

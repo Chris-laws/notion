@@ -12,7 +12,7 @@ function toast(msg, opts) {
   el.innerHTML = '<span>' + esc(msg) + '</span>' + (opts.action ? '<button>' + esc(opts.action.label) + '</button>' : '');
   if (opts.action) el.querySelector('button').onclick = () => { opts.action.fn(); el.remove(); };
   $('#toasts').appendChild(el);
-  setTimeout(() => el.remove(), opts.error || opts.warn ? 8000 : 3800);
+  setTimeout(() => el.remove(), opts.duration || (opts.error || opts.warn ? 8000 : 3800));
 }
 
 /* ---------------- popovers ---------------- */
@@ -527,7 +527,7 @@ function drawPalette(keepHover) {
     { kind: 'nav', view: 'home', label: 'Meine Aufgaben', ic: icon('checksq') },
     { kind: 'nav', view: 'all', label: 'Alle Aufgaben', ic: icon('inbox') },
     { kind: 'nav', view: 'calendar', label: 'Kalender', ic: icon('calendar') },
-    { kind: 'nav', view: 'capacity', label: 'Kapazität', ic: icon('gauge') },
+    { kind: 'nav', view: 'capacity', label: 'Verfügbarkeit', ic: icon('users') },
     { kind: 'nav', view: 'settings', label: 'Einstellungen', ic: icon('settings') },
   ].concat(S.teams.map(t => ({ kind: 'nav', view: 'team', id: t.id, label: t.name, ic: mark(t) })))
     .concat(S.projects.map(p => ({ kind: 'nav', view: 'project', id: p.id, label: p.name, ic: mark(p) })));
@@ -536,6 +536,10 @@ function drawPalette(keepHover) {
   if (ql) {
     S.tasks.filter(t => t.title.toLowerCase().indexOf(ql) >= 0).slice(0, 6).forEach(t => items.push({
       kind: 'task', id: t.id, html: '<span class="check' + (isDone(t) ? ' on' : '') + '" style="margin:0"></span><span>' + esc(t.title) + '</span><small>' + esc(fmtDate(t.dueDate)) + '</small>',
+    }));
+    // people: open their tasks
+    S.users.filter(u => (u.name + ' ' + u.email).toLowerCase().indexOf(ql) >= 0).slice(0, 4).forEach(u => items.push({
+      kind: 'person', email: u.email, html: avatar(u.email) + '<span>' + esc(u.name) + '</span><small>Aufgaben ansehen</small>',
     }));
   }
   palState.items = items;
@@ -549,6 +553,12 @@ function runPaletteItem(it, open) {
   if (!it) return;
   if (it.kind === 'nav') { closePalette(); go(it.view, it.id); return; }
   if (it.kind === 'task') { closePalette(); openPeek(it.id); return; }
+  if (it.kind === 'person') {
+    closePalette();
+    go('all');
+    setPrefs({ people: [it.email], quick: 'open' });
+    return;
+  }
   const text = $('#pal-in').value;
   const fromParse = p => {
     const f = contextDefaults();

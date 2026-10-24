@@ -300,8 +300,7 @@ A['peek-more'] = el => {
         { selected: [t.parentId], onPick: p => patchTask(t.id, { parentId: p }) });
       }
       if (v === 'del') {
-        confirmDelete('„' + t.title + '“' + (subtasks(t.id).length ? ' und ihre Unteraufgaben' : '') + ' löschen?', () =>
-          call('tasks.remove', { id: t.id }).then(ids => { dropTasks(ids); closePeek(); toast('Gelöscht'); }));
+        deleteWithUndo(t);
       }
     },
   });
