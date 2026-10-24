@@ -71,6 +71,21 @@ Bewertet wurde die Web-App aus Sicht der Nutzer:innen, Schwerpunkt Usability. �
 | 3 | 1024 px und 1280 px, Englisch, Offline-Banner, Fehlertexte, automatischer Wiederholversuch | Verfügbarkeit lief bei 1024 px seitlich über | behoben |
 | 4 | Kontrolllauf der Kernabläufe | keine | – |
 
+## Ladezeiten (1.21)
+
+Gemessen in der lokalen Vorschau (echter Servercode, Tabellen im Speicher); die absoluten Zeiten im echten Apps-Script-Betrieb liegen pro Aufruf typischerweise bei 0,5–2 s und sind dort mit `?perf=1` an der /exec-URL sichtbar (Tabelle unten rechts: Dauer gesamt, Zeit auf dem Server, gelesene Tabellen, Größe). Jede Serverantwort schreibt zusätzlich `api <Route> <ms> ms` ins Apps-Script-Protokoll (Ausführungen).
+
+| Messung | vorher | nachher |
+|---|---|---|
+| Serveraufrufe beim Öffnen des Dashboards | 4 (bootstrap, Briefing, 2× Kalenderdaten) | 3 (bootstrap, Schnellreport, 1× Kalenderfenster) |
+| Zusätzliche Aufrufe beim Wechsel in den Kalender | 2 | 0 |
+| Zusätzliche Aufrufe beim Wechsel in die Verfügbarkeit | 2 | 1 (nur Teamdaten) |
+| Summe Dashboard → Kalender → Verfügbarkeit | 8 | 4–5 |
+| Schnellreport bei erneutem Öffnen innerhalb 5 Min. | – | aus dem Cache |
+| Kleine Tabellen (Personen, Teams, Projekte, Firmen-Feiertage) | jede Anfrage aus der Tabelle | 2 Min. im Script-Cache, beim Schreiben verworfen |
+
+Ladezustände: Start (Logo + Ladeanzeige), Ladebalken oben bei jedem Aufruf, Skeletons in Schnellreport, Agenda, Auslastung, Verfügbarkeit, Seitenpanels, Kommentaren, Abwesenheiten; Spinner in Speichern-Knöpfen und im KI-Assistenten.
+
 ## Supportability
 
 | Befund | Status |

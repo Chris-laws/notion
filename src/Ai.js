@@ -217,6 +217,106 @@ const Ai = {
   },
 
   /** Short personal briefing for the home page. */
+  /**
+   * Quick report for a day, week or month: key numbers, a few bullets and actions that jump to the
+   * right view. Gemini words the summary when a key is set; the numbers always come from the data.
+   * Cached for 5 minutes per person, range and language so the dashboard opens fast.
+   */
+  report(p) {
+    const me = Auth.currentUser();
+    const range = ['day', 'week', 'month'].indexOf(p && p.range) >= 0 ? p.range : 'week';
+    const en = !!(p && p.lang === 'en');
+    const cacheKey = 'rep:' + me.email + ':' + range + ':' + (en ? 'en' : 'de');
+    const cache = CacheService.getScriptCache();
+    if (!(p && p.fresh)) {
+      const hit = cache.get(cacheKey);
+      if (hit) return JSON.parse(hit);
+    }
+    const ctx = Access.context(me);
+    const today = Util.today();
+    const from = range === 'day' ? today : range === 'week' ? Shared.mondayOf(today) : today.slice(0, 8) + '01';
+    const to = range === 'day' ? today : range === 'week' ? Shared.addDays(from, 6) : Shared.endOfMonth(from);
+    const visible = Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx));
+    const mineAll = visible.filter(t => (t.assignees || []).indexOf(me.email) >= 0);
+    const open = mineAll.filter(t => t.status !== 'done');
+    const inRange = d => d && d >= from && d <= to;
+    const done = mineAll.filter(t => t.status === 'done' && inRange(String(t.completedAt || '').slice(0, 10)));
+    const created = mineAll.filter(t => inRange(String(t.createdAt || '').slice(0, 10)));
+    const overdue = open.filter(t => t.dueDate && t.dueDate < today);
+    const due = open.filter(t => inRange(t.dueDate) && t.dueDate >= today);
+    const noEstimate = open.filter(t => (inRange(t.dueDate) || (t.dueDate && t.dueDate < today)) && !Number(t.estimate));
+    const weeks = Math.max(1, Math.ceil((Shared.diffDays(Shared.mondayOf(from), to) + 1) / 7));
+    const cap = Capacity.compute_([me], Shared.mondayOf(from), weeks).members[0].weeks;
+    const planned = cap.reduce((s, w) => s + w.planned, 0), available = cap.reduce((s, w) => s + w.available, 0);
+    const utilization = available ? Math.round(planned / available * 100) : 0;
+    const teamIds = Object.keys(ctx.teamIds);
+    const warnings = Availability.warnings(from > today ? from : today, to < today ? today : to, teamIds)
+      .map(w => ({ teamId: w.teamId, teamName: w.teamName, date: w.date, absent: w.absent, total: w.total }));
+    const people = {};
+    teamIds.forEach(id => Calendar.people_(id).forEach(u => { people[u.email] = u; }));
+    people[me.email] = me;
+    const absences = Db.all('Absences').filter(a => people[a.email] && a.startDate <= to && a.endDate >= from)
+      .map(a => ({ name: people[a.email].name, from: a.startDate, to: a.endDate, type: a.type }));
+    const holidays = Holidays.inRange(Object.keys(people).map(e => people[e].country), from, to)
+      .filter(h => Object.keys(people).some(e => Holidays.appliesTo(h, people[e])))
+      .map(h => ({ date: h.date, name: h.name, country: h.country }));
+    const kpis = { done: done.length, created: created.length, overdue: overdue.length, due: due.length, utilization: utilization };
+    const L = (de, e) => (en ? e : de);
+    const bullets = [];
+    const actions = [];
+    if (overdue.length) {
+      bullets.push(L(overdue.length + ' überfällige Aufgabe(n), älteste seit ' + overdue.map(t => t.dueDate).sort()[0] + '.',
+        overdue.length + ' overdue task(s), oldest since ' + overdue.map(t => t.dueDate).sort()[0] + '.'));
+      actions.push({ label: L('Überfällige neu planen', 'Re-plan overdue tasks'), view: 'home', quick: 'overdue' });
+    }
+    if (due.length) bullets.push(L(due.length + ' Aufgabe(n) im Zeitraum noch fällig.', due.length + ' task(s) still due in this period.'));
+    if (done.length) bullets.push(L(done.length + ' erledigt, ' + created.length + ' neu angelegt.', done.length + ' done, ' + created.length + ' created.'));
+    if (available) {
+      bullets.push(L('Auslastung ' + utilization + ' % (' + Math.round(planned * 10) / 10 + ' von ' + Math.round(available * 10) / 10 + ' h).',
+        'Workload ' + utilization + ' % (' + Math.round(planned * 10) / 10 + ' of ' + Math.round(available * 10) / 10 + ' h).'));
+      if (utilization > 100) actions.push({ label: L('Arbeit verteilen', 'Spread the work'), view: 'capacity' });
+    }
+    if (noEstimate.length) {
+      bullets.push(L(noEstimate.length + ' Aufgabe(n) ohne Aufwand – die Auslastung ist dadurch zu niedrig.', noEstimate.length + ' task(s) without an estimate – workload looks lower than it is.'));
+      actions.push({ label: L('Aufwand eintragen', 'Add estimates'), view: 'home', quick: 'open' });
+    }
+    if (warnings.length) {
+      const w = warnings[0];
+      bullets.push(L('Achtung: ' + w.date + ' sind in ' + w.teamName + ' ' + w.absent + ' von ' + w.total + ' abwesend.',
+        'Heads up: on ' + w.date + ', ' + w.absent + ' of ' + w.total + ' in ' + w.teamName + ' are away.'));
+      actions.push({ label: L('Verfügbarkeit prüfen', 'Check availability'), view: 'capacity' });
+    }
+    if (holidays.length) bullets.push(L('Feiertage: ', 'Holidays: ') + holidays.slice(0, 3).map(h => h.name + ' (' + h.country + ', ' + h.date + ')').join(', ') + '.');
+    if (absences.length) bullets.push(L('Abwesend: ', 'Away: ') + absences.slice(0, 4).map(a => a.name + ' ' + a.from + (a.to !== a.from ? '–' + a.to : '')).join(', ') + '.');
+    if (due.length || overdue.length) actions.push({ label: L('Im Kalender planen', 'Plan in the calendar'), view: 'calendar' });
+
+    const label = L({ day: 'heute', week: 'diese Woche', month: 'diesen Monat' }[range], { day: 'today', week: 'this week', month: 'this month' }[range]);
+    let text = '', source = 'rules';
+    if (Ai.enabled()) {
+      try {
+        const res = Ai.generate_([
+          L('Fasse für ' + me.name + ' den Stand für ' + label + ' in 2 Sätzen zusammen (duzen, konkret, keine Aufzählung).',
+            'Summarise the state for ' + me.name + ' for ' + label + ' in 2 sentences (informal, concrete, no list).'),
+          'Daten: ' + JSON.stringify({ kpis: kpis, overdue: overdue.slice(0, 5).map(t => t.title), due: due.slice(0, 5).map(t => t.title), warnings: warnings.slice(0, 3), holidays: holidays.slice(0, 3), absences: absences.slice(0, 4) }),
+          'Antworte als JSON: {"text": string}',
+        ].join('\n'), true);
+        if (res && res.text) { text = String(res.text).slice(0, 600); source = 'ai'; }
+      } catch (e) { /* rules below */ }
+    }
+    if (!text) {
+      text = overdue.length
+        ? L('Für ' + label + ': ' + overdue.length + ' überfällig und ' + due.length + ' noch fällig – zuerst das Überfällige klären.',
+          'For ' + label + ': ' + overdue.length + ' overdue and ' + due.length + ' still due – sort out the overdue ones first.')
+        : due.length
+          ? L('Für ' + label + ' stehen ' + due.length + ' Aufgabe(n) an, nichts ist überfällig.', due.length + ' task(s) due ' + label + ', nothing is overdue.')
+          : L('Für ' + label + ' ist nichts fällig – Zeit für Planung oder Tiefenarbeit.', 'Nothing due ' + label + ' – time for planning or deep work.');
+    }
+    const out = { range: range, from: from, to: to, kpis: kpis, bullets: bullets.slice(0, 5), actions: actions.slice(0, 3),
+      warnings: warnings.slice(0, 5), text: text, source: source, at: new Date().toISOString() };
+    cache.put(cacheKey, JSON.stringify(out), 300);
+    return out;
+  },
+
   briefing(p) {
     const en = !!(p && p.lang === 'en');
     const me = Auth.currentUser();

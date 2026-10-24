@@ -48,21 +48,25 @@ const ROUTES = {
   'ai.status': () => Ai.status(),
   'ai.parse': p => Ai.parse(p),
   'ai.assist': p => Ai.assist(p),
+  'ai.report': p => Ai.report(p),
   'ai.suggestAssignee': p => Ai.suggestAssignee(p),
   'ai.breakdown': p => Ai.breakdown(p),
   'ai.briefing': p => Ai.briefing(p),
 };
 
 function api(method, payload) {
+  const t0 = Date.now();
   try {
     Db.reset();
     const route = ROUTES[method];
     if (!route) throw new Error('Unbekannte Aktion: ' + method);
     const data = route(payload ? JSON.parse(payload) : {});
-    return JSON.stringify({ ok: true, data: data === undefined ? null : data });
+    const ms = Date.now() - t0;
+    console.log('api ' + method + ' ' + ms + ' ms, ' + Db.reads() + ' Tabellen gelesen');
+    return JSON.stringify({ ok: true, data: data === undefined ? null : data, ms: ms, reads: Db.reads() });
   } catch (e) {
     console.error(method, e && e.stack);
-    return JSON.stringify({ ok: false, error: (e && e.message) || String(e) });
+    return JSON.stringify({ ok: false, error: (e && e.message) || String(e), ms: Date.now() - t0 });
   }
 }
 

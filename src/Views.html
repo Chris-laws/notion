@@ -685,6 +685,16 @@ function calEnsure(from, to, teamId) {
   const key = calKey(from, to, teamId);
   const hit = S.cal.cache[key];
   if (hit && hit !== 'loading') return hit;
+  // a wider range of the same scope (loaded at start) answers smaller ones without another server call
+  if (!hit) {
+    for (const k in S.cal.cache) {
+      const p = k.split('|');
+      if (p[2] !== (teamId || '') || p[0] > from || p[1] < to) continue;
+      const wide = S.cal.cache[k];
+      if (wide === 'loading') return null;
+      return (S.cal.cache[key] = sliceRange(wide, from, to));
+    }
+  }
   if (!hit) {
     S.cal.cache[key] = 'loading';
     call('calendar.range', { from: from, to: to, teamId: teamId || '' })
@@ -693,7 +703,21 @@ function calEnsure(from, to, teamId) {
   }
   return null;
 }
-function calReload() { S.cal.cache = {}; S.cap.data = null; S.briefing = null; render(); }
+function sliceRange(d, from, to) {
+  const overlaps = x => x.startDate <= to && (x.endDate || x.startDate) >= from;
+  return Object.assign({}, d, {
+    from: from, to: to,
+    events: d.events.filter(overlaps), absences: d.absences.filter(overlaps),
+    holidays: d.holidays.filter(h => h.date >= from && h.date <= to),
+    warnings: (d.warnings || []).filter(w => w.date >= from && w.date <= to),
+  });
+}
+/** At start: one wide personal range (5 weeks back, 4 months ahead) feeds dashboard, calendar and side panels. */
+function calPrefetch() {
+  const t = TODAY();
+  calEnsure(Shared.addDays(t, -35), Shared.addDays(t, 120), '');
+}
+function calReload() { S.cal.cache = {}; calPrefetch(); S.cap.data = null; S.briefing = null; render(); }
 function calFind(kind, id) {
   let hit = null;
   Object.keys(S.cal.cache).forEach(k => {
@@ -922,8 +946,9 @@ function dashPage() {
   const h = new Date().getHours();
   const hello = h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
   const t = TODAY();
-  const b = briefingData();
-  const warns = b ? b.teamWarnings || [] : [];
+  const rep = reportData();
+  const b = rep && !rep.failed ? { utilization: rep.kpis.utilization, available: true } : null;
+  const warns = rep ? rep.warnings || [] : [];
   const open = S.tasks.filter(x => isMine(x) && !isDone(x));
   const todayList = open.filter(x => x.dueDate && x.dueDate <= t).sort((a, c) => (a.dueDate < c.dueDate ? -1 : a.dueDate > c.dueDate ? 1 : rankPrio(a) - rankPrio(c)));
   const people = myPeopleList();
@@ -993,18 +1018,9 @@ function dashPage() {
     (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Heute ist nichts fällig. Neue Aufgaben legst du oben über „Neue Aufgabe“ an.</div>') + '</div>';
   return '<div class="page wide">' +
     '<div class="card-w dash-top"><div class="du">' + avatar(S.me.email, 'xl') + '<div><h1>' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '!</h1><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div></div></div>' +
-    '<div class="dprog"><div><div class="pt">Dein Fortschritt heute</div><div class="ps">' + (doneToday + dueNow ? '<b>' + doneToday + ' von ' + (doneToday + dueNow) + '</b> Aufgaben erledigt' : 'Heute ist nichts fällig') + '</div></div>' +
-    '<span class="ring lgr" style="--p:' + prog + '"><span>' + prog + '%</span></span></div>' +
-    '<div class="dr"><button class="icon-btn sq" data-action="nav" data-view="capacity" title="Team-Warnungen">' + icon('bell') + (warns.length ? '<i class="bdg">' + warns.length + '</i>' : '') + '</button>' +
-    '<button class="icon-btn sq" data-action="brief-reload" title="Briefing aktualisieren">' + icon('sparkle') + '</button>' +
-    '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
+    '<div class="dr"><button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
     '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>' +
-    '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + '<div class="brief-w">' + icon('sparkle', 'lg') + '<div class="txt">' +
-    (b ? esc(b.text) : '<div class="skeleton" style="width:70%;margin:6px 0"></div><div class="skeleton" style="width:40%"></div>') +
-    (b && b.focus.length ? '<div class="focus">' + b.focus.map(f => '<button data-action="open-task" data-id="' + esc(f.id) + '">' + (f.priority ? prioTag(f.priority, true) : glyph('todo')) + '<span>' + esc(f.title) + '</span></button>').join('') + '</div>' : '') +
-    (b ? '<div class="src">' + (b.failed ? '<button class="linkbtn" data-action="brief-reload">Erneut laden</button>'
-      : b.source === 'ai' ? 'Zusammengefasst von Vertex AI' : 'Automatisch zusammengefasst') + '</div>' : '') +
-    '</div></div>' +
+    '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + reportCard() +
     '<div class="stiles">' + stile('', 'checksq', newWeek ? newWeek + ' neu diese Woche' : 'Keine neuen diese Woche', 'Aufgaben gesamt', my.length, 'home') +
     stile('green', 'check', doneWeek ? doneWeek + ' diese Woche' : 'Noch keine diese Woche', 'Erledigt', my.filter(isDone).length, 'home') +
     stile('yellow', 'clock', dueSoon ? dueSoon + ' bald fällig' : 'Nichts bald fällig', 'Aktiv', open.length, 'home') +
@@ -1017,11 +1033,59 @@ function dashPage() {
     '</div></div></div>';
 }
 
+/* ---------------- quick report (day / week / month) ---------------- */
+function reportData() {
+  if (!S.report) S.report = { range: store.get('reportRange', 'week'), data: {}, fresh: false };
+  // tasks changed since the last report: drop it and ask the server to skip its 5-minute cache
+  if (S.reportDirty) { S.reportDirty = false; S.report.data = {}; S.report.fresh = true; }
+  const r = S.report.range, key = r + ':' + LANG;
+  if (S.report.data[key] === undefined) {
+    const fresh = S.report.fresh;
+    S.report.fresh = false;
+    S.report.data[key] = 'loading';
+    call('ai.report', { range: r, lang: LANG, fresh: fresh })
+      .then(d => { S.report.data[key] = d; S.warnings = d.warnings || []; if (S.route.view === 'dash') render({ peek: false }); })
+      .catch(() => { S.report.data[key] = { failed: true, kpis: {}, bullets: [], actions: [], warnings: [], text: 'Der Report konnte gerade nicht geladen werden.' }; render({ peek: false }); });
+  }
+  const d = S.report.data[key];
+  return d && d !== 'loading' ? d : null;
+}
+function reportCard() {
+  const d = reportData();
+  const r = S.report.range;
+  const seg = '<div class="seg sm">' + [['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat']].map(x =>
+    '<button class="' + (r === x[0] ? 'on' : '') + '" data-action="report-range" data-v="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
+  const kpi = (v, l, cls) => '<div class="rk' + (cls ? ' ' + cls : '') + '"><b>' + v + '</b><span>' + l + '</span></div>';
+  const warns = d ? d.warnings || [] : [];
+  const head = '<div class="rep-head"><h3>' + icon('sparkle', 'sm') + 'Schnellreport</h3>' + seg +
+    (warns.length ? '<button class="chip danger" data-action="nav" data-view="capacity" title="Team-Warnungen">' + icon('alert', 'sm') + warns.length + ' Team-Warnung' + (warns.length > 1 ? 'en' : '') + '</button>' : '') +
+    '<span class="grow"></span>' + (d && !d.failed ? '<span class="rep-src">' + (d.source === 'ai' ? 'Gemini' : 'Automatisch') + ' · ' + esc(timeAgo(d.at)) + '</span>' : '') +
+    '<button class="icon-btn" data-action="report-reload" title="Aktualisieren" aria-label="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>';
+  if (!d) {
+    return '<div class="card-w rep">' + head + '<div class="rep-body"><div class="rep-kpis">' + '<div class="skeleton" style="height:44px"></div>'.repeat(5) + '</div>' +
+      '<div class="skeleton" style="width:70%;margin-top:10px"></div></div></div>';
+  }
+  const k = d.kpis || {};
+  return '<div class="card-w rep">' + head + '<div class="rep-body">' +
+    (d.failed ? '' : '<div class="rep-kpis">' + kpi(k.done, 'erledigt', 'ok') + kpi(k.due, 'noch fällig') + kpi(k.overdue, 'überfällig', k.overdue ? 'bad' : '') +
+      kpi(k.created, 'neu') + kpi(k.utilization + ' %', 'Auslastung', k.utilization > 100 ? 'bad' : k.utilization >= 80 ? 'warn' : '') + '</div>') +
+    '<div class="rep-main"><p class="rep-text">' + esc(d.text) + '</p>' +
+    (d.bullets && d.bullets.length ? '<ul class="rep-bul">' + d.bullets.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>' +
+    (d.actions && d.actions.length ? '<div class="rep-acts">' + d.actions.map(a => '<button class="btn sm outline" data-action="report-go" data-view="' + esc(a.view) + '" data-quick="' + esc(a.quick || '') + '">' + esc(a.label) + icon('right', 'sm') + '</button>').join('') + '</div>' : '') +
+    '</div></div>';
+}
+A['report-range'] = el => { S.report.range = el.dataset.v; store.set('reportRange', el.dataset.v); render({ peek: false }); };
+A['report-reload'] = () => { S.reportDirty = true; render({ peek: false }); };
+A['report-go'] = el => {
+  go(el.dataset.view);
+  if (el.dataset.quick) setPrefs({ quick: el.dataset.quick });
+};
+
 /** First start: while there is no team yet, the dashboard says what to do first. */
 function onboardingHtml() {
   if (S.teams.length) return '';
   const step = (n, title, text, btn) => '<div class="ob-step"><span class="ob-n">' + n + '</span><div><b>' + title + '</b><p>' + text + '</p>' + btn + '</div></div>';
-  return '<div class="card-w onboarding"><h3>' + icon('sparkle', 'sm') + 'Willkommen bei Taskraum – so geht’s los</h3><div class="ob-steps">' +
+  return '<div class="card-w onboarding"><h3>' + icon('sparkle', 'sm') + 'Willkommen bei ' + esc(S.appName) + ' – so geht’s los</h3><div class="ob-steps">' +
     step(1, 'Profil prüfen', 'Land, Region und Arbeitszeit bestimmen Feiertage und deine Kapazität.', '<button class="btn sm outline" data-action="nav" data-view="settings">Zum Profil</button>') +
     step(2, 'Team anlegen', 'Lege ein Team an und füge Kolleg:innen hinzu.', '<button class="btn sm primary" data-action="team-new">Team anlegen</button>') +
     step(3, 'Erste Aufgabe', 'Schreib einfach los, z. B. „Angebot prüfen morgen !hoch“.', '<button class="btn sm outline" data-action="new-task">Neue Aufgabe</button>') +
@@ -1036,6 +1100,10 @@ function workloadCard(t) {
   const mon = Shared.mondayOf(t);
   const end = Shared.addDays(mon, 27);
   const data = calEnsure(mon, end, '');
+  if (!data) {
+    return '<div class="card-w w-6 wl"><h3>' + icon('gauge', 'sm') + 'Auslastung nächste 4 Wochen</h3>' +
+      '<div class="skeleton" style="height:32px;margin:10px 0"></div>'.repeat(4) + '</div>';
+  }
   const me = S.me.email;
   const workDays = String(S.me.workDays || '1,2,3,4,5').split(',').filter(Boolean).map(Number);
   const perDay = (Number(S.me.hoursPerWeek) || 40) / Math.max(1, workDays.length);
@@ -1524,7 +1592,10 @@ function sidePanel(d, people, o) {
       '<div class="hitem" data-action="absence-edit" data-id="' + esc(a.id) + '" style="cursor:pointer">' + avatar(a.email, 'lg') +
       '<div class="what"><div>' + esc(user(a.email).name) + '</div><div class="muted">' + esc(absenceType(a.type).label + ' · ' + fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') ||
       '<div class="faint" style="font-size:13px;padding:4px 6px">Niemand ist abwesend.</div>') + '</div></div>' +
-    '<div class="panel"><h3>' + icon('globe', 'sm') + 'Feiertage</h3><div class="hlist">' + (hl.map(h =>
+    '<div class="panel"><h3>' + icon('globe', 'sm') + 'Feiertage</h3>' +
+    (!S.me.region && REGIONS[S.me.country] ? '<button class="hint-row" data-action="nav" data-view="settings">' + icon('alert', 'sm') +
+      'Für regionale Feiertage dein Bundesland/deine Region im Profil setzen.</button>' : '') +
+    '<div class="hlist">' + (hl.map(h =>
       '<div class="hitem">' + dayBox(h.date) + '<div class="what"><div>' + esc(h.name) + '</div>' +
       '<div class="muted">' + h.countries.map(flag).join(' ') + ' ' + esc(DOW[Shared.weekday(h.date)]) + '</div>' +
       '<div class="hol-who" title="' + esc(h.affects.map(e => user(e).name).join(', ')) + '">' + h.affects.slice(0, 8).map(e => avatar(e)).join('') +
@@ -1732,7 +1803,7 @@ ON.submit.profile = form => {
     form.removeAttribute('data-touched');
     Object.assign(S.me, u);
     applyUser(u);
-    S.cap.data = null; S.cal.cache = {}; S.briefing = null;
+    S.cap.data = null; S.cal.cache = {}; calPrefetch(); S.briefing = null;
     toast('Profil gespeichert');
     render();
   }).catch(fail);

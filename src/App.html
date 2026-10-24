@@ -7,7 +7,7 @@
    ========================================================================== */
 
 const S = {
-  appName: 'Taskraum',
+  appName: 'LidlFlow',
   me: null,
   users: [],
   teams: [],
@@ -282,21 +282,16 @@ function nextColor(list) {
   const used = list.map(x => x.color);
   return ['blue', 'orange', 'green', 'purple', 'pink', 'red', 'yellow', 'teal', 'brown', 'gray'].find(c => used.indexOf(c) < 0) || 'blue';
 }
-/**
- * Logo mark of the app: own design (a 2×2 task grid, one tile is done), not a company trademark.
- * To use an official logo, replace the SVG below or return '<img src="...">' here.
- */
+/** Round logo mark (LogoAssets.html). Swap the data URIs there to change the logo. */
 function logoMark() {
-  return '<svg class="logo" viewBox="0 0 40 40" aria-hidden="true">' +
-    '<defs><linearGradient id="lg-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2b8cff"/><stop offset=".55" stop-color="#0b5bd3"/><stop offset="1" stop-color="#062f78"/></linearGradient>' +
-    '<linearGradient id="lg-sh" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>' +
-    '<rect width="40" height="40" rx="12" fill="url(#lg-bg)"/>' +
-    '<path d="M12 1h16a11 11 0 0 1 11 11v2H1v-2A11 11 0 0 1 12 1z" fill="url(#lg-sh)"/>' +
-    '<rect x="9" y="9" width="9.5" height="9.5" rx="3" fill="#fff"/>' +
-    '<rect x="21.5" y="9" width="9.5" height="9.5" rx="3" fill="#fff" fill-opacity=".55"/>' +
-    '<rect x="9" y="21.5" width="9.5" height="9.5" rx="3" fill="#fff" fill-opacity=".55"/>' +
-    '<rect x="21.5" y="21.5" width="9.5" height="9.5" rx="3" fill="#ffd400"/>' +
-    '<path d="M23.9 26.4l2.1 2.1 3.4-3.9" fill="none" stroke="#062f78" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  return '<img class="logo" src="' + LOGO_MARK_SRC + '" alt="" aria-hidden="true">';
+}
+// start screen shows the logo while the data loads
+(function () { const b = document.querySelector('.boot'); if (b) b.insertAdjacentHTML('afterbegin', logoMark()); })();
+/** Mark + word mark: the original image on light backgrounds, mark + light lettering on dark ones. */
+function logoFull() {
+  return '<img class="logo-full on-light" src="' + LOGO_FULL_SRC + '" alt="' + esc(S.appName) + '">' +
+    '<span class="logo-dark on-dark">' + logoMark() + '<span class="wm">' + (S.appName === 'LidlFlow' ? 'Lidl<b>Flow</b>' : esc(S.appName)) + '</span></span>';
 }
 /** Solid coloured label for a project (table, board): in the team's colour, the name only. */
 function projectPill(p) {
@@ -330,20 +325,40 @@ function call(method, payload) {
   });
   return attempt(0);
 }
+/** Timing of every server call (round trip and time on the server); shown with ?perf=1. */
+const PERF = [];
+const PERF_START = Date.now();
 function runCall(method, payload) {
   S.busy++;
   syncDot();
+  const t0 = Date.now();
+  const log = (res, ok) => {
+    PERF.push({ method: method, at: t0 - PERF_START, total: Date.now() - t0, server: res && res.ms, reads: res && res.reads, ok: ok, bytes: res && res.bytes });
+    if (S.perf) perfPanel();
+  };
   return new Promise((resolve, reject) => {
     google.script.run
       .withSuccessHandler(raw => {
         S.busy--; syncDot();
         let res;
-        try { res = JSON.parse(raw); } catch (e) { return reject(new Error('Ungültige Antwort vom Server')); }
+        try { res = JSON.parse(raw); } catch (e) { log(null, false); return reject(new Error('Ungültige Antwort vom Server')); }
+        res.bytes = raw.length;
+        log(res, res.ok);
         if (res.ok) resolve(res.data); else reject(new Error(res.error));
       })
-      .withFailureHandler(err => { S.busy--; syncDot(); reject(err instanceof Error ? err : new Error(String(err))); })
+      .withFailureHandler(err => { S.busy--; syncDot(); log(null, false); reject(err instanceof Error ? err : new Error(String(err))); })
       .api(method, JSON.stringify(payload || {}));
   });
+}
+/** Small timing table in the corner (open the app with ?perf=1). */
+function perfPanel() {
+  let p = $('#perf');
+  if (!p) { p = document.createElement('div'); p.id = 'perf'; document.body.appendChild(p); }
+  const rows = PERF.slice(-14);
+  p.innerHTML = '<b>Server-Aufrufe</b> <small>' + PERF.length + ' gesamt · Gesamtdauer bis jetzt ' + Math.max(0, ...PERF.map(x => x.at + x.total)) + ' ms</small>' +
+    '<table><tr><th>Aufruf</th><th>Start</th><th>gesamt</th><th>Server</th><th>Tab.</th><th>KB</th></tr>' + rows.map(x =>
+      '<tr class="' + (x.ok ? '' : 'err') + '"><td>' + esc(x.method) + '</td><td>' + x.at + '</td><td><b>' + x.total + '</b></td><td>' + (x.server == null ? '–' : x.server) + '</td><td>' +
+      (x.reads == null ? '–' : x.reads) + '</td><td>' + (x.bytes ? Math.round(x.bytes / 102.4) / 10 : '–') + '</td></tr>').join('') + '</table>';
 }
 /** Saving/loading feedback: pulsing dot next to the app name and a thin bar at the top (after 150 ms, no flicker). */
 let busyTimer = null;
@@ -380,6 +395,7 @@ window.addEventListener('offline', netBanner);
 
 /* ---------------- task data ---------------- */
 function applyTasks(list) {
+  if (list && list.length) S.reportDirty = true;
   (list || []).forEach(t => {
     const i = S.tasks.findIndex(x => x.id === t.id);
     if (i >= 0) S.tasks[i] = t; else S.tasks.push(t);
@@ -602,8 +618,8 @@ function renderSidebar() {
   }).join('');
 
   setHtml($('#sidebar'),
-    '<div class="side-head"><button class="brand" data-action="nav" data-view="dash" title="' + esc(S.appName) + '">' + logoMark() +
-    '<span class="ws-name"><b>' + (S.appName === 'Taskraum' ? 'Task<i>raum</i>' : esc(S.appName)) + '</b><small>Team-Workspace</small></span></button>' +
+    '<div class="side-head"><button class="brand" data-action="nav" data-view="dash" title="' + esc(S.appName) + '">' +
+    '<span class="brand-full">' + logoFull() + '</span><span class="brand-mark">' + logoMark() + '</span></button>' +
     '<span id="sync" class="sync-dot" title="Wird gespeichert …"></span>' +
     '<button class="icon-btn rail-toggle" data-action="rail-toggle" title="Seitenleiste ein-/ausklappen">' + icon('menu') + '</button></div>' +
     '<div class="side-scroll">' +
@@ -631,18 +647,18 @@ A.help = () => {
   openModal({
     title: L('Hilfe', 'Help'), submitLabel: L('Verstanden', 'Got it'),
     body: '<div class="help" translate="no">' +
-      '<h4>' + L('So funktioniert Taskraum', 'How Taskraum works') + '</h4><ol>' +
+      '<h4>' + L('So funktioniert ', 'How this works: ') + esc(S.appName) + '</h4><ol>' +
       L('<li><b>Team anlegen</b> (Seitenleiste → Teams → +) und Kolleg:innen unter <i>Mitglieder</i> hinzufügen.</li>' +
         '<li><b>Aufgaben anlegen</b> über „Neue Aufgabe“ oder die Suche. Jede Aufgabe gehört einer Person, ohne Auswahl dir.</li>' +
         '<li><b>Planen</b> im Kalender: Aufgaben aus der linken Liste ins Wochenraster ziehen.</li>' +
         '<li><b>Urlaub eintragen</b> im Kalender oder unter Verfügbarkeit. Feiertage kommen automatisch aus Land und Region in deinem Profil.</li>' +
-        '<li><b>Überblick</b> auf der Übersicht: Fokus heute, Auslastung der nächsten Wochen, erledigte Aufgaben.</li>' +
+        '<li><b>Überblick</b> auf der Übersicht: Schnellreport für Tag, Woche oder Monat (mit Warnungen und Empfehlungen), Fokus heute, Auslastung der nächsten Wochen.</li>' +
         '<li><b>KI-Assistent</b> (oben links): in eigenen Worten schreiben, z. B. „Anna morgen Angebot prüfen, 2h, ich bin Mo–Mi im Urlaub“. Du prüfst die Vorschau und legst alles mit einem Klick an.</li>',
       '<li><b>Create a team</b> (sidebar → Teams → +) and add colleagues under <i>Members</i>.</li>' +
         '<li><b>Create tasks</b> with “New task” or the search. Every task belongs to someone, to you if nobody is picked.</li>' +
         '<li><b>Plan</b> in the calendar: drag tasks from the list on the left into the week grid.</li>' +
         '<li><b>Add vacation</b> in the calendar or under Availability. Public holidays come from the country and region in your profile.</li>' +
-        '<li><b>Overview</b> on the dashboard: today’s focus, workload for the next weeks, tasks done.</li>' +
+        '<li><b>Overview</b> on the dashboard: quick report for the day, week or month (with warnings and tips), today’s focus, workload for the next weeks.</li>' +
         '<li><b>AI assistant</b> (top left): write in your own words, e.g. “Anna review offer tomorrow, 2h, I am off Mon–Wed”. Check the preview and create everything in one click.</li>') + '</ol>' +
       '<h4>' + L('Tastenkürzel', 'Keyboard shortcuts') + '</h4><table class="keys">' +
       row([k, 'K'], L('Suchen oder neue Aufgabe anlegen', 'Search or create a task')) + row(['N'], L('Neue Aufgabe', 'New task')) +
@@ -650,7 +666,7 @@ A.help = () => {
       row(['1', '–', '5'], L('Kalender: Woche, Tag, Monat, Agenda, Heatmap', 'Calendar: week, day, month, agenda, heatmap')) +
       row(['T'], L('Kalender: heute', 'Calendar: today')) + row(['←', '→'], L('Kalender: vor und zurück', 'Calendar: back and forward')) + '</table>' +
       '<h4>' + L('Schnell-Eingabe in der Suche', 'Quick add in the search') + '</h4><p class="hint">' +
-      L('Einfach mitschreiben, Taskraum erkennt es: ', 'Just type it, Taskraum picks it up: ') +
+      L('Einfach mitschreiben, die App erkennt es: ', 'Just type it, the app picks it up: ') +
       '<code>' + L('morgen', 'morgen (tomorrow)') + '</code>, <code>15.11.</code>, <code>@anna</code> ' + L('(zuweisen)', '(assign)') + ', <code>#website</code> ' +
       L('(Projekt oder Tag)', '(project or tag)') + ', <code>+team</code>, <code>!hoch</code> ' + L('(Priorität)', '(priority)') + ', <code>2h</code> ' +
       L('(Aufwand)', '(estimate)') + ', <code>jeden montag</code> ' + L('(Wiederholung)', '(repeat)') + '.</p>' +
@@ -772,6 +788,7 @@ function refresh() {
     // Only redraw when someone else actually changed something.
     if (JSON.stringify(list) === JSON.stringify(S.tasks)) return;
     S.tasks = list;
+    S.reportDirty = true;
     render();
   }).catch(() => { /* next round */ });
 }
@@ -787,6 +804,8 @@ function boot() {
     document.title = S.appName;
     $('#app').classList.remove('is-loading');
     const start = params => {
+      if (params.perf === '1') { S.perf = true; perfPanel(); }
+      calPrefetch();
       const last = store.get('route', null);
       if (params.view) S.route = { view: params.view, id: params.id || null };
       else if (last && last.view && (!last.id || team(last.id) || project(last.id))) S.route = last;

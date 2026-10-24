@@ -322,6 +322,59 @@ test('team colours are unique per person, max 8 teams, old clashes get fixed', (
   assert.notStrictEqual(fixed.find(t => t.id === a.id).color, fixed.find(t => t.id === b.id).color);
 });
 
+test('holidays per team come from the members profiles (country + region)', () => {
+  as(ME);
+  // offline: the built-in calculation is used (Nager/Google not reachable in tests)
+  call('users.save', { email: 'anna.schmidt@firma.de', country: 'DE', region: 'DE-BY' });
+  call('users.save', { email: 'lukas.meyer@firma.de', country: 'DE', region: 'DE-BE' });
+  call('users.save', { email: 'lea.huber@firma.de', country: 'AT', region: '' });
+  call('users.save', { email: 'james.carter@firma.de', country: 'US', region: '' });
+  const people = ['anna.schmidt@firma.de', 'lukas.meyer@firma.de', 'lea.huber@firma.de', 'james.carter@firma.de'];
+  const tm = call('teams.save', { name: 'Länder-Team', members: people });
+  try {
+    const r = call('calendar.range', { from: '2026-11-01', to: '2026-12-31', teamId: tm.id });
+    const on = (date, name) => r.holidays.filter(h => h.date === date && (!name || h.name.indexOf(name) >= 0));
+    const affects = (date, name) => [].concat(...on(date, name).map(h => h.affects)).sort();
+    const allSaintsDe = on('2026-11-01', 'Allerheiligen').find(h => h.country === 'DE');
+    assert.deepStrictEqual(allSaintsDe.affects.filter(e => people.indexOf(e) >= 0), ['anna.schmidt@firma.de'], 'German regional holiday only for Bavaria');
+    assert.ok(on('2026-11-01', 'Allerheiligen').find(h => h.country === 'AT').affects.indexOf('lea.huber@firma.de') >= 0, 'same day is national in Austria');
+    assert.ok(affects('2026-12-08').indexOf('lea.huber@firma.de') >= 0, 'Austrian holiday for the Austrian member');
+    assert.ok(affects('2026-11-26').indexOf('james.carter@firma.de') >= 0, 'Thanksgiving for the US member');
+    const xmasDe = affects('2026-12-25', 'Weihnachtstag');
+    assert.ok(xmasDe.indexOf('anna.schmidt@firma.de') >= 0 && xmasDe.indexOf('lukas.meyer@firma.de') >= 0 && xmasDe.indexOf('james.carter@firma.de') < 0);
+    // a year boundary in the range works
+    const ny = call('calendar.range', { from: '2026-12-30', to: '2027-01-02', teamId: tm.id });
+    assert.ok(ny.holidays.some(h => h.date === '2027-01-01'));
+    // changing the profile changes the result right away
+    call('users.save', { email: 'lukas.meyer@firma.de', region: 'DE-BY' });
+    const r2 = call('calendar.range', { from: '2026-11-01', to: '2026-11-01', teamId: tm.id });
+    assert.ok([].concat(...r2.holidays.map(h => h.affects)).indexOf('lukas.meyer@firma.de') >= 0, 'region change applies at once');
+  } finally {
+    call('teams.remove', { id: tm.id });
+    call('users.save', { email: 'lukas.meyer@firma.de', region: 'DE-BE' });
+  }
+});
+
+test('quick report: day/week/month numbers, actions and cache', () => {
+  as(ME);
+  ['day', 'week', 'month'].forEach(range => {
+    const r = call('ai.report', { range: range, fresh: true });
+    assert.strictEqual(r.range, range);
+    assert.strictEqual(r.source, 'rules');
+    assert.ok(r.from <= r.to);
+    ['done', 'created', 'overdue', 'due', 'utilization'].forEach(k => assert.strictEqual(typeof r.kpis[k], 'number', k));
+    assert.ok(r.text.length > 10);
+    assert.ok(Array.isArray(r.bullets) && r.bullets.length <= 5);
+    r.actions.forEach(a => assert.ok(['home', 'capacity', 'calendar'].indexOf(a.view) >= 0));
+  });
+  const m = call('ai.report', { range: 'month', fresh: true });
+  assert.ok(m.to.slice(0, 7) === m.from.slice(0, 7) && m.from.slice(8) === '01', 'month runs from the 1st to the last day');
+  const again = call('ai.report', { range: 'month' });
+  assert.strictEqual(again.at, m.at, 'second call within 5 minutes comes from the cache');
+  const en = call('ai.report', { range: 'week', lang: 'en', fresh: true });
+  assert.ok(/[a-z]/.test(en.text) && !/überfällig|fällig/.test(en.text), 'English text');
+});
+
 test('AI assistant: dummy without key, validated items with key', () => {
   as(ME);
   const d = call('ai.assist', { text: 'Angebot prüfen morgen @anna 2h. Ich bin übermorgen im Urlaub' });

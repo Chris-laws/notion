@@ -50,6 +50,7 @@ const Db = (function () {
   let memo = {};
   let txDepth = 0;
   let dirty = false;
+  let sheetReads = 0; // spreadsheet reads in this request (for the timing log)
   // Small, rarely changing tables are also kept in the script cache so most
   // requests skip a spreadsheet round trip. Every write drops the entry.
   const CACHED = { Users: 1, Teams: 1, Projects: 1, CompanyHolidays: 1 };
@@ -139,6 +140,7 @@ const Db = (function () {
     if (cached) { memo[table] = cached; return cached; }
     const d = def(table);
     const sh = sheet(table);
+    sheetReads++;
     const last = sh.getLastRow();
     const rows = last < 2 ? [] : sh.getRange(2, 1, last - 1, d.cols.length).getValues();
     const entries = [];
@@ -174,6 +176,7 @@ const Db = (function () {
 
   return {
     tx: tx,
+    reads() { return sheetReads; },
 
     all(table) {
       return load(table).map(e => e.obj);
@@ -245,6 +248,7 @@ const Db = (function () {
     reset() {
       spreadsheet = null;
       memo = {};
+      sheetReads = 0;
       if (typeof Config !== 'undefined' && Config.reset) Config.reset();
     },
   };

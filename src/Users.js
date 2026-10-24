@@ -2,8 +2,11 @@
 const USER_COLORS = ['#e16b5c', '#e5894a', '#d9a72a', '#5aa36b', '#3e8ed0', '#7a6ad8', '#c45fa0', '#4aa8a8', '#8a7a6a'];
 
 const Users = {
+  /** Active people; a profile without a country counts as DEFAULT_COUNTRY (for holidays and capacity). */
   list() {
-    return Db.all('Users').filter(u => u.active !== false && u.active !== 'false');
+    const fallback = Config.get('DEFAULT_COUNTRY');
+    return Db.all('Users').filter(u => u.active !== false && u.active !== 'false')
+      .map(u => (u.country ? u : Object.assign({}, u, { country: fallback })));
   },
 
   create_(email, extra) {

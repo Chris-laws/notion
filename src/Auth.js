@@ -82,7 +82,7 @@ const Access = {
 /** Script properties with sensible defaults. */
 const Config = {
   DEFAULTS: {
-    APP_NAME: 'Taskraum',
+    APP_NAME: 'LidlFlow',
     DEFAULT_COUNTRY: 'DE',
     DEFAULT_HOURS_PER_WEEK: '40',
     ABSENCE_WARN_PERCENT: '50',
@@ -101,7 +101,8 @@ const Config = {
 
   get(name) {
     if (!Config.props_) Config.props_ = PropertiesService.getScriptProperties().getProperties();
-    const v = Config.props_[name];
+    let v = Config.props_[name];
+    if (name === 'APP_NAME' && v === 'Taskraum') v = 'LidlFlow'; // the old default name, renamed
     return v === null || v === undefined ? (Config.DEFAULTS[name] || '') : v;
   },
 
