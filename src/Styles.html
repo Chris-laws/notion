@@ -360,6 +360,10 @@ input.ai-title { height: 32px; }
 .rep-src { font-size: 11.5px; color: var(--text-3); }
 .seg.sm button { height: 26px; padding: 0 10px; font-size: 12px; }
 .rep-text { margin: 10px 0 0; font-size: 14px; line-height: 1.55; color: var(--text); max-width: 90ch; }
+.rep-pts { margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+.rep-pts li.link { cursor: pointer; }
+.rep-pts li.link:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.rep-dummy { font-size: 11.5px; color: var(--text-3); margin-top: 6px; }
 .rep-news { margin-top: 10px; }
 .rep-sub { font-size: 11.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
 .rep-news ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -1381,13 +1385,16 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .dash-grid .card-w, .rep, .dash-top { box-shadow: none; border: 1px solid var(--border); }
 .dash-top { background: var(--bg); }
 .du .avatar.xl { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--border-strong); }
-/* project banners: a quiet card with a thin colour line instead of stripes and a big yellow disc */
-.pbanner, .pj-banner { background: var(--bg-subtle) !important; color: var(--text) !important; border: 1px solid var(--border); border-left: 4px solid var(--pc, var(--accent)); min-height: 0; padding: 14px 18px; }
-.pbanner::before, .pbanner::after, .pj-banner::before, .pj-banner::after { display: none !important; }
-.pbanner p, .pj-l p { opacity: 1; color: var(--text-2); }
-.pb-chip { background: var(--bg); color: var(--text-2); box-shadow: inset 0 0 0 1px var(--border-strong); font-weight: 600; }
-.pj-m > button, .pj-m > span { color: var(--text-2); }
-.pj-l .mark.lg { background: color-mix(in srgb, var(--pc, var(--accent)) 16%, var(--bg)) !important; color: var(--text); }
-.pj-t h1 { font-size: 24px; }
-.pj-acts .icon-btn.sq { background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }
-.pbanner .mstack > .mark:first-child { box-shadow: 0 0 0 2px var(--bg-subtle); }</style>
+/* project preview: the original lively banner in the project colour (base styles above) */
+.pbanner .mstack > .mark:first-child { box-shadow: 0 0 0 2px rgba(255, 255, 255, .6); }
+/* KPI tiles: softly tinted icons, red only when something is overdue */
+.stile .sic { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); color: var(--accent-text); }
+.stile.green .sic { background: color-mix(in srgb, var(--success) 12%, var(--bg)); color: var(--success); }
+.stile.yellow .sic { background: color-mix(in srgb, var(--yellow) 18%, var(--bg)); color: var(--yellow-ink); }
+.stile.red .sic { background: var(--bg-subtle); color: var(--text-3); }
+.stile.red.hot .sic { background: color-mix(in srgb, var(--danger) 12%, var(--bg)); color: var(--danger); }
+.stile { border-top: 3px solid var(--border); }
+.stile:not(.green):not(.yellow):not(.red) { border-top-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.stile.green { border-top-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
+.stile.yellow { border-top-color: color-mix(in srgb, var(--yellow) 60%, var(--border)); }
+.stile.red.hot { border-top-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }</style>

@@ -377,12 +377,43 @@ test('quick report: day/week/month numbers, actions and cache', () => {
   call('comments.add', { taskId: gift.id, body: 'Schau mal' });
   as(ME);
   const n = call('ai.report', { range: 'day', fresh: true });
-  assert.ok(n.news.some(x => x.kind === 'task' && x.taskId === gift.id), 'new task from Anna is listed');
+  assert.ok(n.news.some(x => x.kind === 'task' && /Anna/.test(x.text) && !x.taskId), 'new task from Anna is counted (no task list)');
+  assert.ok(!/Von Anna für dich/.test(n.text), 'summary does not list single tasks');
   assert.ok(n.news.some(x => x.kind === 'comment' && x.taskId === gift.id), 'Anna’s comment is listed');
   assert.ok(n.news.length <= 5 && n.since);
   call('tasks.remove', { id: gift.id });
   const en = call('ai.report', { range: 'week', lang: 'en', fresh: true });
   assert.ok(/[a-z]/.test(en.text) && !/überfällig|fällig/.test(en.text), 'English text');
+});
+
+test('quick report with Gemini: strict JSON, links checked, max 4 points', () => {
+  as(ME);
+  const anyTask = call('tasks.list')[0];
+  ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_API_KEY', 'test-key');
+  let prompt = '';
+  ctx.__GAS_FETCH__ = (url, opts) => {
+    prompt = JSON.parse(opts.payload).contents[0].parts[0].text;
+    return {
+      getResponseCode: () => 200,
+      getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ text: 'Fazit.', points: [
+        { text: 'A', link: 'capacity' }, { text: 'B', link: 'task:' + anyTask.id }, { text: 'C', link: 'http://evil' },
+        { text: 'D', link: 'task:gibtsnicht' }, { text: 'E', link: 'home' },
+      ] }) }] } }] }),
+    };
+  };
+  try {
+    const r = call('ai.report', { range: 'week', fresh: true });
+    assert.strictEqual(r.source, 'ai');
+    assert.strictEqual(r.points.length, 4);
+    assert.strictEqual(r.points[0].view, 'capacity');
+    assert.strictEqual(r.points[1].taskId, anyTask.id);
+    assert.strictEqual(r.points[2].view, '', 'unknown link is dropped');
+    assert.strictEqual(r.points[3].taskId, '', 'unknown task is dropped');
+    assert.ok(/Kontext/.test(prompt) && /risky/.test(prompt), 'Gemini gets the whole context');
+  } finally {
+    ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_API_KEY', 'PLATZHALTER_VERTEX_AI_API_KEY');
+    ctx.__GAS_FETCH__ = null;
+  }
 });
 
 test('AI assistant: dummy without key, validated items with key', () => {

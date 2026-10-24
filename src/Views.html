@@ -1066,10 +1066,14 @@ function reportCard() {
   const news = d.news || [];
   const act = (d.actions || [])[0];
   const NI = { task: 'checksq', comment: 'msg', absence: 'plane', project: 'folder', holiday: 'globe' };
+  const pts = d.points || [];
+  const link = p => (p.taskId ? ' data-action="open-task" data-id="' + esc(p.taskId) + '" class="link"' : p.view ? ' data-action="nav" data-view="' + esc(p.view) + '" class="link"' : '');
   return '<div class="card-w rep">' + head +
     '<p class="rep-text">' + esc(d.text) + '</p>' +
+    (pts.length ? '<ul class="rep-pts">' + pts.map(p => '<li' + link(p) + '>' + esc(p.text) + '</li>').join('') + '</ul>' : '') +
+    (d.source !== 'ai' && !d.failed ? '<div class="rep-dummy">Automatische Zusammenfassung · mit Gemini-Schlüssel entscheidet die KI, was wichtig ist</div>' : '') +
     (news.length ? '<div class="rep-news"><div class="rep-sub">Neu seit deinem letzten Besuch</div><ul>' + news.map(n =>
-      '<li' + (n.taskId ? ' data-action="open-task" data-id="' + esc(n.taskId) + '" class="link"' : '') + '>' + icon(NI[n.kind] || 'sparkle', 'sm') + '<span>' + esc(n.text) + '</span></li>').join('') + '</ul></div>' : '') +
+      '<li' + (n.taskId ? ' data-action="open-task" data-id="' + esc(n.taskId) + '" class="link"' : n.view ? ' data-action="nav" data-view="' + esc(n.view) + '" class="link"' : '') + '>' + icon(NI[n.kind] || 'sparkle', 'sm') + '<span>' + esc(n.text) + '</span></li>').join('') + '</ul></div>' : '') +
     (warns.length || act ? '<div class="rep-foot">' +
       (warns.length ? '<button class="linkbtn warn" data-action="nav" data-view="capacity">' + icon('alert', 'sm') + warns.length + ' Team-Warnung' + (warns.length > 1 ? 'en' : '') + '</button>' : '') +
       (act ? '<button class="linkbtn" data-action="report-go" data-view="' + esc(act.view) + '" data-quick="' + esc(act.quick || '') + '">' + esc(act.label) + ' →</button>' : '') + '</div>' : '') +

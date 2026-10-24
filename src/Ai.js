@@ -292,28 +292,79 @@ const Ai = {
     if (due.length || overdue.length) actions.push({ label: L('Im Kalender planen', 'Plan in the calendar'), view: 'calendar' });
 
     const label = L({ day: 'heute', week: 'diese Woche', month: 'diesen Monat' }[range], { day: 'today', week: 'this week', month: 'this month' }[range]);
-    let text = '', source = 'rules';
+    // The report is about the team, projects and changes; tasks have their own card ("Heute im Fokus").
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = d => (en ? MON[Number(d.slice(5, 7)) - 1] + ' ' + Number(d.slice(8)) : Number(d.slice(8)) + '.' + Number(d.slice(5, 7)) + '.');
+    const first = n => n.split(' ')[0];
+    const projects = Db.all('Projects').filter(x => ctx.teamIds[x.teamId] && x.status !== 'done' && Shared.isDate(x.endDate) && x.endDate >= today && x.endDate <= Shared.addDays(to, 7))
+      .map(x => {
+        const ts = visible.filter(t => t.projectId === x.id && !t.parentId);
+        return { name: x.name, end: x.endDate, done: ts.filter(t => t.status === 'done').length, total: ts.length };
+      }).sort((a, b) => a.end.localeCompare(b.end));
+    const team = {
+      away: absences.filter(a => a.name !== me.name).map(a => first(a.name) + ' ' + day(a.from) + (a.to !== a.from ? '–' + day(a.to) : '')),
+      holidays: holidays.slice(0, 3).map(h => h.name + ' (' + h.country + ', ' + day(h.date) + ')'),
+      warnings: warnings.slice(0, 3).map(w => w.teamName + ' ' + day(w.date) + ': ' + w.absent + '/' + w.total),
+      projects: projects.slice(0, 3).map(x => x.name + L(' endet ', ' ends ') + day(x.end) + ' (' + x.done + '/' + x.total + ')'),
+      utilization: available ? utilization : null,
+    };
+    // Everything the person can see goes in; the summary picks what matters (importance, urgency, news).
+    // Tasks due today are already on the focus card, so they are only named when they are really at risk.
+    const age = d => Shared.diffDays(d, today);
+    const risky = overdue.filter(t => age(t.dueDate) >= 3 || t.priority === 'urgent')
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 3)
+      .map(t => ({ id: t.id, title: t.title, overdueDays: age(t.dueDate), priority: t.priority }));
+    const projectsById = {};
+    Db.all('Projects').forEach(x => { projectsById[x.id] = x; });
+    const context = {
+      period: label, today: today,
+      tasks: { open: open.length, overdue: overdue.length, dueInPeriod: due.length, doneInPeriod: done.length, withoutEstimate: noEstimate.length, risky: risky },
+      projects: projects.slice(0, 5).map(x => ({ name: x.name, ends: x.end, done: x.done, total: x.total })),
+      team: team,
+      news: news.items.map(n => n.text),
+    };
+    const VALID = ['home', 'calendar', 'capacity', 'all'];
+    const cleanPoints = list => (Array.isArray(list) ? list : []).slice(0, 4).map(p => {
+      const link = String((p && p.link) || '');
+      const task = /^task:/.test(link) && visible.some(t => t.id === link.slice(5)) ? link.slice(5) : '';
+      return { text: String((p && p.text) || '').slice(0, 200), view: VALID.indexOf(link) >= 0 ? link : '', taskId: task };
+    }).filter(p => p.text);
+    let text = '', points = [], source = 'rules';
     if (Ai.enabled()) {
       try {
         const res = Ai.generate_([
-          L('Fasse für ' + me.name + ' den Stand für ' + label + ' in 2 Sätzen zusammen (duzen, konkret, keine Aufzählung).',
-            'Summarise the state for ' + me.name + ' for ' + label + ' in 2 sentences (informal, concrete, no list).'),
-          'Daten: ' + JSON.stringify({ kpis: kpis, overdue: overdue.slice(0, 5).map(t => t.title), due: due.slice(0, 5).map(t => t.title), news: news.items.map(n => n.text), warnings: warnings.slice(0, 3), holidays: holidays.slice(0, 3), absences: absences.slice(0, 4) }),
-          'Antworte als JSON: {"text": string}',
+          L('Du bist der Assistent eines Team-Task-Managers. Lies den gesamten Kontext von ' + me.name + ' für ' + label +
+            ' und entscheide selbst, was wirklich wichtig ist (Wichtigkeit, Dringlichkeit, Neuigkeit).',
+          'You are the assistant of a team task manager. Read all of ' + me.name + '’s context for ' + label +
+            ' and decide what really matters (importance, urgency, novelty).'),
+          L('Schreibe ein Fazit in 1–2 Sätzen (duzen) und höchstens 4 knappe Punkte. Einzelne Aufgaben nur nennen, wenn sie riskant sind (lange überfällig oder dringend) – die heutige Aufgabenliste sieht die Person schon woanders.',
+            'Write a 1–2 sentence conclusion (informal) and at most 4 short points. Name single tasks only when they are at risk (long overdue or urgent) – today’s task list is shown elsewhere.'),
+          L('Links: "home", "calendar", "capacity", "all" oder "task:<id>" aus risky.', 'Links: "home", "calendar", "capacity", "all" or "task:<id>" from risky.'),
+          'Kontext: ' + JSON.stringify(context),
+          'Antworte nur als JSON: {"text": string, "points": [{"text": string, "link": string}]}',
         ].join('\n'), true);
-        if (res && res.text) { text = String(res.text).slice(0, 600); source = 'ai'; }
+        if (res && res.text) { text = String(res.text).slice(0, 500); points = cleanPoints(res.points); source = 'ai'; }
       } catch (e) { /* rules below */ }
     }
     if (!text) {
-      const newBit = news.items.length ? L(' Seit deinem letzten Besuch gibt es ' + news.items.length + ' Neuerung(en).', ' Since your last visit there are ' + news.items.length + ' update(s).') : '';
-      text = (overdue.length
-        ? L('Für ' + label + ': ' + overdue.length + ' überfällig und ' + due.length + ' noch fällig – zuerst das Überfällige klären.',
-          'For ' + label + ': ' + overdue.length + ' overdue and ' + due.length + ' still due – sort out the overdue ones first.')
-        : due.length
-          ? L('Für ' + label + ' stehen ' + due.length + ' Aufgabe(n) an, nichts ist überfällig.', due.length + ' task(s) due ' + label + ', nothing is overdue.')
-          : L('Für ' + label + ' ist nichts fällig – Zeit für Planung oder Tiefenarbeit.', 'Nothing due ' + label + ' – time for planning or deep work.')) + newBit;
+      const parts = [];
+      if (team.warnings.length) parts.push(L('im Team wird es eng (', 'the team gets thin (') + team.warnings[0] + ')');
+      if (risky.length) parts.push(risky.length + L(' Aufgabe(n) brauchen dringend Aufmerksamkeit', ' task(s) need attention urgently'));
+      if (team.away.length) parts.push(team.away.length + L(' Person(en) im Team abwesend', ' teammate(s) away'));
+      if (team.projects.length) parts.push(L('Projekt ', 'project ') + team.projects[0]);
+      text = parts.length ? L('Wichtig ' + label + ': ', 'Important ' + label + ': ') + parts.join(', ') + '.'
+        : L('Für ' + label + ' gibt es nichts Kritisches – Team vollständig, keine Engpässe.', 'Nothing critical ' + label + ' – team complete, no bottlenecks.');
+      risky.slice(0, 2).forEach(t => points.push({ text: t.title + L(' – seit ' + t.overdueDays + ' Tagen überfällig', ' – overdue for ' + t.overdueDays + ' days'), taskId: t.id }));
+      if (team.away.length) points.push({ text: L('Abwesend: ', 'Away: ') + team.away.slice(0, 3).join(', '), view: 'capacity' });
+      if (team.holidays.length) points.push({ text: L('Feiertag: ', 'Holiday: ') + team.holidays[0], view: 'calendar' });
+      if (team.utilization !== null && team.utilization > 100) points.push({ text: L('Deine Auslastung liegt bei ', 'Your workload is ') + team.utilization + ' %', view: 'capacity' });
+      else if (team.projects.length > 1) points.push({ text: L('Projekt ', 'Project ') + team.projects[1], view: 'all' });
+      points = points.slice(0, 4);
     }
-    const out = { range: range, from: from, to: to, kpis: kpis, bullets: bullets.slice(0, 5), actions: actions.slice(0, 3),
+    const quietActions = [];
+    if (warnings.length || absences.length) quietActions.push({ label: L('Verfügbarkeit ansehen', 'View availability'), view: 'capacity' });
+    else if (utilization > 100) quietActions.push({ label: L('Arbeit verteilen', 'Spread the work'), view: 'capacity' });
+    const out = { range: range, from: from, to: to, kpis: kpis, bullets: bullets.slice(0, 5), actions: quietActions, points: points,
       news: news.items, since: news.since, warnings: warnings.slice(0, 5), text: text, source: source, at: new Date().toISOString() };
     cache.put(cacheKey, JSON.stringify(out), 300);
     return out;
@@ -345,8 +396,12 @@ const Ai = {
     const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const day = d => (en ? MON[Number(d.slice(5, 7)) - 1] + ' ' + Number(d.slice(8)) : Number(d.slice(8)) + '.' + Number(d.slice(5, 7)) + '.');
     const items = [];
-    visible.filter(t => (t.assignees || []).indexOf(me.email) >= 0 && t.createdBy !== me.email && String(t.createdAt) > since)
-      .slice(0, 3).forEach(t => items.push({ kind: 'task', taskId: t.id, text: L('Neu für dich von ' + name(t.createdBy) + ': ', 'New for you from ' + name(t.createdBy) + ': ') + t.title }));
+    // tasks are on the focus card; here only a count of what others gave you
+    const given = visible.filter(t => (t.assignees || []).indexOf(me.email) >= 0 && t.createdBy !== me.email && String(t.createdAt) > since);
+    if (given.length) {
+      const who = given.map(t => name(t.createdBy)).filter((x, i, a) => a.indexOf(x) === i).slice(0, 2).join(L(' und ', ' and '));
+      items.push({ kind: 'task', view: 'home', text: given.length + L(' neue Aufgabe(n) an dich von ', ' new task(s) for you from ') + who });
+    }
     const mine = {};
     visible.forEach(t => { if ((t.assignees || []).indexOf(me.email) >= 0 || t.createdBy === me.email) mine[t.id] = t; });
     Db.all('Comments').filter(c => mine[c.taskId] && c.author !== me.email && String(c.createdAt) > since).slice(-3)
