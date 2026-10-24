@@ -931,16 +931,8 @@ function dashPage() {
       : '<div class="banner ok" style="margin:0 0 10px">' + icon('check') + '<div>Alle Teams sind ausreichend besetzt.</div></div>') +
     (absNext.length ? '<div class="hlist" style="margin-top:8px">' + absNext.map(a => '<div class="hitem">' + avatar(a.email, 'lg') + '<div class="what"><div>' + esc(user(a.email).name) + '</div><div class="muted">' +
       esc(absenceType(a.type).label + ' · ' + fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') + '</div>' : '') + '</div>';
-  // activity: tasks I finished per day, last 52 weeks (fills the full card width)
-  const start = Shared.addDays(Shared.mondayOf(t), -51 * 7);
-  const counts = {};
-  S.tasks.filter(x => isDone(x) && x.completedAt && isMine(x)).forEach(x => { const d = x.completedAt.slice(0, 10); counts[d] = (counts[d] || 0) + 1; });
-  const cells = [];
-  for (let i = 0; i < 52 * 7; i++) {
-    const d = Shared.addDays(start, i), c = counts[d] || 0;
-    cells.push(d > t ? '<i style="visibility:hidden"></i>' : '<i class="' + (c >= 5 ? 'l4' : c >= 3 ? 'l3' : c >= 2 ? 'l2' : c >= 1 ? 'l1' : '') + (d === t ? ' today' : '') + '" title="' + esc(fmtDate(d, { absolute: true }) + ': ' + c + ' erledigt') + '"></i>');
-  }
-  const doneTotal = Object.keys(counts).reduce((s, k) => s + counts[k], 0);
+  const loadCard = workloadCard(t);
+  const doneCard = doneWeeksCard(t);
   // header numbers
   const my = S.tasks.filter(isMine);
   const weekStart = Shared.mondayOf(t);
@@ -1008,9 +1000,72 @@ function dashPage() {
     teamCard +
     '<div class="card-w w-7"><h3>' + icon('calendar', 'sm') + 'Agenda, nächste 14 Tage<a class="more" data-action="cal-agenda">Alles ansehen</a></h3>' +
     (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true }) : '<div class="skeleton"></div>') + '</div>' +
-    '<div class="card-w w-12"><h3>' + icon('check', 'sm') + 'Aktivität <span class="n">' + doneTotal + ' erledigt in 12 Monaten</span><a class="more" data-action="dash-heat">Details</a></h3><div class="heat fill">' + cells.join('') + '</div>' +
-    '<div class="heat-legend">weniger <i style="background:var(--bg-hover)"></i><i style="background:#c6dcf7"></i><i style="background:#7fb0ec"></i><i style="background:#2f7bd0"></i><i style="background:#0050aa"></i> mehr</div></div>' +
+    loadCard + doneCard +
     '</div></div></div>';
+}
+
+/**
+ * Workload, next 4 weeks: hours of my open tasks (by plan date, else due date; overdue counts now)
+ * against my real capacity (weekly hours on my workdays, minus vacation and public holidays).
+ */
+function workloadCard(t) {
+  const mon = Shared.mondayOf(t);
+  const end = Shared.addDays(mon, 27);
+  const data = calEnsure(mon, end, '');
+  const me = S.me.email;
+  const workDays = String(S.me.workDays || '1,2,3,4,5').split(',').filter(Boolean).map(Number);
+  const perDay = (Number(S.me.hoursPerWeek) || 40) / Math.max(1, workDays.length);
+  const open = S.tasks.filter(x => isMine(x) && !isDone(x));
+  const weeks = [0, 1, 2, 3].map(i => {
+    const from = Shared.addDays(mon, i * 7), to = Shared.addDays(from, 6);
+    let cap = 0, off = 0;
+    for (let d = from; d <= to; d = Shared.addDays(d, 1)) {
+      if (workDays.indexOf(Shared.weekday(d)) < 0) continue;
+      const away = data && (data.absences.some(a => a.email === me && a.startDate <= d && a.endDate >= d) ||
+        data.holidays.some(h => h.date === d && (h.affects || []).indexOf(me) >= 0));
+      if (away) off++; else cap += perDay;
+    }
+    const when = x => x.planDate || x.dueDate;
+    const tasks = open.filter(x => { const w = when(x); return w && (i === 0 ? w <= to : w >= from && w <= to); });
+    const hours = tasks.reduce((s2, x) => s2 + (Number(x.estimate) || 0), 0);
+    const pct = cap ? Math.round(hours / cap * 100) : (hours ? 999 : 0);
+    const state = pct > 100 ? ['danger', 'Überlastet'] : pct >= 80 ? ['warn', 'Knapp'] : ['ok', 'Im Rahmen'];
+    return { from: from, cap: cap, hours: hours, off: off, n: tasks.length, noEst: tasks.filter(x => !x.estimate).length, pct: pct, state: state };
+  });
+  const max = Math.max(1, ...weeks.map(w => Math.max(w.cap, w.hours)));
+  const rows = weeks.map(w => '<button class="wl-row" data-action="nav" data-view="capacity" title="' +
+    esc(w.n + ' Aufgaben · ' + fmtNum(w.hours) + ' h geplant · ' + fmtNum(w.cap) + ' h verfügbar' + (w.off ? ' · ' + w.off + ' Tage frei' : '') + (w.noEst ? ' · ' + w.noEst + ' ohne Aufwand' : '')) + '">' +
+    '<span class="wl-wk"><b>KW ' + Shared.isoWeek(w.from) + '</b><small>' + esc(fmtDate(w.from, { absolute: true })) + '</small></span>' +
+    '<span class="wl-track"><i class="wl-fill ' + w.state[0] + '" style="width:' + Math.min(100, w.hours / max * 100) + '%"></i>' +
+    '<i class="wl-cap" style="left:' + (w.cap / max * 100) + '%"></i></span>' +
+    '<span class="wl-val"><b>' + fmtNum(w.hours) + '</b> / ' + fmtNum(w.cap) + ' h</span>' +
+    '<span class="wl-chip ' + w.state[0] + '">' + w.state[1] + '</span></button>').join('');
+  return '<div class="card-w w-6 wl"><h3>' + icon('gauge', 'sm') + 'Auslastung nächste 4 Wochen<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>' +
+    '<p class="hint" style="margin:-6px 0 10px">Geplanter Aufwand deiner offenen Aufgaben gegen deine Arbeitszeit, Urlaub und Feiertage schon abgezogen. Der Strich ist deine Kapazität.</p>' +
+    rows + '</div>';
+}
+
+/** Tasks I finished per week, last 8 weeks, with the trend against the week before. */
+function doneWeeksCard(t) {
+  const mon = Shared.mondayOf(t);
+  const done = S.tasks.filter(x => isDone(x) && x.completedAt && isMine(x)).map(x => x.completedAt.slice(0, 10));
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) {
+    const from = Shared.addDays(mon, -7 * i), to = Shared.addDays(from, 6);
+    weeks.push({ from: from, n: done.filter(d => d >= from && d <= to).length, now: i === 0 });
+  }
+  const max = Math.max(1, ...weeks.map(w => w.n));
+  const cur = weeks[7].n, prev = weeks[6].n, diff = cur - prev;
+  const avg = Math.round(weeks.slice(0, 7).reduce((s2, w) => s2 + w.n, 0) / 7 * 10) / 10;
+  const trend = diff > 0 ? '<span class="dw-trend up">▲ ' + diff + ' mehr als letzte Woche</span>'
+    : diff < 0 ? '<span class="dw-trend down">▼ ' + (-diff) + ' weniger als letzte Woche</span>' : '<span class="dw-trend">wie letzte Woche</span>';
+  const bars = weeks.map(w => '<div class="dw-col' + (w.now ? ' now' : '') + '" title="' + esc('KW ' + Shared.isoWeek(w.from) + ': ' + w.n + ' erledigt') + '">' +
+    '<span class="dw-n">' + w.n + '</span><span class="dw-bar"><i style="height:' + (w.n / max * 100) + '%"></i></span>' +
+    '<small>KW ' + Shared.isoWeek(w.from) + '</small></div>').join('');
+  return '<div class="card-w w-6 dw"><h3>' + icon('check', 'sm') + 'Erledigt pro Woche</h3>' +
+    '<div class="dw-head"><b>' + cur + '</b><span>diese Woche</span>' + trend + '<span class="dw-avg">Ø ' + fmtNum(avg) + ' pro Woche</span></div>' +
+    (weeks.some(w => w.n) ? '<div class="dw-chart">' + bars + '</div>'
+      : '<div class="empty-w">Noch nichts erledigt. Sobald du Aufgaben abhakst, siehst du hier deinen Wochenverlauf.</div>') + '</div>';
 }
 A['proj-all'] = () => { const sp = project(S.dashProj); S.teamTab = 'projects'; go('team', sp ? sp.teamId : (S.teams[0] || {}).id); };
 A['dash-proj'] = el => { S.dashProj = el.dataset.id; render(); };

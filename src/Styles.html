@@ -279,6 +279,40 @@ svg.i.lg { width: 18px; height: 18px; }
 .fchip .avatar { width: 18px; height: 18px; font-size: 9px; margin-left: -4px; }
 .fchip.add { padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); color: var(--text-2); }
 .filter-chips { margin-top: 10px; }
+/* dashboard: workload next 4 weeks */
+.wl-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) 92px 86px; align-items: center; gap: 12px; width: 100%; padding: 8px 6px; border-radius: 10px; }
+.wl-row:hover { background: var(--bg-hover); }
+.wl-wk { display: grid; line-height: 1.2; }
+.wl-wk b { font-size: 13px; }
+.wl-wk small { font-size: 11.5px; color: var(--text-3); }
+.wl-track { position: relative; height: 12px; border-radius: 999px; background: var(--bg-hover); }
+.wl-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; min-width: 4px; }
+.wl-fill.ok { background: var(--accent); }
+.wl-fill.warn { background: var(--c-yellow); }
+.wl-fill.danger { background: var(--danger); }
+.wl-cap { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--text); opacity: .55; }
+.wl-val { font-size: 12.5px; color: var(--text-2); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wl-val b { color: var(--text); }
+.wl-chip { justify-self: end; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.wl-chip.ok { background: var(--success-soft); color: var(--success); }
+.wl-chip.warn { background: var(--warning-soft); color: var(--warning); }
+.wl-chip.danger { background: var(--danger-soft); color: var(--danger); }
+/* dashboard: done per week */
+.dw-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.dw-head > b { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+.dw-head > span { font-size: 13px; color: var(--text-2); }
+.dw-trend { font-weight: 600; }
+.dw-trend.up { color: var(--success) !important; }
+.dw-trend.down { color: var(--danger) !important; }
+.dw-avg { margin-left: auto; color: var(--text-3) !important; font-size: 12.5px !important; }
+.dw-chart { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; align-items: end; height: 150px; }
+.dw-col { display: grid; grid-template-rows: auto 1fr auto; justify-items: center; height: 100%; gap: 4px; }
+.dw-n { font-size: 12px; font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.dw-bar { position: relative; width: 100%; max-width: 34px; height: 100%; }
+.dw-bar i { position: absolute; left: 0; right: 0; bottom: 0; min-height: 3px; border-radius: 4px 4px 0 0; background: color-mix(in srgb, var(--accent) 45%, var(--bg-hover)); }
+.dw-col.now .dw-bar i { background: var(--accent); }
+.dw-col.now small { color: var(--text); font-weight: 700; }
+.dw-col small { font-size: 11px; color: var(--text-3); white-space: nowrap; }
 /* smart quick tabs on "Meine Aufgaben" */
 .qtabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 12px; }
 .qtabs button { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--text-2); }
