@@ -94,7 +94,9 @@ function openMenu(anchor, items, opts) {
         } else items.push({ value: it.value, html: tagChip(it.value), search: it.value });
       }
       if (query) { query = ''; hover = 0; const si = $('.pop-search', pop); if (si) si.value = ''; }
-      opts.onPick(it.value, selected.slice());
+      // onPick may answer with the new selection (e.g. "Ganzes Team" replaces the picks)
+      const next = opts.onPick(it.value, selected.slice());
+      if (Array.isArray(next)) selected = next.slice();
       draw(pop);
     } else {
       closePop();
@@ -342,20 +344,70 @@ A['pick-color'] = el => {
   $$('button', row).forEach(b => b.classList.toggle('on', b === el));
   row.previousElementSibling.value = el.dataset.v;
 };
-function peopleField(name, selected, hint) {
-  return '<input class="input" placeholder="Person filtern…" data-on-input="filter-people" style="margin-bottom:6px">' +
-    '<div class="picker">' + S.users.slice().sort((a, b) => a.name.localeCompare(b.name)).map(u =>
-    '<label data-s="' + esc((u.name + ' ' + u.email).toLowerCase()) + '"><input type="checkbox" name="' + name + '" value="' + esc(u.email) + '"' +
-    (selected.indexOf(u.email) >= 0 ? ' checked' : '') + '>' + avatar(u.email) + '<span>' + esc(u.name) + '</span><span class="faint" style="margin-left:auto;font-size:12px">' + esc(u.email) + '</span></label>').join('') +
-    '</div><input class="input" name="' + name + 'Extra" placeholder="Weitere E-Mails einladen (kommagetrennt)" style="margin-top:6px">' +
-    (hint ? '<div class="hint" style="margin-top:4px">' + esc(hint) + '</div>' : '');
+/**
+ * The one people picker for forms: chips plus "+ Person hinzufügen", which opens the
+ * directory search (a few letters are enough, several at once, invite by e-mail).
+ * The value is a comma separated list in a hidden input; collectPeople() reads it.
+ * opts: single (exactly one person), empty (text shown when nobody is picked),
+ * prefer (emails listed first), add (button label), hint.
+ */
+function peoplePicker(name, selected, opts) {
+  opts = opts || {};
+  const sel = (selected || []).filter(Boolean);
+  const add = opts.add || (opts.single ? 'Person wählen' : 'Person hinzufügen');
+  return '<div class="pp-field" data-pp="' + esc(name) + '"' + (opts.single ? ' data-single="1"' : '') +
+    (opts.empty ? ' data-empty="' + esc(opts.empty) + '"' : '') + (opts.prefer ? ' data-prefer="' + esc(opts.prefer.join(',')) + '"' : '') +
+    ' data-add="' + esc(add) + '"><input type="hidden" name="' + esc(name) + '" value="' + esc(sel.join(',')) + '">' +
+    '<div class="nt-people">' + ppChips(sel, opts.single, opts.empty, add) + '</div></div>' +
+    (opts.hint ? '<div class="hint" style="margin-top:4px">' + esc(opts.hint) + '</div>' : '');
 }
-ON.input['filter-people'] = el => {
-  const q = el.value.toLowerCase();
-  $$('label', el.nextElementSibling).forEach(l => { l.hidden = q && l.dataset.s.indexOf(q) < 0; });
+function ppChips(sel, single, empty, add) {
+  return (sel.length ? sel.map(e => '<span class="nt-chip">' + avatar(e) + '<span>' + esc(user(e).name) + (e === S.me.email ? ' (ich)' : '') + '</span>' +
+    (single ? '' : '<button type="button" class="nt-x" data-action="pp-remove" data-v="' + esc(e) + '" aria-label="Entfernen" title="Entfernen">' + icon('x', 'sm') + '</button>') + '</span>').join('')
+    : (empty ? '<span class="pp-empty">' + icon('users', 'sm') + esc(empty) + '</span>' : '')) +
+    '<button type="button" class="nt-add" data-action="pp-add" title="Name oder E-Mail suchen">' + icon(single ? 'user' : 'plus', 'sm') + esc(add) + '</button>';
+}
+function ppValue(box) { return String($('input[type=hidden]', box).value || '').split(',').filter(Boolean); }
+function ppSet(box, sel) {
+  $('input[type=hidden]', box).value = sel.join(',');
+  $('.nt-people', box).innerHTML = ppChips(sel, !!box.dataset.single, box.dataset.empty, box.dataset.add);
+  const form = box.closest('form');
+  if (form) form.setAttribute('data-touched', '1');
+}
+/**
+ * Directory search for several people (search, invite by e-mail, untick to remove).
+ * opts.all: label of an entry that stands for "nobody picked = all of opts.prefer" (e.g. "Ganzes Team");
+ * while it is active the prefer people show as ticked, so adding someone keeps the team.
+ */
+function peopleMenu(anchor, sel, opts, onChange) {
+  const prefer = opts.prefer || [];
+  const whole = ['__all'].concat(prefer);
+  const head = opts.all ? [{ value: '__all', search: opts.all, html: '<span class="pp-allic">' + icon('users', 'sm') + '</span><span class="pp-name">' + esc(opts.all) +
+    '<small class="faint pp-mail">' + esc(opts.allHint || 'Alle Mitglieder, auch künftige') + '</small></span>' }] : [];
+  openMenu(anchor, head.concat(peopleItems(prefer)), {
+    multi: true, search: true, invite: true, placeholder: 'Name oder E-Mail suchen…', selected: opts.all && !sel.length ? whole : sel,
+    onPick: (v, picked) => {
+      const list = picked.filter(x => x !== '__all');
+      if (opts.all && (v === '__all' || !list.length)) { onChange([]); return whole; }
+      onChange(list);
+      return list;
+    },
+  });
+}
+A['pp-add'] = el => {
+  const box = el.closest('.pp-field');
+  const sel = ppValue(box);
+  const prefer = String(box.dataset.prefer || '').split(',').filter(Boolean);
+  if (box.dataset.single) {
+    openMenu(el, peopleItems(prefer), { search: true, selected: sel, placeholder: 'Name oder E-Mail suchen…', onPick: v => ppSet(box, [v]) });
+  } else peopleMenu(el, sel, { prefer: prefer, all: box.dataset.empty }, list => ppSet(box, list));
+};
+A['pp-remove'] = el => {
+  const box = el.closest('.pp-field');
+  ppSet(box, ppValue(box).filter(e => e !== el.dataset.v));
 };
 function collectPeople(v, name) {
-  return (v[name] || []).concat(String(v[name + 'Extra'] || '').split(/[,;\s]+/).filter(Boolean));
+  return String(v[name] || '').split(/[,;\s]+/).filter(Boolean);
 }
 function selectField(name, options, value) {
   return '<select class="select" name="' + name + '">' + options.map(o =>
@@ -374,12 +426,12 @@ function teamModal(t) {
       divField('Farbe', colorField(t.color, { palette: Shared.TEAM_COLORS, taken: taken }) +
         '<div class="hint" style="margin-top:6px">Jedes Team hat eine eigene Farbe. Durchgestrichene Farben gehören schon zu Teams mit denselben Personen (höchstens ' + Shared.MAX_TEAMS + ' Teams pro Person).</div>') +
       field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(t.description || '') + '</textarea>') +
-      field('Team-Lead', selectField('lead', S.users.map(u => ({ key: u.email, label: u.name })), t.lead)) +
-      divField('Mitglieder', peopleField('members', t.members)),
+      divField('Team-Lead', peoplePicker('lead', [t.lead || S.me.email], { single: true })) +
+      divField('Mitglieder', peoplePicker('members', t.members, { add: 'Personen hinzufügen' })),
     submitLabel: t.id ? 'Speichern' : 'Team anlegen',
     danger: t.id ? { label: 'Team löschen', onClick: () => confirmDelete('Team „' + t.name + '“ löschen? Projekte werden entfernt, Aufgaben bleiben erhalten.', () =>
       call('teams.remove', { id: t.id }).then(() => reloadAll()).then(() => go('home'))) } : null,
-    onSubmit: v => call('teams.save', Object.assign({ id: t.id }, v, { members: collectPeople(v, 'members') }))
+    onSubmit: v => call('teams.save', Object.assign({ id: t.id }, v, { lead: collectPeople(v, 'lead')[0] || S.me.email, members: collectPeople(v, 'members') }))
       .then(saved => reloadAll().then(() => go('team', saved.id))),
   });
 }
@@ -405,6 +457,7 @@ A['team-members'] = el => {
 A['team-edit'] = el => teamModal(team(el.dataset.id));
 
 /* Project */
+const PROJECT_MEMBERS_HINT = 'Niemand gewählt = das ganze Team gehört dazu. Sobald du Personen wählst, gehören nur diese zum Projekt – auch aus anderen Teams oder per E-Mail eingeladen.';
 function projectModal(p, teamId) {
   const tid = teamId || (myTeams()[0] || S.teams[0] || {}).id;
   p = p || { teamId: tid, status: 'active', color: nextColor(S.projects.filter(x => x.teamId === tid)), members: [] };
@@ -418,13 +471,38 @@ function projectModal(p, teamId) {
       '<div class="row">' + field('Start', '<input class="input" type="date" name="startDate" value="' + esc(p.startDate || '') + '">') +
       field('Ende', '<input class="input" type="date" name="endDate" value="' + esc(p.endDate || '') + '">') + '</div>' +
       field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(p.description || '') + '</textarea>') +
-      divField('Projektmitglieder', peopleField('members', p.members, 'Leer lassen = ganzes Team. Auch Personen aus anderen Teams sind möglich.')),
+      divField('Projektmitglieder', peoplePicker('members', p.members, { add: 'Personen hinzufügen', empty: 'Ganzes Team', prefer: team(p.teamId) ? teamMembers(team(p.teamId)) : [],
+        hint: PROJECT_MEMBERS_HINT })),
     submitLabel: p.id ? 'Speichern' : 'Projekt anlegen',
     danger: p.id ? { label: 'Projekt löschen', onClick: () => confirmDelete('Projekt „' + p.name + '“ löschen? Die Aufgaben bleiben erhalten.', () =>
       call('projects.remove', { id: p.id }).then(() => reloadAll()).then(() => go('team', p.teamId))) } : null,
     onSubmit: v => call('projects.save', Object.assign({ id: p.id }, v, { members: collectPeople(v, 'members') }))
       .then(saved => reloadAll().then(() => go('project', saved.id))),
   });
+}
+/** "+ Personen hinzufügen" on the project page: same search as for tasks and teams, saved right away. */
+A['project-members'] = el => {
+  const p = project(el.dataset.id);
+  if (!p) return;
+  const t = team(p.teamId);
+  peopleMenu(el, p.members.slice(), { prefer: t ? teamMembers(t) : [], all: 'Ganzes Team' + (t ? ' ' + t.name : '') }, members => saveProjectMembers(p, members));
+};
+A['project-unmember'] = el => {
+  const p = project(el.dataset.id);
+  if (!p) return;
+  const members = projectMembers(p).filter(e => e !== el.dataset.v);
+  saveProjectMembers(p, members);
+  toast(user(el.dataset.v).name + ' aus dem Projekt entfernt', { action: { label: 'Rückgängig', fn: () => saveProjectMembers(p, members.concat([el.dataset.v])) } });
+};
+A['project-whole-team'] = el => { const p = project(el.dataset.id); if (p) saveProjectMembers(p, []); };
+function saveProjectMembers(p, members) {
+  const before = p.members;
+  p.members = members.slice();
+  render();
+  return call('projects.save', { id: p.id, name: p.name, teamId: p.teamId, icon: p.icon, color: p.color, description: p.description,
+    status: p.status, startDate: p.startDate, endDate: p.endDate, members: p.members })
+    .then(saved => { Object.assign(p, saved); render(); })
+    .catch(err => { p.members = before; render(); fail(err); });
 }
 A['project-new'] = el => projectModal(null, el.dataset.team);
 A['project-edit'] = el => projectModal(project(el.dataset.id));
@@ -452,13 +530,13 @@ function absenceModal(a) {
   a = a || { type: 'vacation', email: S.me.email, startDate: TODAY() };
   openModal({
     title: a.id ? 'Abwesenheit bearbeiten' : 'Abwesenheit eintragen',
-    body: (S.me.admin ? field('Person', selectField('email', S.users.map(u => ({ key: u.email, label: u.name })), a.email)) : '') +
+    body: (S.me.admin ? divField('Person', peoplePicker('email', [a.email || S.me.email], { single: true })) : '') +
       field('Art', selectField('type', Shared.ABSENCE_TYPES, a.type)) +
       '<div class="row">' + field('Von', '<input class="input" type="date" name="startDate" required value="' + esc(a.startDate) + '">') +
       field('Bis', '<input class="input" type="date" name="endDate" value="' + esc(a.endDate || '') + '">') + '</div>' +
       field('Notiz (nur für dich und Admins sichtbar)', '<input class="input" name="note" value="' + esc(a.note || '') + '">'),
     danger: a.id ? { label: 'Löschen', onClick: () => call('absences.remove', { id: a.id }).then(() => { closeModal(); calReload(); }).catch(fail) } : null,
-    onSubmit: v => call('absences.save', Object.assign({ id: a.id }, v)).then(res => {
+    onSubmit: v => call('absences.save', Object.assign({ id: a.id }, v, v.email ? { email: collectPeople(v, 'email')[0] } : {})).then(res => {
       const w = res.warnings || [];
       if (w.length) {
         toast('Achtung: ' + w.map(x => fmtDate(x.date, { absolute: true }) + ' ' + x.teamName + ' ' + x.absent + '/' + x.total).slice(0, 3).join(', ') +

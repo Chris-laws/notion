@@ -1469,19 +1469,29 @@ function projectPage(p) {
   } else if (tab === 'tasks') {
     body = database(tasks, { hideProject: true, people: members });
   } else {
-    body = '<div class="card-w"><div class="members-list">' + members.map(e => {
-      const u = user(e);
-      const open = tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
-      return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:600">' + esc(u.name) + (t && e === t.lead ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
-        '<span class="col2">' + flag(u.country) + ' ' + esc(u.region || '') + '</span><span class="col2 num">' + open + ' offen im Projekt</span></div>';
-    }).join('') + '</div></div>';
+    const whole = !p.members.length;
+    // who belongs to the project: the whole team (default) or a picked list of people
+    body = '<div class="card-w pm-head"><div class="pm-mode"><span class="pm-ic">' + icon(whole ? 'users' : 'user') + '</span><div><b>' +
+      (whole ? 'Ganzes Team' + (t ? ' ' + esc(t.name) : '') : members.length + ' ausgewählte Personen') + '</b><small>' +
+      (whole ? 'Alle Mitglieder des Teams gehören automatisch dazu, auch wer später ins Team kommt. Sobald du Personen hinzufügst oder entfernst, gilt nur noch die Auswahl.'
+        : 'Nur diese Personen gehören zum Projekt, auch aus anderen Teams oder per E-Mail eingeladen.') + '</small></div></div>' +
+      '<div class="pm-acts">' + (whole ? '' : '<button class="btn outline sm" data-action="project-whole-team" data-id="' + esc(p.id) + '">' + icon('users', 'sm') + 'Wieder ganzes Team</button>') +
+      '<button class="btn primary" data-action="project-members" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Personen hinzufügen</button></div></div>' +
+      '<div class="card-w"><div class="members-list">' + (members.length ? members.map(e => {
+        const u = user(e);
+        const open = tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
+        return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:600">' + esc(u.name) + (t && e === t.lead ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
+          '<span class="col2">' + flag(u.country) + ' ' + esc(u.region || '') + '</span><span class="col2 num">' + open + ' offen im Projekt</span>' +
+          '<button class="icon-btn" data-action="project-unmember" data-id="' + esc(p.id) + '" data-v="' + esc(e) + '" title="Aus dem Projekt entfernen" aria-label="Aus dem Projekt entfernen">' + icon('x', 'sm') + '</button></div>';
+      }).join('') : '<div class="empty-mini">Noch niemand im Projekt. Füge Personen hinzu.</div>') + '</div></div>';
   }
   return '<div class="page wide"><div class="pj-banner" style="--pc:' + pc + '">' +
     '<div class="pj-l">' + mark(p, 'lg') + '<div><div class="pj-t"><h1>' + esc(p.name) + '</h1><span class="pb-chip">' + esc(st.label) + '</span></div>' +
     '<p>' + esc(p.description || 'Keine Beschreibung.') + '</p>' +
     '<div class="pj-m">' + (t ? '<button data-action="nav" data-view="team" data-id="' + esc(t.id) + '">' + mark(t) + esc(t.name) + '</button>' : '') +
     (p.startDate || p.endDate ? '<span>' + icon('calendar', 'sm') + esc(fmtRange(p.startDate || p.endDate, p.endDate)) + '</span>' : '') +
-    '<span>' + avatars(members, 5) + (p.members.length ? members.length + ' Mitglieder' : 'Ganzes Team') + '</span></div></div></div>' +
+    '<button class="pj-people" data-action="project-members" data-id="' + esc(p.id) + '" title="Personen hinzufügen oder entfernen">' + avatars(members, 5) +
+      (p.members.length ? members.length + ' Mitglieder' : 'Ganzes Team') + '<span class="pj-plus">' + icon('plus', 'sm') + 'Personen</span></button></div></div></div>' +
     '<div class="pj-acts"><button class="icon-btn sq" data-action="new-task" title="Neue Aufgabe">' + icon('plus') + '</button>' +
     '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
     '<button class="icon-btn sq" data-action="project-edit" data-id="' + esc(p.id) + '" title="Projekt bearbeiten">' + icon('settings') + '</button></div></div>' +

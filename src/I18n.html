@@ -7,6 +7,12 @@
    ========================================================================== */
 
 const EN = {
+  'Personen hinzufügen': 'Add people', 'Person wählen': 'Choose person', 'Personen': 'People', 'Wieder ganzes Team': 'Back to whole team',
+  'Personen hinzufügen oder entfernen': 'Add or remove people', 'Aus dem Projekt entfernen': 'Remove from project', 'Name oder E-Mail suchen': 'Search name or email',
+  'Alle Mitglieder, auch künftige': 'All members, including future ones', 'Noch niemand im Projekt. Füge Personen hinzu.': 'Nobody in the project yet. Add people.',
+  'Alle Mitglieder des Teams gehören automatisch dazu, auch wer später ins Team kommt. Sobald du Personen hinzufügst oder entfernst, gilt nur noch die Auswahl.': 'Everyone in the team belongs to it automatically, including people who join later. Once you add or remove people, only the selection counts.',
+  'Nur diese Personen gehören zum Projekt, auch aus anderen Teams oder per E-Mail eingeladen.': 'Only these people belong to the project, also from other teams or invited by email.',
+  'Niemand gewählt = das ganze Team gehört dazu. Sobald du Personen wählst, gehören nur diese zum Projekt – auch aus anderen Teams oder per E-Mail eingeladen.': 'Nobody picked = the whole team belongs to it. Once you pick people, only they belong to the project – also from other teams or invited by email.',
   'Mitglieder hinzufügen': 'Add members', 'Name oder E-Mail suchen…': 'Search name or email…', ' · per E-Mail einladen': ' · invite by email', '· per E-Mail einladen': '· invite by email',
   'Der Team-Lead bleibt Mitglied.': 'The team lead stays a member.',
   // navigation and pages
@@ -185,6 +191,9 @@ const EN = {
 const PATTERNS = [
   [/^(\d+) erledigt in 12 Monaten$/, '$1 done in 12 months'],
   [/^(\d+) von (\d+)$/, '$1 of $2'],
+  [/^(\d+) ausgewählte Personen$/, '$1 selected people'],
+  [/^Ganzes Team (.+)$/, 'Whole team $1'],
+  [/^(.+) aus dem Projekt entfernt$/, '$1 removed from the project'],
   [/^vor (\d+) (min|h)$/, '$1 $2 ago'],
   [/^\+ ?(\d+) weitere$/, '+$1 more'],
   [/^(\d+) abwesend$/, '$1 away'],
