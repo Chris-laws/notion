@@ -966,29 +966,73 @@ function agendaHtml(data, from, n, o) {
     L('Bis ' + fmtDate(last, { absolute: true }) + ' steht nichts an.', 'Nothing coming up until ' + fmtDate(last, { absolute: true }) + '.') + '</span></div>') + '</div>';
 }
 
+/**
+ * "Woche im Blick": this and next week, Mon–Fri. Answers "can I plan with my team?":
+ * events and milestones, who of my teams is away, holidays, understaffed days (red).
+ * Tasks are only a small "n fällig" count – the list itself lives in "Heute im Fokus".
+ */
+function weekGlanceCard(t, people) {
+  // on the weekend this week is over: start with the next one
+  const weekend = Shared.weekday(t) === 0 || Shared.weekday(t) === 6;
+  const mon = Shared.addDays(Shared.mondayOf(t), weekend ? 7 : 0);
+  const data = calEnsure(mon, Shared.addDays(mon, 13), '');
+  const myTeamIds = myTeams().map(x => x.id);
+  const warnDays = data ? (data.warnings || []).filter(w => w.date >= t && myTeamIds.indexOf(w.teamId) >= 0) : [];
+  const status = !data ? '' : warnDays.length
+    ? '<span class="wg-status bad">' + icon('alert', 'sm') + '<span>' + L(warnDays.length + (warnDays.length === 1 ? ' Tag unterbesetzt' : ' Tage unterbesetzt'), warnDays.length + (warnDays.length === 1 ? ' day understaffed' : ' days understaffed')) + '</span></span>'
+    : '<span class="wg-status ok">' + icon('check', 'sm') + '<span>Alle Teams gut besetzt</span></span>';
+  const head = '<h3>' + icon('calendar', 'sm') + 'Woche im Blick' + status + '<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>';
+  if (!data) return '<div class="card-w w-12 wg">' + head + skCalGrid(5, 2) + '</div>';
+  const mine = S.tasks.filter(x => isMine(x) && !isDone(x) && x.dueDate);
+  const inScope = e => people.indexOf(e) >= 0;
+  const cell = d => {
+    const past = d < t;
+    const wd = Shared.weekday(d);
+    const events = data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d);
+    const hol = data.holidays.filter(h => h.date === d && h.affects.some(inScope));
+    const away = [];
+    data.absences.filter(a => inScope(a.email) && a.startDate <= d && a.endDate >= d).forEach(a => { if (away.indexOf(a.email) < 0) away.push(a.email); });
+    hol.forEach(h => h.affects.filter(inScope).forEach(e => { if (away.indexOf(e) < 0) away.push(e); }));
+    const warn = (data.warnings || []).filter(w => w.date === d && myTeamIds.indexOf(w.teamId) >= 0);
+    const due = mine.filter(x => x.dueDate === d).length;
+    const lines = [];
+    events.slice(0, 2).forEach(e => lines.push('<div class="wg-ev' + (e.type === 'milestone' ? ' ms' : '') + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(e.title) + '">' +
+      icon(e.type === 'milestone' ? 'flag' : 'calendar', 'sm') + '<span>' + esc(e.title) + '</span></div>'));
+    if (events.length > 2) lines.push('<div class="wg-more">+ ' + (events.length - 2) + ' weitere</div>');
+    hol.slice(0, 1).forEach(h => lines.push('<div class="wg-hol" title="' + esc(hol.map(x => holName(x) + ' (' + x.country + ')').join(', ')) + '">' + flag(h.country) + '<span>' + esc(holName(h)) + '</span></div>'));
+    if (away.length) lines.push('<div class="wg-away" title="' + esc(away.map(e => user(e).name).join(', ')) + '"><span class="lbl">' + L('Weg', 'Away') + '</span>' + avatars(away, 4) + '</div>');
+    if (warn.length) lines.push('<div class="wg-warn">' + icon('alert', 'sm') + '<span>' + esc(warn.map(w => w.teamName + ' ' + w.absent + '/' + w.total).join(', ')) + '</span></div>');
+    return '<div class="wg-day' + (d === t ? ' today' : '') + (past ? ' past' : '') + (warn.length ? ' under' : '') + '" data-action="glance-day" data-date="' + d + '">' +
+      '<div class="wg-dh"><b>' + (d === t ? 'Heute' : DOW[wd]) + '</b><span>' + esc(fmtDate(d, { absolute: true })) + '</span>' +
+      (due ? '<span class="wg-due' + (past ? ' late' : '') + '" title="' + esc(L('Deine fälligen Aufgaben', 'Your tasks due')) + '">' + esc(L(due + ' fällig', due + ' due')) + '</span>' : '') + '</div>' +
+      (lines.length ? lines.join('') : '<div class="wg-free">' + L('frei', 'clear') + '</div>') + '</div>';
+  };
+  const week = (start, label) => '<div class="wg-week"><div class="wg-wl">' + label + '</div><div class="wg-row">' +
+    [0, 1, 2, 3, 4].map(i => cell(Shared.addDays(start, i))).join('') + '</div></div>';
+  return '<div class="card-w w-12 wg">' + head + week(mon, weekend ? 'Nächste Woche' : 'Diese Woche') + week(Shared.addDays(mon, 7), weekend ? 'Übernächste Woche' : 'Nächste Woche') + '</div>';
+}
+A['glance-day'] = (el, e) => {
+  if (e && e.target.closest('[data-action="event-edit"]')) return;
+  S.cal.mode = 'day';
+  if (!S.plan) S.plan = { date: TODAY(), filter: 'due' };
+  S.plan.date = el.dataset.date;
+  go('calendar');
+};
+
 function dashPage() {
   const h = new Date().getHours();
   const hello = h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
   const t = TODAY();
   const rep = reportData();
   const b = rep && !rep.failed ? { utilization: rep.kpis.utilization, available: true } : null;
-  const warns = rep ? rep.warnings || [] : [];
   const open = S.tasks.filter(x => isMine(x) && !isDone(x));
   const todayList = open.filter(x => x.dueDate && x.dueDate <= t).sort((a, c) => (a.dueDate < c.dueDate ? -1 : a.dueDate > c.dueDate ? 1 : rankPrio(a) - rankPrio(c)));
   const people = myPeopleList();
-  const upcoming = calEnsure(t, Shared.addDays(t, 14), '');
   const util = b ? b.utilization : 0;
   // grouped by team so "Data › n" and "Forecast › m" stand together
   const teamOrder = id => (team(id) ? team(id).name : '');
   const projects = S.projects.filter(p => p.status !== 'done' && myTeams().some(x => x.id === p.teamId))
     .sort((a, b) => teamOrder(a.teamId).localeCompare(teamOrder(b.teamId)) || a.name.localeCompare(b.name));
-  const absNext = upcoming ? upcoming.absences.filter(a => a.endDate >= t && people.indexOf(a.email) >= 0).sort((a, c) => a.startDate.localeCompare(c.startDate)).slice(0, 3) : [];
-  const teamCard = '<div class="card-w w-5"><h3>' + icon('users', 'sm') + 'Team<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>' +
-    (warns.length ? '<div class="hlist">' + warns.slice(0, 3).map(w => '<div class="hitem warnitem" data-action="warn-open" data-team="' + esc(w.teamId) + '" style="cursor:pointer">' + dayBox(w.date) +
-      '<div class="what"><div><b>' + w.absent + ' von ' + w.total + '</b> in ' + esc(w.teamName) + ' weg</div><div class="muted">' + esc(w.people.map(x => user(x.email).name.split(' ')[0]).join(', ')) + '</div></div></div>').join('') + '</div>'
-      : '<div class="banner ok" style="margin:0 0 10px">' + icon('check') + '<div>Alle Teams sind ausreichend besetzt.</div></div>') +
-    (absNext.length ? '<div class="hlist" style="margin-top:8px">' + absNext.map(a => '<div class="hitem">' + avatar(a.email, 'lg') + '<div class="what"><div>' + esc(user(a.email).name) + '</div><div class="muted">' +
-      '<span>' + esc(absenceType(a.type).label) + '</span> · ' + esc(fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') + '</div>' : '') + '</div>';
   const loadCard = workloadCard(t);
   const doneCard = doneWeeksCard(t);
   // header numbers
@@ -1050,9 +1094,7 @@ function dashPage() {
     stile('yellow', 'clock', dueSoon ? dueSoon + ' bald fällig' : 'Nichts bald fällig', 'Aktiv', open.length, 'home') +
     stile(overdueN ? 'red hot' : 'red', 'alert', overdueN ? 'Jetzt handeln' : 'Alles im Plan', 'Überfällig', overdueN, 'home') + '</div>' +
     '<div class="dash-grid"><div class="w-8">' + projCard + '</div><div class="w-4">' + focusCard + '</div>' +
-    teamCard +
-    '<div class="card-w w-7"><h3>' + icon('calendar', 'sm') + 'Agenda, nächste 14 Tage<a class="more" data-action="cal-agenda">Alles ansehen</a></h3>' +
-    (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true, skipOverdue: true }) : skRows(4)) + '</div>' +
+    weekGlanceCard(t, people) +
     loadCard + doneCard +
     '</div></div></div>';
 }
@@ -1092,7 +1134,7 @@ function reportCard() {
   const link = p => (p.taskId ? ' data-action="open-task" data-id="' + esc(p.taskId) + '" class="link"' : p.view ? ' data-action="nav" data-view="' + esc(p.view) + '" class="link"' : '');
   return '<div class="card-w rep">' + head +
     '<p class="rep-text">' + esc(d.text) +
-    (warns.length ? ' <button class="linkbtn warn" data-action="nav" data-view="capacity">' + icon('alert', 'sm') + warns.length + ' Team-Warnung' + (warns.length > 1 ? 'en' : '') + '</button>' : '') + '</p>' +
+    (warns.length ? ' <button class="linkbtn warn" data-action="nav" data-view="capacity">' + icon('alert', 'sm') + esc(L(warns.length + (warns.length > 1 ? ' Team-Warnungen' : ' Team-Warnung'), warns.length + (warns.length > 1 ? ' team warnings' : ' team warning'))) + '</button>' : '') + '</p>' +
     (pts.length ? '<ul class="rep-pts">' + pts.map(p => '<li' + link(p) + ' title="' + esc(p.text) + '">' + esc(p.text) + '</li>').join('') + '</ul>' : '') +
     (news.length ? '<details class="rep-news"' + (S.report.newsOpen ? ' open' : '') + ' data-on-toggle="rep-news"><summary>Neu seit deinem letzten Besuch <span class="n">' + news.length + '</span></summary><ul>' + news.map(n =>
       '<li' + link(n) + '>' + icon(NI[n.kind] || 'sparkle', 'sm') + '<span>' + esc(n.text) + '</span></li>').join('') + '</ul></details>' : '') +
