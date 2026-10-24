@@ -1282,7 +1282,7 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 
 @media (max-width: 1180px) {
   :root { --peek-w: 460px; }
-  .cal-layout { grid-template-columns: 1fr; }
+  .cal-layout { grid-template-columns: minmax(0, 1fr); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dash-grid .w-7, .dash-grid .w-5, .dash-grid .w-6 { grid-column: span 12; }
   .planner { grid-template-columns: 1fr; }

@@ -40,7 +40,7 @@ Bewertet wurde die Web-App aus Sicht der Nutzer:innen, Schwerpunkt Usability. �
 | Formulareingaben gingen bei Hintergrund-Aktualisierung verloren | behoben (früher): Entwürfe bleiben, Neuaufbau nur bei echten Änderungen |
 | Gelöschte Aufgabe bei sofortigem Seitenwechsel innerhalb der 6 s | behoben: wird beim Verlassen der Seite sofort gelöscht |
 | Gleichzeitiges Speichern mehrerer Personen | geprüft: Server sperrt Schreibvorgänge (LockService) |
-| Automatischer Wiederholversuch bei Serverfehler | offen: Meldung fordert zum erneuten Versuch auf |
+| Automatischer Wiederholversuch bei Serverfehler | behoben (1.19): Lese-Aufrufe 2 Wiederholungen mit Backoff (0,6 s / 1,8 s); Schreib-Aufrufe melden sich verständlich |
 
 ## Performance
 
@@ -50,6 +50,26 @@ Bewertet wurde die Web-App aus Sicht der Nutzer:innen, Schwerpunkt Usability. �
 | Neue Aufgabe wartete auf den Server | behoben (1.3): erscheint sofort |
 | Tabellen werden pro Anfrage gecacht, Einstellungen einmal gelesen | behoben (1.3) |
 | Lange Listen: Tabelle hat Seiten (25–200 Zeilen), Liste und Board nicht; bei mehreren Tausend Aufgaben prüfen | offen |
+
+## Ergänzungen 1.19
+
+| Befund | Status |
+|---|---|
+| Tastenkürzel N, T, ? reagierten nicht (Groß-/Kleinschreibung, nur im Kalender, Fokus im Google-Rahmen) | behoben: unabhängig von Shift/Caps und Layout, T von überall, N legt Aufgabe an, Fokus in die App |
+| Kalender musste gescrollt werden | behoben: Stundenhöhe aus Fensterhöhe (6–21 Uhr sichtbar), Handy zeigt Tagesansicht |
+| Keine 404-Seite, leere Seite beim Start | behoben: eigene 404 (auch gelöschte Teams/Projekte/Aufgaben-Links), Startbildschirm, Fehlerseite mit „Erneut versuchen“ |
+| Kein Ladehinweis bei Serveraufrufen | behoben: Ladebalken oben, Spinner auf Speichern-Knöpfen |
+| Dialoge: Fokus ging verloren, Klick daneben verwarf Eingaben | behoben: Fokus bleibt im Dialog und kehrt zurück; Klick daneben schließt nur ohne Eingaben |
+| Bewegung/Druck | behoben: prefers-reduced-motion, Druckansicht |
+
+## QA-Runden (1.19)
+
+| Runde | Geprüft | Funde | Status |
+|---|---|---|---|
+| 1 | Kürzel, Tippschutz, Kalender-Höhe, 404, Team/Mitglied/Projekt/Quick-Add/Kommentar/Timer/Urlaub/Löschen+Rückgängig/Profil, Hell/Dunkel, 390 px | Briefing blieb nach Fehler leer; Kalender- und Verfügbarkeitskopf liefen am Handy über | behoben |
+| 2 | Termin, Unteraufgabe, Tabelle/Gantt/Board/Kalender-Layout, KI-Assistent, Person einladen, dunkle Ansichten | keine | – |
+| 3 | 1024 px und 1280 px, Englisch, Offline-Banner, Fehlertexte, automatischer Wiederholversuch | Verfügbarkeit lief bei 1024 px seitlich über | behoben |
+| 4 | Kontrolllauf der Kernabläufe | keine | – |
 
 ## Supportability
 
