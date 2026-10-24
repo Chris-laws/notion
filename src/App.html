@@ -318,6 +318,7 @@ function call(method, payload) {
   }
   // reading calls are retried twice (0.6 s, 1.8 s) when Google is busy or the connection hiccups
   const READS = /^(bootstrap|tasks\.list|calendar\.range|availability|comments\.list|ai\.briefing|ai\.status)$/;
+  if (!READS.test(method) && typeof BOOT_DONE !== 'undefined' && !BOOT_DONE) S.wroteDuringBoot = true;
   const attempt = n => runCall(method, payload).catch(err => {
     const transient = /lock|timed? ?out|Zeitüberschreitung|too many|Rate Limit|NetworkError|network|Failed to fetch|503|500/i.test(err && err.message || '');
     if (n < 2 && transient && READS.test(method)) return new Promise(r => setTimeout(r, 600 * Math.pow(3, n))).then(() => attempt(n + 1));
@@ -871,7 +872,9 @@ function skSidebar() {
  * once from that copy and swaps in the fresh data when it arrives.
  */
 const SNAP_MAX_AGE = 7 * 864e5;
+var BOOT_DONE = false;
 const BOOT_REQ = call('bootstrap');
+BOOT_REQ.then(() => { BOOT_DONE = true; }, () => { BOOT_DONE = true; });
 function readSnap() {
   const snap = store.get('snap', null);
   return snap && BOOT_USER && snap.user === BOOT_USER && Date.now() - snap.at < SNAP_MAX_AGE && snap.d ? snap.d : null;
@@ -892,40 +895,55 @@ function applyBoot(d) {
 function boot() {
   S.collapsed = store.get('collapsed', {});
   let started = false;
-  const start = params => {
+  let params = {};
+  const openLinkedTask = () => {
+    if (!params.task) return;
+    if (task(params.task)) { openPeek(params.task); params.task = null; }
+    else if (!S.fromSnap) { toast('Diese Aufgabe gibt es nicht mehr oder du hast keinen Zugriff darauf.', { warn: true }); params.task = null; }
+  };
+  const start = p => {
     started = true;
+    params = p;
     if (params.perf === '1') { S.perf = true; perfPanel(); }
     calPrefetch();
     const last = store.get('route', null);
     if (params.view) S.route = { view: params.view, id: params.id || null };
     else if (last && last.view && (!last.id || team(last.id) || project(last.id))) S.route = last;
     render({ resetScroll: true });
-    if (params.task && task(params.task)) openPeek(params.task);
-    else if (params.task && !S.fromSnap) toast('Diese Aufgabe gibt es nicht mehr oder du hast keinen Zugriff darauf.', { warn: true });
+    openLinkedTask();
   };
   const go0 = () => { try { google.script.url.getLocation(loc => start(loc.parameter || {})); } catch (e) { start({}); } };
-  const snap = readSnap();
-  if (snap) { S.fromSnap = true; applyBoot(snap); go0(); }
-  BOOT_REQ.then(d => {
-    saveSnap(d);
-    if (!S.fromSnap) { applyBoot(d); go0(); return; }
-    // fresh data replaces the copy; tasks created in the meantime stay until the next poll
-    const keep = Object.keys(PENDING).length ? S.tasks : null;
-    S.fromSnap = false;
-    applyBoot(d);
-    if (keep) { S.tasks = keep; S.tasksVer = ''; }
-    // the copy may point at a team or calendar scope that is gone meanwhile
-    if (S.cap.teamId && !team(S.cap.teamId)) { S.cap.teamId = null; S.cap.data = null; }
-    if (S.cal.teamId && !team(S.cal.teamId)) S.cal.teamId = '';
-    S.reportDirty = true;
-    if (started) render();
-  }).catch(err => {
-    if (S.fromSnap) { toast('Keine Verbindung – du siehst den zuletzt geladenen Stand.', { warn: true }); return; }
+  const fail0 = err => {
     $('#app').classList.remove('is-loading');
     $('#sidebar').innerHTML = '';
     $('#view').innerHTML = '<div class="page"><div class="nf">' + logoMark() + '<h1>App konnte nicht geladen werden</h1>' +
       '<p>' + esc(friendlyError(err.message || String(err))) + '</p>' +
       '<div class="nf-acts"><button class="btn primary" onclick="location.reload()">Erneut versuchen</button></div></div></div>';
+  };
+  const snap = readSnap();
+  if (snap) { S.fromSnap = true; applyBoot(snap); go0(); }
+  BOOT_REQ.then(d => {
+    saveSnap(d);
+    if (!S.fromSnap) { applyBoot(d); go0(); return; }
+    // fresh data replaces the copy; tasks still being created here are kept on top
+    const pending = S.tasks.filter(t => PENDING[t.id]);
+    S.fromSnap = false;
+    applyBoot(d);
+    if (pending.length) S.tasks = S.tasks.concat(pending);
+    // the copy may point at a team or calendar scope that is gone meanwhile
+    if (S.cap.teamId && !team(S.cap.teamId)) { S.cap.teamId = null; S.cap.data = null; }
+    if (S.cal.teamId && !team(S.cal.teamId)) S.cal.teamId = '';
+    S.reportDirty = true;
+    if (started) { render(); openLinkedTask(); }
+    // something was saved while the start data was on its way: fetch the list once more
+    if (S.wroteDuringBoot) { S.tasksVer = ''; setTimeout(refresh, 300); }
+  }).catch(err => {
+    const offline = /network|netzwerk|failed to fetch|timed? ?out|zeitüberschreitung|verbindung|503|502/i.test((err && err.message) || '');
+    if (S.fromSnap && offline) { toast('Keine Verbindung – du siehst den zuletzt geladenen Stand.', { warn: true }); return; }
+    // no access (any more) or another server answer: the copy must not stay visible
+    try { localStorage.removeItem('tr:snap'); } catch (e) { /* ignore */ }
+    S.fromSnap = false;
+    fail0(err);
   });
   if (google.script.history) google.script.history.setChangeHandler(ev => {
     if (ev.state && ev.state.view) { S.route = ev.state; render({ resetScroll: true }); }

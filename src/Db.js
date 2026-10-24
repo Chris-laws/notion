@@ -57,8 +57,9 @@ const Db = (function () {
   // Big tables are split into chunks (the cache takes up to 100 KB per value).
   const CACHED = { Users: 1, Teams: 1, Projects: 1, CompanyHolidays: 1, Tasks: 1, Events: 1, Absences: 1, Comments: 1 };
   const CACHE_TTL = 600;
-  const CHUNK = 90000;
-  const MAX_CHUNKS = 30;
+  // characters per chunk: at most 3 bytes each in UTF-8, so a chunk stays under the 100 KB limit
+  const CHUNK = 30000;
+  const MAX_CHUNKS = 80;
   const newToken = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
   function scriptCache() {
@@ -92,17 +93,24 @@ const Db = (function () {
     const c = CACHED[table] && scriptCache();
     if (!c) return;
     try {
-      const raw = JSON.stringify(entries);
-      const n = Math.max(1, Math.ceil(raw.length / CHUNK));
-      if (n > MAX_CHUNKS) return;
-      // someone wrote meanwhile: our copy may be old, leave it out
+      // someone wrote meanwhile: our copy may be old, leave it out (checked before the costly part)
       let ver = c.get('ver_' + table);
       if (ver !== seen) return;
+      const raw = JSON.stringify(entries);
+      if (raw.length > CHUNK * MAX_CHUNKS) return;
       if (!ver) { ver = newToken(); c.put('ver_' + table, ver, 21600); }
       const k = 'tbl_' + table;
       const out = {};
+      let n = 0;
+      for (let at = 0; at < raw.length || n === 0; n++) {
+        let end = Math.min(raw.length, at + CHUNK);
+        // never cut an emoji (surrogate pair) in half
+        const code = raw.charCodeAt(end - 1);
+        if (end < raw.length && code >= 0xD800 && code <= 0xDBFF) end--;
+        out[k + '_' + n] = raw.slice(at, end);
+        at = end;
+      }
       out[k + '_h'] = JSON.stringify({ ver: ver, n: n });
-      for (let i = 0; i < n; i++) out[k + '_' + i] = raw.slice(i * CHUNK, (i + 1) * CHUNK);
       c.putAll(out, CACHE_TTL);
     } catch (e) { /* cache is optional */ }
   }

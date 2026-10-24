@@ -74,17 +74,17 @@ const App = {
   bootstrap() {
     const me = Auth.currentUser();
     Teams.fixColors_();
+    const list = Tasks.list({ ver: '' });
     const ctx = Access.context(me);
-    const tasksVer = Tasks.version_();
     return {
-      tasksVer: tasksVer,
+      tasksVer: list.ver,
       appName: Config.get('APP_NAME'),
       today: Util.today(),
       me: Object.assign({}, me, { admin: ctx.admin }),
       users: Users.list(),
       teams: Db.all('Teams'),
       projects: Db.all('Projects'),
-      tasks: Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx)),
+      tasks: list.tasks,
       companyHolidays: Db.all('CompanyHolidays'),
       ai: Ai.status(),
     };

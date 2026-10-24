@@ -1,12 +1,17 @@
 /** Tasks, sub-tasks and comments. */
 const Tasks = {
-  /** With p.ver from the last call: { same: true } while nothing changed, so polling stays tiny. */
+  /**
+   * With p.ver from the last call: { same: true } while nothing changed, so polling stays tiny.
+   * Without a ver field (pages from before this version) the plain list as before.
+   */
   list(p) {
-    const ver = Tasks.version_();
-    if (p && p.ver && p.ver === ver) return { ver: ver, same: true };
     const me = Auth.currentUser();
+    const ver = Tasks.version_();
+    const versioned = !!p && Object.prototype.hasOwnProperty.call(p, 'ver');
+    if (versioned && p.ver && p.ver === ver) return { ver: ver, same: true };
     const ctx = Access.context(me);
-    return { ver: ver, tasks: Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx)) };
+    const tasks = Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx));
+    return versioned ? { ver: ver, tasks: tasks } : tasks;
   },
   /** Taken before reading, so a write that lands meanwhile shows up next time. */
   version_() { return Db.version(['Tasks', 'Teams', 'Projects', 'Users']); },
