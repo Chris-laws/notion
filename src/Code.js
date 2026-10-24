@@ -10,8 +10,7 @@ function doGet() {
   tpl.userEmail = user.email;
   return tpl.evaluate()
     .setTitle(Config.get('APP_NAME'))
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setFaviconUrl('https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsrounded/task_alt/default/48px.svg');
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 /** Used by the HTML templates: <?!= include('Styles') ?> */
