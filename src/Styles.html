@@ -417,8 +417,6 @@ input.ai-title { height: 32px; }
 .modal.nudge { animation: nudge .3s; }
 @keyframes nudge { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
 /* start screen */
-.boot { display: grid; place-items: center; gap: 14px; height: 100%; color: var(--text-2); font-size: 13.5px; font-weight: 500; }
-.boot .spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--border-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 /* less motion for people who asked for it */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
@@ -614,7 +612,6 @@ table.db tr:hover .title-cell .open { opacity: 1; }
 .heat.fill i { aspect-ratio: 1; max-height: 22px; border-radius: 3px; }
 .heat-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 11.5px; color: var(--text-3); }
 .heat-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
-.skeleton { height: 12px; background: var(--bg-hover); animation: pulse 1.2s infinite; border-radius: 6px; }
 
 /* ---------- agenda ---------- */
 .agenda { display: grid; gap: 0; }
@@ -1443,4 +1440,54 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .mrow .icon-btn { opacity: .55; }
 .mrow:hover .icon-btn { opacity: 1; }
 .empty-mini { padding: 18px; color: var(--text-3); font-size: 13px; text-align: center; }
+
+/* skeletons: soft shimmer in the shape of the content that is loading */
+:root { --sk: rgba(15, 23, 42, .065); --sk-hi: rgba(15, 23, 42, .12); }
+:root[data-theme="dark"] { --sk: rgba(255, 255, 255, .06); --sk-hi: rgba(255, 255, 255, .12); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --sk: rgba(255, 255, 255, .06); --sk-hi: rgba(255, 255, 255, .12); } }
+.sk, .skeleton, .sk-gbar, .cal.sk-on > div:not(.cal-dow)::after, .wk.sk-on .wk-a::after {
+  display: block; height: 12px; border-radius: 6px; flex: none;
+  background: linear-gradient(90deg, var(--sk) 0%, var(--sk-hi) 45%, var(--sk) 90%) 0 0 / 260% 100%;
+  animation: sk-shine 1.5s ease-in-out infinite;
+}
+.skeleton { animation-name: sk-shine; }
+@keyframes sk-shine { from { background-position: 100% 0; } to { background-position: -60% 0; } }
+.sk.round { border-radius: 50%; }
+.sk.pill { border-radius: 999px; }
+.sk.sq { border-radius: 8px; }
+.sk-box { display: flex; flex-direction: column; gap: 2px; }
+.sk-line { padding: 6px 0; }
+.sk-row { display: flex; align-items: center; gap: 12px; padding: 11px 6px; border-bottom: 1px solid var(--border); }
+.sk-row:last-child { border-bottom: 0; }
+.sk-row.tight { padding: 7px 4px; border: 0; gap: 10px; }
+.sk-row .grow { flex: 1; }
+.sk-stack { display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 0; }
+.sk-table .sk-tr { display: grid; grid-template-columns: 2.2fr repeat(calc(var(--cols) - 1), 1fr); gap: 18px; align-items: center; padding: 12px 6px; border-bottom: 1px solid var(--border); }
+.sk-table .sk-tr.head { padding: 8px 6px; }
+.sk-board { flex-direction: row; gap: 14px; overflow: hidden; align-items: flex-start; }
+.sk-col { flex: 1 1 0; min-width: 220px; display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: var(--r-lg, 14px); background: var(--bg-soft, var(--bg-hover)); }
+.sk-card, .sk-pcard, .sk-tile { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; background: var(--bg); box-shadow: var(--shadow-card); }
+.sk-foot { display: flex; justify-content: space-between; align-items: center; }
+.sk-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.sk-pcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.sk-pcard { box-shadow: inset 0 0 0 1px var(--border); }
+.sk-gr { display: grid; grid-template-columns: 26% 1fr; align-items: center; gap: 16px; padding: 10px 6px; border-bottom: 1px solid var(--border); }
+.sk-gbar { height: 18px; border-radius: 6px; }
+.sk-cal { display: grid; grid-template-columns: repeat(var(--cols), 1fr); gap: 0; border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
+.sk-cell { min-height: 86px; padding: 8px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.sk-page { display: flex; flex-direction: column; gap: 16px; }
+.sk-head { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 4px; }
+.sk-tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+.sk-2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+.sk-banner { display: flex; flex-direction: column; gap: 12px; padding: 26px; border-radius: 18px; min-height: 130px; justify-content: center; background: var(--bg-soft, var(--bg-hover)); }
+.sk-side { display: flex; flex-direction: column; gap: 8px; padding: 18px 14px; }
+.sk-side > .sk:nth-child(2) { margin: 8px 0 10px; border-radius: 10px; }
+.boot { height: 100%; }
+/* calendar while events and absences are on their way: a shimmering line in each day */
+.cal.sk-on > div:not(.cal-dow)::after { content: ''; height: 14px; margin: 6px 4px 0; width: 70%; border-radius: 999px; }
+.wk.sk-on .wk-a::after { content: ''; height: 14px; margin: 4px; width: 75%; border-radius: 999px; }
+@media (max-width: 900px) { .sk-2 { grid-template-columns: 1fr; } .sk-col:nth-child(n+3) { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .sk, .skeleton, .sk-gbar, .cal.sk-on > div:not(.cal-dow)::after, .wk.sk-on .wk-a::after { animation: none; background: var(--sk-hi); }
+}
 </style>

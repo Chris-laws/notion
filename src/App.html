@@ -795,6 +795,73 @@ function refresh() {
 setInterval(refresh, 90000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
 
+/* ---------------- skeletons: placeholders shaped like the content that is on its way ---------------- */
+const SKW = ['72%', '54%', '86%', '61%', '78%', '47%', '69%', '58%'];
+const sk = (w, h, cls) => '<span class="sk' + (cls ? ' ' + cls : '') + '" style="width:' + (w || '100%') + (h ? ';height:' + h : '') + '"></span>';
+const skBox = (inner, cls, style) => '<div class="sk-box' + (cls ? ' ' + cls : '') + '"' + (style ? ' style="' + style + '"' : '') + ' role="status" aria-busy="true" aria-label="Wird geladen …">' + inner + '</div>';
+const skRep = (n, f) => { let s = ''; for (let i = 0; i < n; i++) s += f(i); return s; };
+const skPct = (i, min, span) => (min + (i * 17) % span) + '%';
+function skLines(n, h) { return skBox(skRep(n || 3, i => '<div class="sk-line">' + sk(SKW[i % 8], h) + '</div>')); }
+/** list rows: check, title, chips, avatar */
+function skRows(n) {
+  return skBox(skRep(n || 6, i => '<div class="sk-row">' + sk('16px', '16px', 'round') + sk(skPct(i, 22, 30), '12px') +
+    '<span class="grow"></span>' + sk('58px', '18px', 'pill') + sk('22px', '22px', 'round') + '</div>'));
+}
+function skTable(n, cols) {
+  cols = cols || 5;
+  const row = (i, head) => '<div class="sk-tr' + (head ? ' head' : '') + '">' +
+    skRep(cols, c => sk(head ? (c ? '50%' : '40%') : c ? skPct(i + c, 35, 45) : SKW[i % 8], head ? '10px' : '12px')) + '</div>';
+  return skBox(row(0, true) + skRep(n || 8, i => row(i)), 'sk-table', '--cols:' + cols);
+}
+function skBoard(cols) {
+  return skBox(skRep(cols || 4, c => '<div class="sk-col"><div class="sk-line">' + sk('46%', '11px') + '</div>' +
+    skRep(3 - (c % 2), i => '<div class="sk-card">' + sk(SKW[(c + i) % 8], '12px') + sk('40%', '10px') +
+      '<div class="sk-foot">' + sk('52px', '16px', 'pill') + sk('20px', '20px', 'round') + '</div></div>') + '</div>'), 'sk-board');
+}
+function skTiles(n) {
+  return skBox(skRep(n || 4, () => '<div class="sk-tile">' + sk('30px', '30px', 'sq') + sk('46%', '10px') + sk('34%', '22px') + '</div>'), 'sk-tiles');
+}
+function skGantt(n) {
+  return skBox(skRep(n || 7, i => '<div class="sk-gr">' + sk(skPct(i, 10, 12), '11px') +
+    '<span class="sk sk-gbar" style="margin-left:' + skPct(i, 6, 50) + ';width:' + skPct(i, 14, 26) + '"></span></div>'), 'sk-gantt');
+}
+function skCalGrid(cols, rows) {
+  return skBox(skRep(cols * rows, i => '<div class="sk-cell">' + sk('24%', '10px') + (i % 3 === 0 ? sk(SKW[i % 8], '14px', 'pill') : '') + '</div>'), 'sk-cal', '--cols:' + cols);
+}
+function skPeople(n) {
+  return skBox(skRep(n || 4, i => '<div class="sk-row">' + sk('34px', '34px', 'round') + '<div class="sk-stack">' + sk(skPct(i, 30, 30), '12px') + sk('45%', '10px') + '</div>' +
+    sk('70px', '12px') + '</div>'));
+}
+function skCards(n) {
+  return skBox(skRep(n || 3, i => '<div class="sk-pcard"><div class="sk-row tight">' + sk('26px', '26px', 'sq') + sk('50%', '13px') + '</div>' + sk(SKW[i % 8], '10px') +
+    sk('100%', '6px', 'pill') + '<div class="sk-foot">' + sk('30%', '10px') + sk('60px', '20px', 'pill') + '</div></div>'), 'sk-pcards');
+}
+/** Whole page while the app starts: shaped like the page that will open (saved route and layout). */
+function skPage(route) {
+  const v = route.view || 'dash';
+  const head = '<div class="sk-head">' + sk('220px', '24px') + sk('320px', '12px') + '</div>';
+  const card = inner => '<div class="card-w">' + inner + '</div>';
+  const tabs = (n, w) => '<div class="sk-tabs">' + skRep(n, () => sk(w, '26px', 'pill')) + '</div>';
+  if (v === 'dash') {
+    return '<div class="page wide sk-page">' + head + skTiles(4) + '<div class="sk-2">' + card('<div class="sk-line">' + sk('34%', '13px') + '</div>' + skRows(5)) +
+      card('<div class="sk-line">' + sk('40%', '13px') + '</div>' + skLines(4)) + '</div>' + card(skCards(3)) + '</div>';
+  }
+  if (v === 'calendar') return '<div class="page wide sk-page">' + head + card(skCalGrid(7, 5)) + '</div>';
+  if (v === 'capacity') return '<div class="page wide sk-page">' + head + card(skTable(7, 7)) + '</div>';
+  if (v === 'settings' || v === 'admin') return '<div class="page sk-page">' + head + card(skLines(6, '14px')) + card(skPeople(3)) + '</div>';
+  if (v === 'team') return '<div class="page wide sk-page">' + head + tabs(3, '96px') + card(skCards(3)) + '</div>';
+  const prefs = (store.get('db', {}) || {})[v + ':' + (route.id || '')] || {};
+  const layout = prefs.layout || (v === 'home' ? 'list' : 'board');
+  const body = layout === 'board' ? skBoard(4) : layout === 'table' ? card(skTable(9, 6)) : layout === 'gantt' ? card(skGantt(8))
+    : layout === 'calendar' ? card(skCalGrid(7, 5)) : card(skRows(9));
+  if (v === 'project') return '<div class="page wide sk-page"><div class="sk-banner">' + sk('40%', '24px') + sk('55%', '12px') + '</div>' + tabs(3, '86px') + body + '</div>';
+  return '<div class="page wide sk-page">' + head + tabs(v === 'home' ? 6 : 4, '96px') + body + '</div>';
+}
+function skSidebar() {
+  return '<div class="sk-side">' + sk('130px', '28px') + sk('100%', '34px') + skRep(6, i => '<div class="sk-row tight">' + sk('16px', '16px', 'sq') + sk(skPct(i, 40, 35), '12px') + '</div>') +
+    '<div class="sk-line" style="margin-top:14px">' + sk('40%', '10px') + '</div>' + skRep(4, i => '<div class="sk-row tight">' + sk('18px', '18px', 'sq') + sk(skPct(i, 35, 40), '12px') + '</div>') + '</div>';
+}
+
 /* ---------------- start ---------------- */
 function boot() {
   S.collapsed = store.get('collapsed', {});
@@ -821,10 +888,17 @@ function boot() {
     });
   }).catch(err => {
     $('#app').classList.remove('is-loading');
+    $('#sidebar').innerHTML = '';
     $('#view').innerHTML = '<div class="page"><div class="nf">' + logoMark() + '<h1>App konnte nicht geladen werden</h1>' +
       '<p>' + esc(friendlyError(err.message || String(err))) + '</p>' +
       '<div class="nf-acts"><button class="btn primary" onclick="location.reload()">Erneut versuchen</button></div></div></div>';
   });
 }
 window.addEventListener('load', boot);
+// placeholders shaped like the page that will open, drawn right away (before fonts and data)
+(function () {
+  const saved = store.get('route', null);
+  $('#sidebar').innerHTML = skSidebar();
+  $('#view').innerHTML = skPage(saved && saved.view ? saved : { view: 'dash' });
+})();
 </script>

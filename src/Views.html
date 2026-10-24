@@ -728,7 +728,7 @@ function monthHtml(o) {
   const data = o.data || { events: [], holidays: [], absences: [], warnings: [] };
   const show = o.show || { tasks: true, events: true, absences: true, holidays: true };
   const inScope = e => !o.people || o.people.indexOf(e) >= 0;
-  return '<div class="cal">' + ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(d => '<div class="cal-dow">' + d + '</div>').join('') +
+  return '<div class="cal' + (o.data ? '' : ' sk-on') + '">' + ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(d => '<div class="cal-dow">' + d + '</div>').join('') +
     days.map(d => {
       const wd = Shared.weekday(d);
       const weekend = wd === 0 || wd === 6;
@@ -1014,7 +1014,7 @@ function dashPage() {
     '<div class="dash-grid"><div class="w-8">' + projCard + '</div><div class="w-4">' + focusCard + '</div>' +
     teamCard +
     '<div class="card-w w-7"><h3>' + icon('calendar', 'sm') + 'Agenda, nächste 14 Tage<a class="more" data-action="cal-agenda">Alles ansehen</a></h3>' +
-    (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true }) : '<div class="skeleton"></div>') + '</div>' +
+    (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true }) : skRows(4)) + '</div>' +
     loadCard + doneCard +
     '</div></div></div>';
 }
@@ -1046,7 +1046,7 @@ function reportCard() {
     '<span class="grow"></span>' +
     (d && !d.failed ? '<span class="rep-src">' + (d.source === 'ai' ? 'Gemini' : 'Automatisch') + ' · ' + esc(timeAgo(d.at)) + '</span>' : '') +
     '<button class="icon-btn sm" data-action="report-reload" title="Aktualisieren" aria-label="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>';
-  if (!d) return '<div class="card-w rep">' + head + '<div class="skeleton" style="width:75%;margin-top:8px"></div></div>';
+  if (!d) return '<div class="card-w rep">' + head + skLines(3) + '</div>';
   const warns = d.warnings || [];
   const news = d.news || [];
   const pts = d.points || [];
@@ -1091,7 +1091,7 @@ function workloadCard(t) {
   const data = calEnsure(mon, end, '');
   if (!data) {
     return '<div class="card-w w-6 wl"><h3>' + icon('gauge', 'sm') + 'Auslastung nächste 4 Wochen</h3>' +
-      '<div class="skeleton" style="height:32px;margin:10px 0"></div>'.repeat(4) + '</div>';
+      skBox(skRep(4, i => '<div class="sk-row tight">' + sk('64px', '11px') + '<span class="grow">' + sk(skPct(i, 30, 60), '14px', 'pill') + '</span>' + sk('54px', '11px') + '</div>')) + '</div>';
   }
   const me = S.me.email;
   const workDays = String(S.me.workDays || '1,2,3,4,5').split(',').filter(Boolean).map(Number);
@@ -1287,7 +1287,7 @@ function timeGridHtml(days, o) {
     return '<div class="wk-col' + (d === today ? ' today' : '') + (wd === 0 || wd === 6 ? ' weekend' : '') + '" data-plan-date="' + d + '" data-action="wk-slot" data-date="' + d + '" title="Klicken, um hier eine Aufgabe einzuplanen">' + blocksHtml(planned) + nowLineHtml(d) + '</div>';
   }).join('');
   const h = (PL.to - PL.from) / 60 * PL.hh;
-  return '<div class="card-w wk" data-keep-scroll="wk" style="--cols:' + days.length + ';--hh:' + PL.hh + 'px;--tlh:' + h + 'px">' +
+  return '<div class="card-w wk' + (data ? '' : ' sk-on') + '" data-keep-scroll="wk" style="--cols:' + days.length + ';--hh:' + PL.hh + 'px;--tlh:' + h + 'px">' +
     '<div class="wk-corner"></div>' + head + '<div class="wk-corner a">ganztägig</div>' + allday +
     '<div class="wk-gutter" style="height:' + h + 'px">' + hourLabels() + '</div>' + cols + '</div>';
 }
@@ -1526,7 +1526,7 @@ function calendarPage() {
   const hidden = ['absences', 'holidays', 'events', 'tasks'].filter(k => !show[k]).length;
   const filters = '<button class="btn outline sm' + (hidden ? ' active' : '') + '" data-action="cal-layers" title="Was im Kalender angezeigt wird">' + icon('layers', 'sm') + 'Ebenen' +
     (hidden ? ' <span class="tn">' + (4 - hidden) + '/4</span>' : '') + '</button>';
-  const side = () => '<aside>' + (upcoming ? sidePanel(upcoming, people) : '<div class="panel"><div class="skeleton"></div></div>') + '</aside>';
+  const side = () => '<aside>' + (upcoming ? sidePanel(upcoming, people) : '<div class="panel">' + skPeople(3) + '</div>') + '</aside>';
   let main = '', layoutSide = false;
   const ctl = [];
   if (mode === 'agenda') {
@@ -1538,7 +1538,7 @@ function calendarPage() {
         over.slice(0, 12).map(x => '<div class="ag-item overdue" data-action="open-task" data-id="' + esc(x.id) + '">' + glyph(x.status) + '<span class="tt">' + esc(x.title) + '</span>' +
           metaHtml(x, { skipDue: true }) + '<span class="meta due">' + esc(fmtRange(x.startDate || x.dueDate, x.dueDate)) + '</span>' + (x.assignees.length ? avatars(x.assignees, 2) : '') + '</div>').join('') +
         (over.length > 12 ? '<div class="hint" style="padding-top:6px">+ ' + (over.length - 12) + ' weitere</div>' : '') + '</div>' : '';
-    main = overHtml + '<div class="card-w">' + (upcoming ? agendaHtml(upcoming, t, AG_RANGES[range][0], { people: people, teamId: teamId, tasks: tasks.filter(x => !isDone(x)), show: show, skipOverdue: true }) : '<div class="skeleton"></div>') + '</div>';
+    main = overHtml + '<div class="card-w">' + (upcoming ? agendaHtml(upcoming, t, AG_RANGES[range][0], { people: people, teamId: teamId, tasks: tasks.filter(x => !isDone(x)), show: show, skipOverdue: true }) : skRows(6)) + '</div>';
     layoutSide = true;
   } else if (mode === 'month') {
     const days = monthDays(calCursor());
@@ -1654,7 +1654,7 @@ function capacityPage() {
     '<button class="btn outline sm" data-action="cap-today">Diese Woche</button>' +
     '<button class="icon-btn" data-action="cap-next" aria-label="Später">' + icon('right') + '</button></div></div>' +
     '<div class="cal-top-r"><button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button>' + prefControls() + '</div></div>';
-  if (!d) return head + '<div class="skeleton" style="height:260px;border-radius:12px"></div></div>';
+  if (!d) return head + '<div class="card-w">' + skTable(6, Math.min(weeks, 8) + 1) + '</div></div>';
 
   const work = d.days.filter(x => { const wd = Shared.weekday(x); return wd !== 0 && wd !== 6; });
   const warnDays = d.team.filter(x => x.warn);
@@ -1688,7 +1688,7 @@ function capacityPage() {
   const scope = teamId ? teamMembers(team(teamId)) : null;
   return head + '<div class="cal-body"><div class="cal-layout"><div class="cal-main cap-main">' + banner +
     '<div class="av-wrap" data-keep-scroll="av"><table class="av"><thead>' + th + '</thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>' + legend + '</div>' +
-    '<div class="cal-side" data-keep-scroll="side">' + (extra ? sidePanel(extra, scope, { noWarn: true }) : '<div class="panel"><div class="skeleton"></div></div>') + '</div></div></div></div>';
+    '<div class="cal-side" data-keep-scroll="side">' + (extra ? sidePanel(extra, scope, { noWarn: true }) : '<div class="panel">' + skPeople(3) + '</div>') + '</div></div></div></div>';
 }
 function fmtNum(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
 function uniq(a) { return a.filter((x, i) => a.indexOf(x) === i); }
@@ -1770,7 +1770,7 @@ function settingsPage() {
     divField('Arbeitstage', '<div class="days">' + [1, 2, 3, 4, 5, 6, 0].map(d => '<label><input type="checkbox" name="workDays" value="' + d + '"' + (days.indexOf(String(d)) >= 0 ? ' checked' : '') + '><span>' + DOW[d] + '</span></label>').join('') + '</div>') +
     '<div><button class="btn primary" type="submit">Profil speichern</button></div></form>';
 
-  const absHtml = myAbs === null ? '<div class="skeleton"></div>' : (myAbs.map(a => {
+  const absHtml = myAbs === null ? skRows(2) : (myAbs.map(a => {
     const ty = Shared.ABSENCE_TYPES.find(x => x.key === a.type) || Shared.ABSENCE_TYPES[3];
     return '<div class="li"><span class="chip"><span class="dot" style="background:var(--' + ty.key + ')"></span>' + esc(ty.label) + '</span><span class="grow">' + esc(fmtRange(a.startDate, a.endDate)) +
       (a.note ? ' <span class="faint">· ' + esc(a.note) + '</span>' : '') + '</span>' +

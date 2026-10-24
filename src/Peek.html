@@ -138,7 +138,7 @@ function renderPeek() {
   }
 
   const comments = S.comments && S.comments.taskId === t.id ? S.comments.list : null;
-  const commentsList = comments === null ? '<div class="skeleton" style="width:60%"></div>' : comments.map(c =>
+  const commentsList = comments === null ? skPeople(2) : comments.map(c =>
     '<div class="comment">' + avatar(c.author) + '<div class="body"><div class="head"><b>' + esc(user(c.author).name) + '</b><span class="muted">' + esc(timeAgo(c.createdAt)) + '</span></div>' +
     '<div class="text">' + esc(c.body) + '</div></div></div>').join('');
   const commentForm = '<form class="comment-form" data-on-submit="comment">' + avatar(S.me.email) +
