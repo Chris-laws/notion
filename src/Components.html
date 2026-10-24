@@ -49,6 +49,7 @@ function closePop() {
 function closeTopLayer() {
   if ($('#palette-root').children.length) { closePalette(); return true; }
   if (closePop()) return true;
+  if (closePeopleModal()) return true;
   if ($('#modal-root').children.length) { closeModal(); return true; }
   return false;
 }
@@ -134,20 +135,167 @@ function openMenu(anchor, items, opts) {
     });
 }
 
-/* ---------------- property editors ---------------- */
-function peopleItems(preferred) {
-  const pref = preferred || [];
-  const list = S.users.slice().sort((a, b) =>
-    (b.email === S.me.email) - (a.email === S.me.email) ||
-    (pref.indexOf(b.email) >= 0) - (pref.indexOf(a.email) >= 0) ||
-    a.name.localeCompare(b.name));
-  return list.map(u => ({
-    value: u.email,
-    html: avatar(u.email) + '<span class="pp-name">' + esc(u.name) + (u.email === S.me.email ? ' <span class="faint">(ich)</span>' : '') +
-      '<small class="faint pp-mail">' + esc(u.email) + '</small></span>',
-    search: u.name + ' ' + u.email,
-  }));
+/* ---------------- people manager: one dialog for every place where people are added ---------------- */
+/**
+ * "Mitglieder verwalten": search on top (name or e-mail, hits after a few letters), the current
+ * people below with avatar, name, e-mail, role and a remove button, hits with "Hinzufügen",
+ * invite by e-mail. Opens above other dialogs (own layer), Esc closes it first.
+ * o: {
+ *   title, sub, selected: [emails], onChange(list) (called on every change),
+ *   single: pick exactly one (closes on pick), roles: email => label, keep: email that cannot be removed,
+ *   prefer: [emails] suggested first, all: { label, people } (empty list = all of these),
+ *   extra: [{ value, name, icon }] special entries (filters), min: 1 = at least one person,
+ *   addLabel, emptyText, invite (default true)
+ * }
+ */
+let PM = null;
+function peopleModal(o) {
+  closePop();
+  PM = { o: o, list: (o.selected || []).slice(), q: '', ret: document.activeElement, undo: null };
+  const root = $('#people-root');
+  root.innerHTML = '<div class="pm-bg" data-action="pm-bg"><div class="pm" role="dialog" aria-modal="true" aria-labelledby="pm-title">' +
+    '<div class="pm-top"><div><div id="pm-title" class="pm-title">' + esc(o.title || 'Mitglieder verwalten') + '</div>' +
+    (o.sub ? '<div class="pm-sub">' + esc(o.sub) + '</div>' : '') + '</div>' +
+    '<button type="button" class="icon-btn" data-action="pm-close" aria-label="Schließen" title="Schließen (Esc)">' + icon('x') + '</button></div>' +
+    '<label class="pm-search">' + icon('search', 'sm') + '<input type="search" placeholder="' + esc(o.invite === false ? 'Name oder E-Mail suchen …' : 'Name oder E-Mail suchen – oder E-Mail einladen …') + '" autocomplete="off" aria-label="Person suchen"></label>' +
+    '<div class="pm-body" role="list"></div>' +
+    '<div class="pm-foot"><span class="pm-count"></span><button type="button" class="btn primary" data-action="pm-close">Fertig</button></div></div></div>';
+  const m = $('.pm', root);
+  const input = $('input', m);
+  input.addEventListener('input', () => { PM.q = input.value; pmDraw(); });
+  input.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const first = $('.pm-hit [data-action="pm-add"]', m);
+    if (first) first.click();
+  });
+  m.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const f = $$('button:not([disabled]), input', m).filter(x => x.offsetParent);
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
+  pmDraw();
+  input.focus();
 }
+function pmEffective() {
+  const o = PM.o;
+  return !PM.list.length && o.all ? o.all.people.slice() : PM.list.slice();
+}
+function pmName(e) {
+  const x = (PM.o.extra || []).find(i => i.value === e);
+  return x ? x.name : user(e).name;
+}
+function pmRow(e, kind) {
+  const o = PM.o;
+  const x = (o.extra || []).find(i => i.value === e);
+  const u = user(e);
+  const known = x || S.users.some(v => v.email === e);
+  const role = !x && o.roles ? o.roles(e) : '';
+  const mine = pmEffective().indexOf(e) >= 0;
+  const av = x ? '<span class="pm-xic">' + icon(x.icon || 'user', 'sm') + '</span>' : avatar(e);
+  const text = '<span class="pm-who"><b>' + esc(x ? x.name : u.name) + (e === S.me.email ? ' <span class="faint">(ich)</span>' : '') + '</b>' +
+    (x ? '' : '<small>' + esc(e) + (known ? '' : ' · wird eingeladen') + '</small>') + '</span>';
+  let btn;
+  if (kind === 'member') {
+    btn = o.single ? '<span class="chip soft">Ausgewählt</span>'
+      : o.keep === e ? '<span class="pm-keep" title="' + esc(o.keepHint || 'Kann nicht entfernt werden') + '">' + icon('lock', 'sm') + '</span>'
+      : '<button type="button" class="icon-btn pm-del" data-action="pm-remove" data-v="' + esc(e) + '" title="Entfernen" aria-label="' + esc(pmName(e) + ' entfernen') + '">' + icon('trash', 'sm') + '</button>';
+  } else if (mine) {
+    btn = '<span class="pm-in">' + icon('check', 'sm') + (o.single ? 'Ausgewählt' : 'Dabei') + '</span>';
+  } else {
+    btn = '<button type="button" class="btn sm ' + (kind === 'invite' ? 'outline' : 'primary') + '" data-action="pm-add" data-v="' + esc(e) + '">' +
+      icon(kind === 'invite' ? 'mail' : o.single ? 'check' : 'plus', 'sm') + (kind === 'invite' ? 'Einladen' : o.single ? 'Auswählen' : (o.addLabel || 'Hinzufügen')) + '</button>';
+  }
+  return '<div class="pm-row' + (kind !== 'member' ? ' pm-hit' : '') + '" role="listitem">' + av + text +
+    (role ? '<span class="chip soft pm-role">' + esc(role) + '</span>' : '') + btn + '</div>';
+}
+function pmDraw() {
+  if (!PM) return;
+  const o = PM.o;
+  const m = $('#people-root .pm');
+  if (!m) return;
+  const q = PM.q.trim().toLowerCase();
+  const eff = pmEffective();
+  const prefer = o.prefer || [];
+  const extras = (o.extra || []);
+  let html = '';
+  if (q) {
+    const hits = extras.filter(x => x.name.toLowerCase().indexOf(q) >= 0).map(x => x.value)
+      .concat(S.users.filter(u => (u.name + ' ' + u.email).toLowerCase().indexOf(q) >= 0)
+        .sort((a, b) => (prefer.indexOf(b.email) >= 0) - (prefer.indexOf(a.email) >= 0) || a.name.localeCompare(b.name)).map(u => u.email));
+    const isMail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(q);
+    html += '<div class="pm-sec">Treffer <span class="n">' + hits.length + '</span></div>' +
+      (hits.length ? hits.slice(0, 40).map(e => pmRow(e, 'hit')).join('') : '') +
+      (o.invite !== false && !o.single && isMail && !S.users.some(u => u.email === q) ? pmRow(q, 'invite') : '') +
+      (!hits.length && !(isMail && o.invite !== false && !o.single) ? '<div class="pm-empty">Niemand gefunden.' + (o.invite === false || o.single ? '' : ' Gib eine vollständige E-Mail-Adresse ein, um die Person einzuladen.') + '</div>' : '');
+  } else {
+    const sugg = extras.map(x => x.value).filter(v => eff.indexOf(v) < 0)
+      .concat(prefer.filter(e => eff.indexOf(e) < 0)).slice(0, 8);
+    if (sugg.length) html += '<div class="pm-sec">Vorschläge</div>' + sugg.map(e => pmRow(e, 'hit')).join('');
+  }
+  if (o.all) {
+    const whole = !PM.list.length;
+    html += '<div class="pm-allbar' + (whole ? ' on' : '') + '">' + icon('users', 'sm') + '<div><b>' + esc(o.all.label) + '</b><small>' +
+      (whole ? 'Alle Mitglieder gehören automatisch dazu, auch künftige. Wer hinzugefügt oder entfernt wird, macht daraus eine feste Auswahl.'
+        : 'Feste Auswahl: nur die Personen unten gehören dazu.') + '</small></div>' +
+      (whole ? '' : '<button type="button" class="btn sm outline" data-action="pm-all">Wieder ganzes Team</button>') + '</div>';
+  }
+  const members = eff.slice().sort((a, b) => (a === S.me.email ? -1 : b === S.me.email ? 1 : 0) || pmName(a).localeCompare(pmName(b)));
+  html += '<div class="pm-sec">' + (o.single ? 'Ausgewählt' : 'Aktuelle Mitglieder') + ' <span class="n">' + members.length + '</span></div>' +
+    (members.length ? members.map(e => pmRow(e, 'member')).join('') : '<div class="pm-empty">' + esc(o.emptyText || 'Noch niemand. Suche oben nach Namen oder E-Mail.') + '</div>');
+  $('.pm-body', m).innerHTML = html;
+  $('.pm-count', m).textContent = o.single ? '' : members.length === 1 ? '1 Person' : members.length + ' Personen';
+}
+function pmCommit(list, msg, undoList) {
+  const cb = PM.o.onChange;
+  PM.list = list;
+  pmDraw();
+  if (cb) cb(list.slice());
+  if (!msg) return;
+  toast(msg, { action: { label: 'Rückgängig', fn: () => {
+    if (PM) { PM.list = undoList.slice(); pmDraw(); }
+    if (cb) cb(undoList.slice());
+  } } });
+}
+A['pm-add'] = el => {
+  const e = el.dataset.v;
+  const o = PM.o;
+  if (!S.users.some(u => u.email === e) && !(o.extra || []).some(x => x.value === e)) S.users.push(user(e));
+  if (o.single) { const cb = o.onChange; closePeopleModal(); if (cb) cb([e]); return; }
+  const before = PM.list.slice();
+  const base = pmEffective();
+  if (base.indexOf(e) < 0) base.push(e);
+  pmCommit(base, null);
+  PM.undo = before;
+  // ready for the next name
+  const input = $('#people-root input');
+  if (input && PM.q) { input.value = ''; PM.q = ''; pmDraw(); }
+  if (input) input.focus();
+};
+A['pm-remove'] = el => {
+  const e = el.dataset.v;
+  const o = PM.o;
+  const before = PM.list.slice();
+  const next = pmEffective().filter(x => x !== e);
+  if (o.min && next.length < o.min) { toast('Mindestens eine Person muss übrig bleiben.', { warn: true }); return; }
+  pmCommit(next, pmName(e) + ' entfernt', before);
+};
+A['pm-all'] = () => { const before = PM.list.slice(); pmCommit([], 'Wieder ganzes Team', before); };
+A['pm-close'] = () => closePeopleModal();
+A['pm-bg'] = (el, e) => { if (e.target === el) closePeopleModal(); };
+function closePeopleModal() {
+  if (!PM) return false;
+  const ret = PM.ret;
+  const done = PM.o.onClose;
+  PM = null;
+  $('#people-root').innerHTML = '';
+  if (done) done();
+  if (ret && document.contains(ret) && ret.focus) ret.focus();
+  return true;
+}
+
+/* ---------------- property editors ---------------- */
 function relevantPeople(t) {
   let emails = [];
   const p = t.projectId && project(t.projectId);
@@ -167,10 +315,8 @@ const PROP_EDITORS = {
     { selected: [t.priority], search: false, onPick: v => save({ priority: v }) });
   },
   assignees(anchor, t, save) {
-    openMenu(anchor, peopleItems(relevantPeople(t)), {
-      multi: true, search: true, invite: true, selected: t.assignees, placeholder: 'Name oder E-Mail suchen…',
-      onPick: (v, sel) => save({ assignees: sel }),
-    });
+    peopleModal({ title: 'Zuständige verwalten', sub: t.title, selected: t.assignees, prefer: relevantPeople(t), addLabel: 'Zuweisen',
+      emptyText: 'Noch niemand zuständig.', onChange: list => save({ assignees: list }) });
   },
   teams(anchor, t, save) {
     openMenu(anchor, S.teams.map(x => ({ value: x.id, html: teamChip(x), search: x.name })),
@@ -374,33 +520,14 @@ function ppSet(box, sel) {
   const form = box.closest('form');
   if (form) form.setAttribute('data-touched', '1');
 }
-/**
- * Directory search for several people (search, invite by e-mail, untick to remove).
- * opts.all: label of an entry that stands for "nobody picked = all of opts.prefer" (e.g. "Ganzes Team");
- * while it is active the prefer people show as ticked, so adding someone keeps the team.
- */
-function peopleMenu(anchor, sel, opts, onChange) {
-  const prefer = opts.prefer || [];
-  const whole = ['__all'].concat(prefer);
-  const head = opts.all ? [{ value: '__all', search: opts.all, html: '<span class="pp-allic">' + icon('users', 'sm') + '</span><span class="pp-name">' + esc(opts.all) +
-    '<small class="faint pp-mail">' + esc(opts.allHint || 'Alle Mitglieder, auch künftige') + '</small></span>' }] : [];
-  openMenu(anchor, head.concat(peopleItems(prefer)), {
-    multi: true, search: true, invite: true, placeholder: 'Name oder E-Mail suchen…', selected: opts.all && !sel.length ? whole : sel,
-    onPick: (v, picked) => {
-      const list = picked.filter(x => x !== '__all');
-      if (opts.all && (v === '__all' || !list.length)) { onChange([]); return whole; }
-      onChange(list);
-      return list;
-    },
-  });
-}
 A['pp-add'] = el => {
   const box = el.closest('.pp-field');
-  const sel = ppValue(box);
   const prefer = String(box.dataset.prefer || '').split(',').filter(Boolean);
-  if (box.dataset.single) {
-    openMenu(el, peopleItems(prefer), { search: true, selected: sel, placeholder: 'Name oder E-Mail suchen…', onPick: v => ppSet(box, [v]) });
-  } else peopleMenu(el, sel, { prefer: prefer, all: box.dataset.empty }, list => ppSet(box, list));
+  peopleModal({
+    title: box.dataset.title || (box.dataset.single ? 'Person wählen' : 'Mitglieder verwalten'), selected: ppValue(box), single: !!box.dataset.single, prefer: prefer,
+    all: box.dataset.empty ? { label: box.dataset.empty, people: prefer } : null,
+    onChange: list => ppSet(box, list),
+  });
 };
 A['pp-remove'] = el => {
   const box = el.closest('.pp-field');
@@ -440,11 +567,10 @@ A['team-new'] = () => teamModal();
 A['team-members'] = el => {
   const t = team(el.dataset.id);
   if (!t) return;
-  openMenu(el, peopleItems(), {
-    multi: true, search: true, invite: true, selected: t.members.slice(), placeholder: 'Name oder E-Mail suchen…',
-    onPick: (v, sel) => {
-      if (v === t.lead && sel.indexOf(v) < 0) { sel.push(v); toast('Der Team-Lead bleibt Mitglied.'); }
-      const members = sel.slice();
+  peopleModal({
+    title: 'Mitglieder verwalten', sub: 'Team ' + t.name, selected: t.members.slice(), keep: t.lead, keepHint: 'Der Team-Lead bleibt Mitglied. Lead ändern: Team bearbeiten.',
+    roles: e => (e === t.lead ? 'Team-Lead' : 'Mitglied'),
+    onChange: members => {
       const before = t.members;
       t.members = members;
       render();
@@ -485,7 +611,13 @@ A['project-members'] = el => {
   const p = project(el.dataset.id);
   if (!p) return;
   const t = team(p.teamId);
-  peopleMenu(el, p.members.slice(), { prefer: t ? teamMembers(t) : [], all: 'Ganzes Team' + (t ? ' ' + t.name : '') }, members => saveProjectMembers(p, members));
+  const crew = t ? teamMembers(t) : [];
+  peopleModal({
+    title: 'Mitglieder verwalten', sub: 'Projekt ' + p.name, selected: p.members.slice(), prefer: crew,
+    all: { label: 'Ganzes Team' + (t ? ' ' + t.name : ''), people: crew },
+    roles: e => (t && e === t.lead ? 'Team-Lead' : crew.indexOf(e) >= 0 ? 'Teammitglied' : 'Gast'),
+    onChange: members => saveProjectMembers(p, members),
+  });
 };
 A['project-unmember'] = el => {
   const p = project(el.dataset.id);
@@ -576,8 +708,8 @@ A.assistant = () => {
         const b = e.target.closest('[data-ai-people]');
         if (!b) return;
         const it = assistState.items[Number(b.dataset.aiPeople)];
-        openMenu(b, peopleItems(), { multi: true, search: true, invite: true, selected: (it.assignees && it.assignees.length ? it.assignees : [S.me.email]).slice(),
-          placeholder: 'Name oder E-Mail suchen…', onPick: (v, sel) => { it.assignees = sel.length ? sel : [S.me.email]; drawAssist(); } });
+        peopleModal({ title: 'Zuständige', sub: it.title, selected: (it.assignees && it.assignees.length ? it.assignees : [S.me.email]).slice(), min: 1, addLabel: 'Zuweisen',
+          onChange: list => { it.assignees = list.length ? list : [S.me.email]; drawAssist(); } });
       });
     },
   });
@@ -858,9 +990,10 @@ function newTaskModal(preset) {
         const add = e.target.closest('[data-nt-add]');
         if (!add) return;
         // people of the project/team in context come first
-        openMenu(add, peopleItems(relevantPeople({ projectId: $('select[name=projectId]', m).value, teams: preset.teams || [] })), {
-          multi: true, search: true, invite: true, selected: people.slice(), placeholder: 'Name oder E-Mail suchen…',
-          onPick: (v, sel) => { people = sel.length ? sel : [S.me.email]; drawPeople(); },
+        peopleModal({
+          title: 'Zuständige', sub: 'Wer kümmert sich um die neue Aufgabe?', selected: people.slice(), min: 1, addLabel: 'Zuweisen',
+          prefer: relevantPeople({ projectId: $('select[name=projectId]', m).value, teams: preset.teams || [] }),
+          onChange: list => { people = list.length ? list : [S.me.email]; drawPeople(); },
         });
       });
     },

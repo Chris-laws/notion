@@ -1490,4 +1490,44 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 @media (prefers-reduced-motion: reduce) {
   .sk, .skeleton, .sk-gbar, .cal.sk-on > div:not(.cal-dow)::after, .wk.sk-on .wk-a::after { animation: none; background: var(--sk-hi); }
 }
+
+/* people manager ("Mitglieder verwalten"): own layer above dialogs */
+.pm-bg { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 4vh 16px; background: rgba(14, 26, 52, .45); backdrop-filter: blur(2px); animation: fade .12s; }
+.pm { width: 100%; max-width: 560px; height: min(640px, 88vh); display: flex; flex-direction: column; background: var(--bg-elevated); border-radius: 20px; box-shadow: var(--shadow-pop); overflow: hidden; animation: popin .14s; }
+.pm-top { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 20px 22px 12px; }
+.pm-top .icon-btn { margin-left: auto; }
+.pm-title { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+.pm-sub { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+.pm-search { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 22px 10px; padding: 0 12px; height: 42px; border-radius: 12px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--border-strong); color: var(--text-3); }
+.pm-search:focus-within { box-shadow: inset 0 0 0 2px var(--accent); color: var(--accent-text); }
+.pm-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: 14px; color: var(--text); }
+.pm-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 14px 10px; }
+.pm-sec { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 12px 8px 6px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); background: var(--bg-elevated); }
+.pm-sec .n { font-weight: 600; color: var(--text-3); }
+.pm-row { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 12px; min-width: 0; }
+.pm-row:hover { background: var(--bg-hover); }
+.pm-row .avatar { width: 34px; height: 34px; font-size: 12px; flex: none; }
+.pm-xic { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); flex: none; }
+.pm-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pm-who b { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-who small { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-role { flex: none; }
+.pm-row .btn.sm { flex: none; }
+.pm-del { flex: none; color: var(--text-3); }
+.pm-del:hover { color: var(--danger); background: var(--danger-soft); }
+.pm-in { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-3); padding: 0 8px; }
+.pm-keep { flex: none; width: 32px; display: grid; place-items: center; color: var(--text-3); }
+.pm-empty { padding: 14px 10px; font-size: 13px; color: var(--text-3); }
+.pm-allbar { display: flex; align-items: center; gap: 12px; margin: 10px 4px 2px; padding: 12px 14px; border-radius: 14px; background: var(--bg-hover); color: var(--text-2); }
+.pm-allbar.on { background: var(--accent-soft); color: var(--accent-text); }
+.pm-allbar > div { flex: 1; min-width: 0; }
+.pm-allbar b { display: block; font-size: 13.5px; color: var(--text); }
+.pm-allbar small { display: block; font-size: 12px; margin-top: 2px; }
+.pm-foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 22px 18px; border-top: 1px solid var(--border); }
+.pm-count { margin-right: auto; font-size: 13px; color: var(--text-2); }
+@media (max-width: 600px) {
+  .pm-bg { padding: 0; place-items: end stretch; }
+  .pm { max-width: none; height: 92vh; border-radius: 20px 20px 0 0; }
+  .pm-role { display: none; }
+}
 </style>

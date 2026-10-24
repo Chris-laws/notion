@@ -156,6 +156,8 @@ const ICONS = {
   repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   circle: '<circle cx="12" cy="12" r="9"/>',
   status: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
   expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
   shrink: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
@@ -759,7 +761,7 @@ window.addEventListener('keydown', e => {
     if (S.peekId && !typing) { closePeek(); return; }
   }
   if (typing || e.metaKey || e.ctrlKey || e.altKey || !S.me) return;
-  if ($('#modal-root').children.length || $('#palette-root').children.length) return;
+  if ($('#modal-root').children.length || $('#palette-root').children.length || $('#people-root').children.length) return;
   const letter = /^Key[A-Z]$/.test(e.code || '') ? e.code.slice(3).toLowerCase() : k;
   if (k === '?' || (e.shiftKey && (e.code === 'Slash' || e.code === 'Minus')) || e.key === 'F1') { e.preventDefault(); A.help(); return; }
   if (S.route.view === 'calendar') {

@@ -509,6 +509,27 @@ test('AI uses Vertex when a key is configured', () => {
   ctx.__GAS_FETCH__ = null;
 });
 
+test('people manager: whole team, picked people with guests, lead stays in the team', () => {
+  as(ME);
+  const tm = call('teams.save', { name: 'Picker', members: [ME, 'anna.schmidt@firma.de'] });
+  // removing the lead from the member list keeps the lead in the team
+  const kept = call('teams.save', { id: tm.id, name: tm.name, lead: ME, members: ['anna.schmidt@firma.de'] });
+  assert.ok(kept.members.indexOf(ME) >= 0);
+  // empty list = whole team; picking people (also from outside, invited by e-mail) makes it a fixed list
+  const p = call('projects.save', { teamId: tm.id, name: 'Picker-Projekt', members: [] });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(p.members)), []);
+  const fields = { id: p.id, teamId: p.teamId, name: p.name, color: p.color, status: p.status };
+  const picked = call('projects.save', Object.assign({}, fields, { members: [ME, 'anna.schmidt@firma.de', 'neu.kollegin@firma.de'] }));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(picked.members)), [ME, 'anna.schmidt@firma.de', 'neu.kollegin@firma.de']);
+  assert.ok(call('bootstrap').users.some(u => u.email === 'neu.kollegin@firma.de'), 'invited guest is in the directory');
+  const [task] = call('tasks.save', { title: 'Für den Gast', projectId: p.id, assignees: [ME] });
+  as('neu.kollegin@firma.de');
+  assert.ok(call('tasks.list').some(x => x.id === task.id), 'project guest sees the project task');
+  as(ME);
+  const back = call('projects.save', Object.assign({}, fields, { members: [] }));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(back.members)), [], 'back to whole team');
+});
+
 test('table cache: repeat reads skip the sheet, writes invalidate, polling says "same"', () => {
   as(ME);
   const raw = (m, p) => JSON.parse(ctx.api(m, JSON.stringify(p || {})));

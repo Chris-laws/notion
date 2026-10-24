@@ -229,10 +229,12 @@ ON.input['db-search'] = debounce(el => {
   if (n) { n.focus(); n.setSelectionRange(pos, pos); }
 }, 200);
 /** Person filter: type a few letters, pick several people; they show up as chips with a "+" to add more. */
-A['db-who'] = el => openMenu(el, [
-  { value: '__me', html: icon('user', 'sm') + '<span>Mir zugewiesen</span>', search: 'ich mir me' },
-  { value: '__none', html: icon('circle', 'sm') + '<span>Nicht zugewiesen</span>', search: 'nicht zugewiesen' },
-].concat(peopleItems()), { multi: true, search: true, placeholder: 'Name oder E-Mail suchen…', selected: prefs().people, onPick: multiFilter('people') });
+A['db-who'] = () => peopleModal({
+  title: 'Nach Personen filtern', sub: 'Gezeigt werden Aufgaben, die einer der gewählten Personen zugewiesen sind.', selected: prefs().people.slice(),
+  extra: [{ value: '__me', name: 'Mir zugewiesen', icon: 'user' }, { value: '__none', name: 'Nicht zugewiesen', icon: 'circle' }],
+  invite: false, addLabel: 'Filtern', emptyText: 'Kein Personenfilter – alle Aufgaben werden gezeigt.',
+  onChange: list => { prefs().people = list; store.set('db', S.db); render(); },
+});
 A['db-prio'] = el => openMenu(el, Shared.PRIORITIES.map(p => ({ value: p.key, html: prioTag(p.key), search: p.label }))
   .concat([{ value: '', html: '<span class="faint">Keine</span>', search: 'keine' }]),
 { multi: true, search: false, selected: prefs().prio, onPick: (v, sel) => { prefs().prio = sel; store.set('db', S.db); render(); } });
