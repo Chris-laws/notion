@@ -1113,27 +1113,35 @@ function workloadCard(t) {
   const open = S.tasks.filter(x => isMine(x) && !isDone(x));
   const weeks = [0, 1, 2, 3].map(i => {
     const from = Shared.addDays(mon, i * 7), to = Shared.addDays(from, 6);
-    let cap = 0, off = 0;
+    // working days of the profile; a day off counts once (vacation wins over a holiday on the same day)
+    let cap = 0, off = 0, vac = 0, hol = 0;
     for (let d = from; d <= to; d = Shared.addDays(d, 1)) {
       if (workDays.indexOf(Shared.weekday(d)) < 0) continue;
-      const away = data && (data.absences.some(a => a.email === me && a.startDate <= d && a.endDate >= d) ||
-        data.holidays.some(h => h.date === d && (h.affects || []).indexOf(me) >= 0));
-      if (away) off++; else cap += perDay;
+      const isVac = data && data.absences.some(a => a.email === me && a.startDate <= d && a.endDate >= d);
+      const isHol = !isVac && data && data.holidays.some(h => h.date === d && (h.affects || []).indexOf(me) >= 0);
+      if (isVac) { vac++; off++; } else if (isHol) { hol++; off++; } else cap += perDay;
     }
     const when = x => x.planDate || x.dueDate;
     const tasks = open.filter(x => { const w = when(x); return w && (i === 0 ? w <= to : w >= from && w <= to); });
     const hours = tasks.reduce((s2, x) => s2 + (Number(x.estimate) || 0), 0);
-    const pct = cap ? Math.round(hours / cap * 100) : (hours ? 999 : 0);
-    const state = pct > 100 ? ['danger', 'Überlastet'] : pct >= 80 ? ['warn', 'Knapp'] : ['ok', 'Im Rahmen'];
-    return { from: from, cap: cap, hours: hours, off: off, n: tasks.length, noEst: tasks.filter(x => !x.estimate).length, pct: pct, state: state };
+    const pct = cap ? Math.round(hours / cap * 100) : 0;
+    const why = vac ? 'Urlaub' : 'Feiertage';
+    let state;
+    if (!cap && off) state = hours ? ['danger', 'Kein Zeitfenster'] : ['off', why];
+    else state = pct > 100 ? ['danger', 'Überlastet'] : pct >= 80 ? ['warn', 'Knapp'] : ['ok', 'Im Rahmen'];
+    const note = off && cap ? [vac ? vac + (vac === 1 ? ' Tag Urlaub' : ' Tage Urlaub') : '', hol ? hol + (hol === 1 ? ' Feiertag' : ' Feiertage') : ''].filter(Boolean).join(', ') : '';
+    return { from: from, cap: cap, hours: hours, off: off, vac: vac, hol: hol, why: why, note: note, n: tasks.length, noEst: tasks.filter(x => !x.estimate).length, pct: pct, state: state };
   });
   const max = Math.max(1, ...weeks.map(w => Math.max(w.cap, w.hours)));
   const rows = weeks.map(w => '<button class="wl-row" data-action="nav" data-view="capacity" title="' +
     esc(w.n + ' Aufgaben · ' + fmtNum(w.hours) + ' h geplant · ' + fmtNum(w.cap) + ' h verfügbar' + (w.off ? ' · ' + w.off + ' Tage frei' : '') + (w.noEst ? ' · ' + w.noEst + ' ohne Aufwand' : '')) + '">' +
     '<span class="wl-wk"><b>KW ' + Shared.isoWeek(w.from) + '</b><small>' + esc(fmtDate(w.from, { absolute: true })) + '</small></span>' +
-    '<span class="wl-track"><i class="wl-fill ' + w.state[0] + '" style="width:' + Math.min(100, w.hours / max * 100) + '%"></i>' +
-    '<i class="wl-cap" style="left:' + (w.cap / max * 100) + '%"></i></span>' +
-    '<span class="wl-val"><b>' + fmtNum(w.hours) + '</b> / ' + fmtNum(w.cap) + ' h</span>' +
+    (!w.cap && w.off
+      ? '<span class="wl-track away"><span>' + esc(w.why) + ' · ' + w.off + (w.off === 1 ? ' Tag' : ' Tage') + '</span></span>' +
+        '<span class="wl-val">' + (w.hours ? '<b>' + fmtNum(w.hours) + ' h</b> geplant' : '0 h verfügbar') + '</span>'
+      : '<span class="wl-track"><i class="wl-fill ' + w.state[0] + '" style="width:' + Math.min(100, w.hours / max * 100) + '%"></i>' +
+        '<i class="wl-cap" style="left:' + (w.cap / max * 100) + '%"></i>' + (w.note ? '<em class="wl-note">' + esc(w.note) + '</em>' : '') + '</span>' +
+        '<span class="wl-val"><b>' + fmtNum(w.hours) + '</b> / ' + fmtNum(w.cap) + ' h' + (w.noEst ? '<small>' + w.noEst + ' ohne Aufwand</small>' : '') + '</span>') +
     '<span class="wl-chip ' + w.state[0] + '">' + w.state[1] + '</span></button>').join('');
   return '<div class="card-w w-6 wl"><h3>' + icon('gauge', 'sm') + 'Auslastung nächste 4 Wochen<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>' +
     '<p class="hint" style="margin:-6px 0 10px">Geplanter Aufwand deiner offenen Aufgaben gegen deine Arbeitszeit, Urlaub und Feiertage schon abgezogen. Der Strich ist deine Kapazität.</p>' +

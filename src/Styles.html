@@ -2,16 +2,16 @@
 /* Tokens: see DESIGN.md. Light canvas, white rounded cards; Lidl blue is the accent, yellow a small highlight, red means act now. */
 :root {
   --font: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --canvas: #f1f4f9;
+  --canvas: #e9eef6;
   --bg: #ffffff;
   --bg-subtle: #f6f8fc;
   --bg-hover: #eef2f9;
   --bg-active: #e3ebf8;
   --bg-elevated: #ffffff;
-  --border: #e5eaf3;
-  --border-strong: #d3dbe9;
+  --border: #d5dce8;
+  --border-strong: #b9c4d6;
   --text: #16223b;
-  --text-2: #55617c;
+  --text-2: #3f4a63;
   --text-3: #606b81;
   --accent: #012e90;
   --accent-hover: #00236e;
@@ -352,6 +352,16 @@ input.ai-title { height: 32px; }
 #perf th, #perf td { padding: 2px 6px; text-align: right; border-bottom: 1px solid var(--border); }
 #perf th:first-child, #perf td:first-child { text-align: left; }
 #perf tr.err td { color: var(--danger); }
+/* new-task form: assignees as chips */
+.nt-people { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 36px; padding: 4px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--border-strong); background: var(--bg); }
+.nt-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px 0 3px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); font-size: 12.5px; font-weight: 600; }
+.nt-chip .avatar { width: 22px; height: 22px; font-size: 10px; }
+.nt-x { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: inherit; opacity: .7; }
+.nt-x:hover { opacity: 1; background: rgba(0, 0, 0, .08); }
+.nt-add, .nt-me { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--text-2); border: 1px dashed var(--border-strong); }
+.nt-add:hover, .nt-me:hover { color: var(--accent-text); border-color: var(--accent); }
+.ai-people { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px 2px 2px; border-radius: 999px; border: 1px dashed var(--border-strong); color: var(--text-3); }
+.ai-people:hover { border-color: var(--accent); color: var(--accent-text); }
 /* new-task form */
 .field-err { display: block; color: var(--danger); font-size: 12px; margin-top: 4px; }
 .field-err[hidden] { display: none; }
@@ -444,6 +454,13 @@ input.ai-title { height: 32px; }
 .wl-val b { color: var(--text); }
 .wl-chip { justify-self: end; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
 .wl-chip.ok { background: var(--success-soft); color: var(--success); }
+.wl-chip.off { background: var(--bg-hover); color: var(--text-2); }
+/* a week without working time: grey hatched bar with the reason */
+.wl-track.away { height: 20px; display: flex; align-items: center; padding: 0 10px; font-size: 11.5px; font-weight: 600; color: var(--text-2);
+  background: repeating-linear-gradient(135deg, var(--bg-hover) 0 6px, var(--bg-subtle) 6px 12px); }
+.wl-note { position: absolute; left: 0; top: 14px; font-style: normal; font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
+.wl-val small { display: block; font-size: 10.5px; color: var(--warning); }
+.wl-row { min-height: 46px; }
 .wl-chip.warn { background: var(--warning-soft); color: var(--warning); }
 .wl-chip.danger { background: var(--danger-soft); color: var(--danger); }
 /* dashboard: done per week */

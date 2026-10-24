@@ -494,6 +494,13 @@ A.assistant = () => {
       };
       m.addEventListener('input', edit);
       m.addEventListener('change', edit);
+      m.addEventListener('click', e => {
+        const b = e.target.closest('[data-ai-people]');
+        if (!b) return;
+        const it = assistState.items[Number(b.dataset.aiPeople)];
+        openMenu(b, peopleItems(), { multi: true, search: true, invite: true, selected: (it.assignees && it.assignees.length ? it.assignees : [S.me.email]).slice(),
+          placeholder: 'Name oder E-Mail suchen…', onPick: (v, sel) => { it.assignees = sel.length ? sel : [S.me.email]; drawAssist(); } });
+      });
     },
   });
 };
@@ -516,7 +523,8 @@ function drawAssist() {
       ? '<span class="ai-title">' + esc(absenceType(it.absenceType).label) + ' · ' + esc(user(it.email).name) + '</span>'
       : '<input class="input ai-title" data-ai-i="' + i + '" data-ai-f="title" value="' + esc(it.title || '') + '">';
     const meta = it.type === 'task'
-      ? date(i, 'dueDate', it.dueDate, 'Fällig') + '<span class="ai-meta">' + (it.assignees && it.assignees.length ? avatars(it.assignees, 3) : avatar(S.me.email)) +
+      ? date(i, 'dueDate', it.dueDate, 'Fällig') + '<span class="ai-meta"><button type="button" class="ai-people" data-ai-people="' + i + '" title="Zuständige ändern">' +
+        (it.assignees && it.assignees.length ? avatars(it.assignees, 3) : avatar(S.me.email)) + icon('plus', 'sm') + '</button>' +
         (it.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(it.estimate)) + '</span>' : '') + (it.priority ? prioTag(it.priority) : '') +
         (it.projectId && project(it.projectId) ? projectChip(project(it.projectId)) : '') + '</span>'
       : date(i, 'startDate', it.startDate, 'Von') + date(i, 'endDate', it.endDate, 'Bis');
@@ -728,33 +736,55 @@ function confirmCreate(fields) {
  */
 function newTaskModal(preset) {
   preset = Object.assign({}, preset || {});
-  const assignee = (preset.assignees && preset.assignees[0]) || S.me.email;
+  // who does it: chips with search (like "Zugewiesen"), at least one person, me by default
+  let people = (preset.assignees && preset.assignees.length ? preset.assignees : [S.me.email]).slice();
+  const drawPeople = () => {
+    const box = $('#modal-root .nt-people');
+    if (!box) return;
+    box.innerHTML = people.map(e => '<span class="nt-chip">' + avatar(e) + '<span>' + esc(user(e).name) + (e === S.me.email ? ' (ich)' : '') + '</span>' +
+      (people.length > 1 ? '<button type="button" class="nt-x" data-nt-remove="' + esc(e) + '" aria-label="Entfernen" title="Entfernen">' + icon('x', 'sm') + '</button>' : '') + '</span>').join('') +
+      '<button type="button" class="nt-add" data-nt-add title="Person suchen oder per E-Mail einladen">' + icon('plus', 'sm') + 'Person</button>' +
+      (people.indexOf(S.me.email) < 0 ? '<button type="button" class="nt-me" data-nt-me>Mir zuweisen</button>' : '');
+  };
   const projectOptions = [{ key: '', label: 'Kein Projekt' }];
   S.teams.forEach(tm => S.projects.filter(p => p.teamId === tm.id && p.status !== 'done')
     .forEach(p => projectOptions.push({ key: p.id, label: tm.name + ' › ' + p.name })));
   const prioOptions = [{ key: '', label: 'Keine Priorität' }].concat(Shared.PRIORITIES.map(p => ({ key: p.key, label: p.label })));
-  const people = S.users.slice().sort((a, b) => (b.email === S.me.email) - (a.email === S.me.email) || a.name.localeCompare(b.name))
-    .map(u => ({ key: u.email, label: u.name + (u.email === S.me.email ? ' (ich)' : '') }));
   openModal({
     title: 'Neue Aufgabe', submitLabel: 'Aufgabe anlegen',
     body: field('Titel', '<input class="input" name="title" required maxlength="300" value="' + esc(preset.title || '') + '" placeholder="Was ist zu tun?">' +
         '<span class="field-err" hidden>Bitte einen Titel eingeben.</span>') +
-      '<div class="row">' + field('Zuständig', selectField('assignee', people, assignee)) +
-      field('Fällig', '<input class="input" type="date" name="dueDate" value="' + esc(preset.dueDate || '') + '">') + '</div>' +
-      '<div class="row">' + field('Projekt', selectField('projectId', projectOptions, preset.projectId || '')) +
+      divField('Zuständig', '<div class="nt-people"></div>') +
+      '<div class="row">' + field('Fällig', '<input class="input" type="date" name="dueDate" value="' + esc(preset.dueDate || '') + '">') +
       field('Priorität', selectField('priority', prioOptions, preset.priority || '')) + '</div>' +
+      field('Projekt', selectField('projectId', projectOptions, preset.projectId || '')) +
       field('Aufwand (Stunden)', '<input class="input" type="number" min="0" step="0.25" name="estimate" value="' + esc(preset.estimate || '') + '" placeholder="z. B. 2">') +
       (preset.planDate && preset.planStart ? '<p class="hint">Wird am ' + esc(fmtDate(preset.planDate, { absolute: true })) + ' um ' + fmtClock(preset.planStart) + ' eingeplant.</p>' : ''),
     onSubmit: v => {
       const title = String(v.title || '').trim();
       if (!title) { const e = $('#modal-root .field-err'); if (e) e.hidden = false; return false; }
       const fields = Object.assign({}, preset, {
-        title: title, assignees: [v.assignee || S.me.email], dueDate: v.dueDate || '',
+        title: title, assignees: people.length ? people.slice() : [S.me.email], dueDate: v.dueDate || '',
         projectId: v.projectId || '', priority: v.priority || '', estimate: Number(v.estimate) || 0,
       });
       if (!fields.dueDate) delete fields.dueDate;
       confirmCreate(fields);
       return true;
+    },
+    mount: m => {
+      drawPeople();
+      m.addEventListener('click', e => {
+        const rm = e.target.closest('[data-nt-remove]');
+        if (rm) { people = people.filter(x => x !== rm.dataset.ntRemove); if (!people.length) people = [S.me.email]; drawPeople(); return; }
+        if (e.target.closest('[data-nt-me]')) { people = people.concat([S.me.email]); drawPeople(); return; }
+        const add = e.target.closest('[data-nt-add]');
+        if (!add) return;
+        // people of the project/team in context come first
+        openMenu(add, peopleItems(relevantPeople({ projectId: $('select[name=projectId]', m).value, teams: preset.teams || [] })), {
+          multi: true, search: true, invite: true, selected: people.slice(), placeholder: 'Name oder E-Mail suchen…',
+          onPick: (v, sel) => { people = sel.length ? sel : [S.me.email]; drawPeople(); },
+        });
+      });
     },
   });
 }

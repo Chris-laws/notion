@@ -246,6 +246,15 @@ test('capacity respects holidays, absences, part-time', () => {
   assert.strictEqual(m(ME).weeks[1].available, 32); // Neujahr
   const lea = call('capacity', { from: '2026-10-26', weeks: 1 }).members.find(x => x.email === 'lea.huber@firma.de');
   assert.strictEqual(lea.weeks[0].available, 22.5); // AT 30h/4 days, 26.10. Nationalfeiertag
+  // a full week of vacation means no working time at all (not "0 of 0, all fine")
+  call('absences.save', { email: 'lukas.meyer@firma.de', startDate: '2026-11-09', endDate: '2026-11-13', type: 'vacation' });
+  const lukas = call('capacity', { from: '2026-11-09', weeks: 1 }).members.find(x => x.email === 'lukas.meyer@firma.de');
+  assert.strictEqual(lukas.weeks[0].available, 0);
+  assert.strictEqual(lukas.weeks[0].absentDays, 5);
+  // part-time with a holiday and a vacation day in the same week: 30h/4 days, 26.10. off, 27.10. vacation
+  call('absences.save', { email: 'lea.huber@firma.de', startDate: '2026-10-27', endDate: '2026-10-27', type: 'vacation' });
+  const lea2 = call('capacity', { from: '2026-10-26', weeks: 1 }).members.find(x => x.email === 'lea.huber@firma.de');
+  assert.strictEqual(lea2.weeks[0].available, 15);
 });
 
 test('capacity counts task load over working days', () => {
