@@ -1164,7 +1164,8 @@ function teamPage(t) {
     '<div class="db-bar"><div class="tabs">' +
     [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length], ['members', 'Mitglieder', 'users', members.length]]
       .map(x => '<button class="tab' + (tab === x[0] ? ' active' : '') + '" data-action="team-tab" data-v="' + x[0] + '">' + icon(x[2]) + x[1] + ' <span class="n">' + x[3] + '</span></button>').join('') +
-    '</div></div>' + body + '</div>';
+    '</div>' + (tab === 'members' ? '<button class="btn primary" data-action="team-members" data-id="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Mitglieder hinzufügen</button>' : '') +
+    '</div>' + body + '</div>';
 }
 A['team-tab'] = el => { S.teamTab = el.dataset.v; render(); };
 A['team-capacity'] = el => { S.cap.teamId = el.dataset.id; S.cap.data = null; go('capacity'); };

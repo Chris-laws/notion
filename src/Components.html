@@ -62,6 +62,9 @@ function openMenu(anchor, items, opts) {
   const visible = () => {
     const q = query.trim().toLowerCase();
     let list = items.filter(it => !q || (it.search || '').toLowerCase().indexOf(q) >= 0);
+    if (opts.invite && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(q) && !items.some(it => (it.search || '').toLowerCase().indexOf(q) >= 0)) {
+      list = list.concat([{ value: q, html: avatar(q) + '<span>' + esc(q) + ' <span class="faint">· per E-Mail einladen</span></span>', create: true, invite: true }]);
+    }
     if (opts.create && q && !items.some(it => (it.search || '').toLowerCase() === q)) {
       list = list.concat([{ value: query.trim(), html: icon('plus', 'sm') + ' „' + esc(query.trim()) + '“ hinzufügen', create: true }]);
     }
@@ -81,7 +84,13 @@ function openMenu(anchor, items, opts) {
     if (opts.multi) {
       const i = selected.indexOf(it.value);
       if (i >= 0) selected.splice(i, 1); else selected.push(it.value);
-      if (it.create) { items.push({ value: it.value, html: tagChip(it.value), search: it.value }); query = ''; $('.pop-search', pop).value = ''; }
+      if (it.create) {
+        if (it.invite) {
+          if (!S.users.some(u => u.email === it.value)) S.users.push(user(it.value));
+          items.push({ value: it.value, html: avatar(it.value) + '<span>' + esc(it.value) + '</span>', search: it.value });
+        } else items.push({ value: it.value, html: tagChip(it.value), search: it.value });
+      }
+      if (query) { query = ''; hover = 0; const si = $('.pop-search', pop); if (si) si.value = ''; }
       opts.onPick(it.value, selected.slice());
       draw(pop);
     } else {
@@ -90,7 +99,7 @@ function openMenu(anchor, items, opts) {
     }
   };
   openPop(anchor,
-    (opts.search !== false && items.length > 6 || opts.create ? '<input class="pop-search" placeholder="' + esc(opts.placeholder || 'Suchen…') + '">' : '') +
+    (opts.search === true || opts.search !== false && items.length > 6 || opts.create || opts.invite ? '<input class="pop-search" placeholder="' + esc(opts.placeholder || 'Suchen…') + '">' : '') +
     '<div class="pop-list"></div>',
     pop => {
       draw(pop);
@@ -121,7 +130,8 @@ function peopleItems(preferred) {
     a.name.localeCompare(b.name));
   return list.map(u => ({
     value: u.email,
-    html: avatar(u.email) + '<span>' + esc(u.name) + (u.email === S.me.email ? ' <span class="faint">(ich)</span>' : '') + '</span>',
+    html: avatar(u.email) + '<span class="pp-name">' + esc(u.name) + (u.email === S.me.email ? ' <span class="faint">(ich)</span>' : '') +
+      '<small class="faint pp-mail">' + esc(u.email) + '</small></span>',
     search: u.name + ' ' + u.email,
   }));
 }
@@ -145,7 +155,7 @@ const PROP_EDITORS = {
   },
   assignees(anchor, t, save) {
     openMenu(anchor, peopleItems(relevantPeople(t)), {
-      multi: true, selected: t.assignees, placeholder: 'Person suchen…',
+      multi: true, search: true, invite: true, selected: t.assignees, placeholder: 'Name oder E-Mail suchen…',
       onPick: (v, sel) => save({ assignees: sel }),
     });
   },
@@ -320,6 +330,24 @@ function teamModal(t) {
   });
 }
 A['team-new'] = () => teamModal();
+/** "+" in the member list: search the directory (or invite by e-mail) and add or remove people. */
+A['team-members'] = el => {
+  const t = team(el.dataset.id);
+  if (!t) return;
+  openMenu(el, peopleItems(), {
+    multi: true, search: true, invite: true, selected: t.members.slice(), placeholder: 'Name oder E-Mail suchen…',
+    onPick: (v, sel) => {
+      if (v === t.lead && sel.indexOf(v) < 0) { sel.push(v); toast('Der Team-Lead bleibt Mitglied.'); }
+      const members = sel.slice();
+      const before = t.members;
+      t.members = members;
+      render();
+      call('teams.save', { id: t.id, name: t.name, icon: t.icon, color: t.color, description: t.description, lead: t.lead, members: members })
+        .then(saved => { Object.assign(t, saved); render(); })
+        .catch(err => { t.members = before; render(); fail(err); });
+    },
+  });
+};
 A['team-edit'] = el => teamModal(team(el.dataset.id));
 
 /* Project */
