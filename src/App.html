@@ -222,14 +222,15 @@ function mark(entity, cls) {
 const GLYPHS = {
   backlog: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--text-3)" stroke-width="1.6" stroke-dasharray="2.4 2.2"/>',
   todo: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--text-3)" stroke-width="1.6"/>',
-  doing: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--c-yellow)" stroke-width="1.6"/><path d="M8 4a4 4 0 0 1 0 8z" fill="var(--c-yellow)"/>',
-  review: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M8 4a4 4 0 1 1-4 4h4z" fill="var(--accent)"/>',
-  done: '<circle cx="8" cy="8" r="7" fill="var(--success)"/><path d="m5 8.1 2 2 4-4.2" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+  doing: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--st-doing)" stroke-width="1.6"/><path d="M8 4a4 4 0 0 1 0 8z" fill="var(--st-doing)"/>',
+  review: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--st-review)" stroke-width="1.6"/><path d="M8 4a4 4 0 1 1-4 4h4z" fill="var(--st-review)"/>',
+  done: '<circle cx="8" cy="8" r="7" fill="var(--st-done)"/><path d="m5 8.1 2 2 4-4.2" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 function glyph(key) {
   return '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">' + (GLYPHS[key] || GLYPHS.todo) + '</svg>';
 }
-const STATUS_COLORS = { backlog: '#8d98b0', todo: '#5b78a8', doing: '#e0a800', review: '#0050aa', done: '#12935b' };
+// status colours live in the semantic tokens (Styles: --st-*), the same in dots, pills, glyphs and charts
+const STATUS_COLORS = { backlog: 'var(--st-backlog)', todo: 'var(--st-todo)', doing: 'var(--st-doing)', review: 'var(--st-review)', done: 'var(--st-done)' };
 function statusTag(key) {
   return '<span class="spill st-' + esc(key) + '">' + esc(statusOf(key).label) + '</span>';
 }

@@ -4,11 +4,14 @@
   "private": true,
   "description": "Notion-artiges Team-Task-Management mit smartem Kalender als Google Apps Script Web-App",
   "scripts": {
-    "test": "node dev/test.js",
+    "test": "node dev/test.js && node dev/i18n-audit.js",
     "check": "node dev/check-gas.js",
     "preview": "node dev/build-preview.js",
     "push": "clasp push",
-    "deploy": "clasp push && clasp deploy"
+    "deploy": "clasp push && clasp deploy",
+    "i18n": "node dev/i18n-audit.js"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "jsdom": "^24.1.3"
+  }
 }

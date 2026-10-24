@@ -730,7 +730,7 @@ function monthHtml(o) {
   const data = o.data || { events: [], holidays: [], absences: [], warnings: [] };
   const show = o.show || { tasks: true, events: true, absences: true, holidays: true };
   const inScope = e => !o.people || o.people.indexOf(e) >= 0;
-  return '<div class="cal' + (o.data ? '' : ' sk-on') + '">' + ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(d => '<div class="cal-dow">' + d + '</div>').join('') +
+  return '<div class="cal' + (o.data ? '' : ' sk-on') + '">' + [1, 2, 3, 4, 5, 6, 0].map(i => DOW[i]).map(d => '<div class="cal-dow">' + d + '</div>').join('') +
     days.map(d => {
       const wd = Shared.weekday(d);
       const weekend = wd === 0 || wd === 6;
@@ -751,7 +751,7 @@ function monthHtml(o) {
       });
       const max = 3;
       const holLabel = show.holidays && hol.length
-        ? '<span class="hol" title="' + esc(hol.map(h => h.name + ' (' + h.country + ')').join(', ')) + '">' + esc(hol[0].name) + (hol.length > 1 ? ' +' + (hol.length - 1) : '') + '</span>' : '';
+        ? '<span class="hol" title="' + esc(hol.map(h => holName(h) + ' (' + h.country + ')').join(', ')) + '">' + esc(holName(hol[0])) + (hol.length > 1 ? ' +' + (hol.length - 1) : '') + '</span>' : '';
       const badge = warn.length
         ? '<span class="wbadge" title="' + esc(warn.map(w => w.teamName + ': ' + w.absent + ' von ' + w.total + ' abwesend').join('\n')) + '">' +
           esc((o.teamId ? '' : warn[0].teamName + ' ') + warn[0].absent + '/' + warn[0].total + ' weg') + '</span>' : '';
@@ -797,7 +797,7 @@ A['day-away'] = (el, e) => {
     });
     data.holidays.filter(h => h.date === d).forEach(h => h.affects.forEach(em => {
       const key = 'h:' + em + h.name;
-      if (!items.some(x => x.value === key)) items.push({ value: key, html: avatar(em) + '<span>' + esc(user(em).name) + '</span><small>' + esc(h.name) + '</small>', search: user(em).name });
+      if (!items.some(x => x.value === key)) items.push({ value: key, html: avatar(em) + '<span>' + esc(user(em).name) + '</span><small>' + esc(holName(h)) + '</small>', search: user(em).name });
     }));
   });
   openMenu(el, items, { search: items.length > 6, onPick: v => { if (v.indexOf('h:') !== 0) absenceModal(calFind('absences', v)); } });
@@ -902,32 +902,68 @@ function briefingData() {
 }
 
 /** Agenda: days with something going on, grouped by date. */
+/**
+ * Agenda: one block per day with a clear header (Heute / Morgen / weekday + date, count).
+ * Inside a day: who is away and holidays as one quiet line, then events, then tasks by priority.
+ * Overdue tasks come first in their own group (dashboard only). Empty days are left out.
+ */
 function agendaHtml(data, from, n, o) {
   const inScope = e => !o.people || o.people.indexOf(e) >= 0;
   const show = o.show || { tasks: true, events: true, absences: true, holidays: true };
   const today = TODAY();
-  let out = '', month = '', any = false;
+  const tomorrow = Shared.addDays(today, 1);
+  const last = Shared.addDays(from, n - 1);
+  const tasks = (o.tasks || []).filter(t => !isDone(t));
+  const taskRow = (t, over) => '<div class="ag2-row task' + (over ? ' over' : '') + '" data-action="open-task" data-id="' + esc(t.id) + '">' + glyph(t.status) +
+    '<span class="tt">' + esc(t.title) + '</span>' +
+    (t.projectId && project(t.projectId) ? '<span class="ag2-proj">' + projectChip(project(t.projectId)) + '</span>' : '') +
+    (t.priority ? prioTag(t.priority, true) : '') +
+    (over ? '<span class="ag2-late">' + esc(fmtDate(t.dueDate, { absolute: true })) + '</span>' : '') +
+    (t.assignees.length ? avatars(t.assignees, 2) : '') + '</div>';
+  const byPrio = (a, b) => rankPrio(a) - rankPrio(b) || bySort(a, b);
+  let out = '', month = '';
+  // overdue: own group on top instead of being mixed into today
+  const overdue = show.tasks && !o.skipOverdue ? tasks.filter(t => t.dueDate && t.dueDate < from).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || byPrio(a, b)) : [];
+  if (overdue.length) {
+    out += '<section class="ag2-day over"><div class="ag2-head"><b>Überfällig</b><span class="n">' + overdue.length + '</span></div>' +
+      overdue.slice(0, 6).map(t => taskRow(t, true)).join('') +
+      (overdue.length > 6 ? '<div class="ag2-more">+ ' + (overdue.length - 6) + ' weitere</div>' : '') + '</section>';
+  }
   for (let i = 0; i < n; i++) {
     const d = Shared.addDays(from, i);
     const wd = Shared.weekday(d);
-    const items = [];
-    const warn = (data.warnings || []).filter(w => w.date === d && (!o.teamId || w.teamId === o.teamId));
-    if (show.absences) warn.forEach(w => items.push('<div class="ag-item warn">' + icon('alert', 'sm') + '<span class="tt">' + esc(w.teamName) + ': ' + w.absent + ' von ' + w.total + ' abwesend</span></div>'));
-    if (show.holidays) data.holidays.filter(h => h.date === d && h.affects.some(inScope)).forEach(h => items.push('<div class="ag-item hol">' + flag(h.country) + '<span class="tt">' + esc(h.name) + '</span></div>'));
-    if (show.events) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d && (e.startDate === d || (i === 0))).forEach(e =>
-      items.push('<div class="ag-item event" data-action="event-edit" data-id="' + esc(e.id) + '">' + icon('calendar', 'sm') + '<span class="tt">' + esc(e.title) + '</span><span class="meta">' + esc(fmtRange(e.startDate, e.endDate || e.startDate)) + '</span></div>'));
-    if (show.absences) data.absences.filter(a => inScope(a.email) && a.endDate >= d && (a.startDate === d || (i === 0 && a.startDate < d))).forEach(a =>
-      items.push('<div class="ag-item away">' + avatar(a.email) + '<span class="tt">' + esc(user(a.email).name) + ' · ' + esc(absenceType(a.type).label) + '</span><span class="meta">' + esc(fmtRange(a.startDate, a.endDate)) + '</span></div>'));
-    if (show.tasks) (o.tasks || []).filter(t => t.dueDate === d || (i === 0 && !o.skipOverdue && t.dueDate < d && !isDone(t))).sort((a, b) => rankPrio(a) - rankPrio(b)).forEach(t =>
-      items.push('<div class="ag-item' + (isDone(t) ? ' done' : '') + '" data-action="open-task" data-id="' + esc(t.id) + '">' + glyph(t.status) + '<span class="tt">' + esc(t.title) + '</span>' +
-        metaHtml(t, { skipDue: true }) + (t.assignees.length ? avatars(t.assignees, 2) : '') + '</div>'));
-    if (!items.length) continue;
-    any = true;
+    const lines = [];
+    // who is away: one line per day, multi-day absences only on their first day in view
+    if (show.absences) {
+      const away = data.absences.filter(a => inScope(a.email) && a.startDate <= d && a.endDate >= d && (a.startDate === d || i === 0));
+      if (away.length) {
+        lines.push('<div class="ag2-note away">' + icon('plane', 'sm') + '<span class="lbl">Abwesend</span><span class="who">' + away.map(a =>
+          '<span class="ag2-person">' + avatar(a.email) + '<span>' + esc(user(a.email).name.split(' ')[0]) + '</span><small><span>' + esc(absenceType(a.type).label) + '</span>' +
+          (a.endDate > d ? ' · <span>' + esc(L('bis ', 'until ') + fmtDate(a.endDate, { absolute: true })) + '</span>' : '') + '</small></span>').join('') + '</span></div>');
+      }
+      (data.warnings || []).filter(w => w.date === d && (!o.teamId || w.teamId === o.teamId)).forEach(w =>
+        lines.push('<div class="ag2-note warn">' + icon('alert', 'sm') + '<span>' + esc(w.teamName) + ': ' + esc(L(w.absent + ' von ' + w.total + ' abwesend', w.absent + ' of ' + w.total + ' away')) + '</span></div>'));
+    }
+    if (show.holidays) {
+      const hol = data.holidays.filter(h => h.date === d && h.affects.some(inScope));
+      if (hol.length) lines.push('<div class="ag2-note hol">' + icon('flag', 'sm') + '<span class="lbl">Feiertag</span><span class="who">' +
+        hol.map(h => '<span class="ag2-person">' + flag(h.country) + '<span>' + esc(holName(h)) + '</span></span>').join('') + '</span></div>');
+    }
+    const rows = [];
+    if (show.events) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d && (e.startDate === d || i === 0)).forEach(e =>
+      rows.push('<div class="ag2-row event" data-action="event-edit" data-id="' + esc(e.id) + '">' + icon(e.type === 'milestone' ? 'flag' : 'calendar', 'sm') +
+        '<span class="tt">' + esc(e.title) + '</span>' + (e.endDate && e.endDate !== e.startDate ? '<span class="meta">' + esc(fmtRange(e.startDate, e.endDate)) + '</span>' : '') + '</div>'));
+    if (show.tasks) tasks.filter(t => t.dueDate === d).sort(byPrio).forEach(t => rows.push(taskRow(t, false)));
+    if (!lines.length && !rows.length) continue;
     const m = d.slice(0, 7);
-    if (m !== month && !o.compact) { month = m; out += '<div class="ag-month">' + MONTHS_LONG[Number(m.slice(5)) - 1] + ' ' + m.slice(0, 4) + '</div>'; }
-    out += '<div class="ag-day' + (d === today ? ' today' : '') + (warn.length ? ' warn' : '') + '"><div class="ag-date"><b>' + Number(d.slice(8)) + '</b><small>' + DOW[wd] + '</small></div><div class="ag-items">' + items.join('') + '</div></div>';
+    if (m !== month && !o.compact && d.slice(0, 7) !== today.slice(0, 7)) out += '<div class="ag-month">' + MONTHS_LONG[Number(m.slice(5)) - 1] + ' ' + m.slice(0, 4) + '</div>';
+    month = m;
+    const name = d === today ? 'Heute' : d === tomorrow ? 'Morgen' : DOW_LONG[wd];
+    out += '<section class="ag2-day' + (d === today ? ' today' : '') + '"><div class="ag2-head"><b>' + name + '</b><span class="date">' + esc(fmtDate(d, { absolute: true })) + '</span>' +
+      (rows.length ? '<span class="n">' + rows.length + '</span>' : '') + '</div>' + lines.join('') + rows.join('') + '</section>';
   }
-  return '<div class="agenda">' + (any ? out : '<div class="ag-empty">In diesem Zeitraum steht nichts an.</div>') + '</div>';
+  return '<div class="agenda ag2">' + (out || '<div class="ag-empty">' + icon('check', 'sm') + '<span>' +
+    L('Bis ' + fmtDate(last, { absolute: true }) + ' steht nichts an.', 'Nothing coming up until ' + fmtDate(last, { absolute: true }) + '.') + '</span></div>') + '</div>';
 }
 
 function dashPage() {
@@ -952,7 +988,7 @@ function dashPage() {
       '<div class="what"><div><b>' + w.absent + ' von ' + w.total + '</b> in ' + esc(w.teamName) + ' weg</div><div class="muted">' + esc(w.people.map(x => user(x.email).name.split(' ')[0]).join(', ')) + '</div></div></div>').join('') + '</div>'
       : '<div class="banner ok" style="margin:0 0 10px">' + icon('check') + '<div>Alle Teams sind ausreichend besetzt.</div></div>') +
     (absNext.length ? '<div class="hlist" style="margin-top:8px">' + absNext.map(a => '<div class="hitem">' + avatar(a.email, 'lg') + '<div class="what"><div>' + esc(user(a.email).name) + '</div><div class="muted">' +
-      esc(absenceType(a.type).label + ' · ' + fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') + '</div>' : '') + '</div>';
+      '<span>' + esc(absenceType(a.type).label) + '</span> · ' + esc(fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') + '</div>' : '') + '</div>';
   const loadCard = workloadCard(t);
   const doneCard = doneWeeksCard(t);
   // header numbers
@@ -1005,7 +1041,7 @@ function dashPage() {
     '<p class="hint" style="margin:-6px 0 12px">Aufgaben mit Fälligkeit oder Zeitblock heute und früher' + (b && b.available ? ' · Auslastung ' + util + ' %' : '') + '</p>' +
     (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Heute ist nichts fällig. Neue Aufgaben legst du oben über „Neue Aufgabe“ an.</div>') + '</div>';
   return '<div class="page wide">' +
-    '<div class="card-w dash-top"><div class="du">' + avatar(S.me.email, 'xl') + '<div><h1>' + hello + ', ' + esc(S.me.name.split(' ')[0]) + '!</h1><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div></div></div>' +
+    '<div class="card-w dash-top"><div class="du">' + avatar(S.me.email, 'xl') + '<div><h1><span>' + hello + '</span>, ' + esc(S.me.name.split(' ')[0]) + '!</h1><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div></div></div>' +
     '<div class="dr"><button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
     '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>' +
     '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + reportCard() +
@@ -1016,7 +1052,7 @@ function dashPage() {
     '<div class="dash-grid"><div class="w-8">' + projCard + '</div><div class="w-4">' + focusCard + '</div>' +
     teamCard +
     '<div class="card-w w-7"><h3>' + icon('calendar', 'sm') + 'Agenda, nächste 14 Tage<a class="more" data-action="cal-agenda">Alles ansehen</a></h3>' +
-    (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true }) : skRows(4)) + '</div>' +
+    (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true, skipOverdue: true }) : skRows(4)) + '</div>' +
     loadCard + doneCard +
     '</div></div></div>';
 }
@@ -1243,7 +1279,7 @@ function dayFlags(data, d, o) {
   const flags = [];
   if (!data) return flags;
   const inScope = o.people ? (e => o.people.indexOf(e) >= 0) : (e => e === S.me.email || people_(e));
-  data.holidays.filter(h => h.date === d && h.affects.some(inScope)).forEach(h => flags.push('<span class="chip warn" title="' + esc(h.name + ' (' + h.country + ')') + '">' + flag(h.country) + esc(h.name) + '</span>'));
+  data.holidays.filter(h => h.date === d && h.affects.some(inScope)).forEach(h => flags.push('<span class="chip warn" title="' + esc(holName(h) + ' (' + h.country + ')') + '">' + flag(h.country) + esc(holName(h)) + '</span>'));
   (data.warnings || []).filter(w => w.date === d && (!o.teamId || w.teamId === o.teamId)).forEach(w => flags.push('<span class="chip danger">' + icon('alert', 'sm') + esc(w.teamName + ' ' + w.absent + '/' + w.total + ' weg') + '</span>'));
   const away = uniq(data.absences.filter(a => a.startDate <= d && a.endDate >= d && inScope(a.email)).map(a => a.email));
   if (away.length) flags.push('<span class="chip" title="' + esc(away.map(e => user(e).name).join(', ')) + '">' + avatars(away, 3) + away.length + ' abwesend</span>');
@@ -1321,10 +1357,10 @@ function heatmapHtml(people) {
   const stat2 = (v, l) => '<div class="hm-stat"><b>' + v + '</b><span>' + l + '</span></div>';
   return '<div class="card-w hm"><div class="hm-stats">' + stat2(total, 'erledigt in 12 Monaten') + stat2(active, 'aktive Tage') + stat2(streak, 'Werktage in Folge (Bestwert)') +
     stat2(best || '–', bestDay ? 'Bestwert am ' + fmtDate(bestDay, { absolute: true }) : 'bester Tag') + '</div>' +
-    '<div class="hm-wrap"><div class="hm-dows"><span>Mo</span><span></span><span>Mi</span><span></span><span>Fr</span><span></span><span></span></div><div>' +
+    '<div class="hm-wrap"><div class="hm-dows"><span>' + DOW[1] + '</span><span></span><span>' + DOW[3] + '</span><span></span><span>' + DOW[5] + '</span><span></span><span></span></div><div>' +
     '<div class="hm-months" style="--w:52">' + months.map(m => '<span style="grid-column:' + (m.col + 1) + '">' + m.label + '</span>').join('') + '</div>' +
     '<div class="heat big">' + cells.join('') + '</div></div></div>' +
-    '<div class="heat-legend">weniger <i style="background:var(--bg-hover)"></i><i style="background:#c6dcf7"></i><i style="background:#7fb0ec"></i><i style="background:#2f7bd0"></i><i style="background:#0050aa"></i> mehr</div></div>';
+    '<div class="heat-legend">' + L('weniger', 'less') + ' <i style="background:var(--bg-hover)"></i><i style="background:var(--heat-1)"></i><i style="background:var(--heat-2)"></i><i style="background:var(--heat-3)"></i><i style="background:var(--heat-4)"></i> ' + L('mehr', 'more') + '</div></div>';
 }
 function people_(email) { return myPeopleList().indexOf(email) >= 0; }
 A['pl-filter'] = el => { S.plan.filter = el.dataset.k; render(); };
@@ -1587,7 +1623,7 @@ function sidePanel(d, people, o) {
     const aff = h.affects.filter(inScope);
     if (!aff.length) return;
     const k = h.date + h.name;
-    if (!hol[k]) hol[k] = { date: h.date, name: h.name, countries: [], affects: [] };
+    if (!hol[k]) hol[k] = { date: h.date, name: h.name, nameEn: h.nameEn, countries: [], affects: [] };
     if (hol[k].countries.indexOf(h.country) < 0) hol[k].countries.push(h.country);
     aff.forEach(e => { if (hol[k].affects.indexOf(e) < 0) hol[k].affects.push(e); });
   });
@@ -1596,16 +1632,16 @@ function sidePanel(d, people, o) {
   const warns = o.noWarn ? [] : d.warnings.slice(0, 6);
   return (warns.length ? '<div class="panel"><h3 style="color:var(--danger)">' + icon('alert', 'sm') + 'Warnungen</h3><div class="hlist">' + warns.map(w =>
     '<div class="hitem warnitem">' + dayBox(w.date) + '<div class="what"><div><b>' + w.absent + ' von ' + w.total + '</b> in ' + esc(w.teamName) + ' abwesend</div>' +
-    '<div class="muted">' + esc(w.people.map(x => user(x.email).name.split(' ')[0] + ' (' + (x.kind === 'holiday' ? x.label : absenceType(x.kind).label) + ')').join(', ')) + '</div></div></div>').join('') + '</div></div>' : '') +
+    '<div class="muted">' + esc(w.people.map(x => user(x.email).name.split(' ')[0] + ' (' + (x.kind === 'holiday' ? holName(x) : absenceType(x.kind).label) + ')').join(', ')) + '</div></div></div>').join('') + '</div></div>' : '') +
     '<div class="panel"><h3>' + icon('plane', 'sm') + 'Abwesenheiten</h3><div class="hlist">' + (abs.map(a =>
       '<div class="hitem" data-action="absence-edit" data-id="' + esc(a.id) + '" style="cursor:pointer">' + avatar(a.email, 'lg') +
-      '<div class="what"><div>' + esc(user(a.email).name) + '</div><div class="muted">' + esc(absenceType(a.type).label + ' · ' + fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') ||
+      '<div class="what"><div>' + esc(user(a.email).name) + '</div><div class="muted">' + '<span>' + esc(absenceType(a.type).label) + '</span> · ' + esc(fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') ||
       '<div class="faint" style="font-size:13px;padding:4px 6px">Niemand ist abwesend.</div>') + '</div></div>' +
     '<div class="panel"><h3>' + icon('globe', 'sm') + 'Feiertage</h3>' +
     (!S.me.region && REGIONS[S.me.country] ? '<button class="hint-row" data-action="nav" data-view="settings">' + icon('alert', 'sm') +
       'Für regionale Feiertage dein Bundesland/deine Region im Profil setzen.</button>' : '') +
     '<div class="hlist">' + (hl.map(h =>
-      '<div class="hitem">' + dayBox(h.date) + '<div class="what"><div>' + esc(h.name) + '</div>' +
+      '<div class="hitem">' + dayBox(h.date) + '<div class="what"><div>' + esc(holName(h)) + '</div>' +
       '<div class="muted">' + h.countries.map(flag).join(' ') + ' ' + esc(DOW[Shared.weekday(h.date)]) + '</div>' +
       '<div class="hol-who" title="' + esc(h.affects.map(e => user(e).name).join(', ')) + '">' + h.affects.slice(0, 8).map(e => avatar(e)).join('') +
       (h.affects.length > 8 ? '<span class="faint">+' + (h.affects.length - 8) + '</span>' : '') + '</div></div></div>').join('') ||
@@ -1663,7 +1699,7 @@ function capacityPage() {
   const banner = warnDays.length
     ? '<div class="banner danger">' + icon('alert') + '<div><b>' + warnDays.length + (warnDays.length === 1 ? ' Tag' : ' Tage') + ' mit ≥ ' + d.threshold + ' % Abwesenheit' +
       (teamId ? ' in ' + esc(team(teamId).name) : '') + '.</b> Bitte Urlaube abstimmen oder Vertretung klären.' +
-      '<div class="days-list">' + warnDays.slice(0, 14).map(w => '<span class="chip danger" title="' + esc(w.people.map(x => user(x.email).name + ' – ' + (x.kind === 'holiday' ? x.label : absenceType(x.kind).label)).join('\n')) + '">' +
+      '<div class="days-list">' + warnDays.slice(0, 14).map(w => '<span class="chip danger" title="' + esc(w.people.map(x => user(x.email).name + ' – ' + (x.kind === 'holiday' ? holName(x) : absenceType(x.kind).label)).join('\n')) + '">' +
         esc(DOW[Shared.weekday(w.date)] + ' ' + fmtDate(w.date, { absolute: true }) + ' · ' + w.absent + '/' + w.total) + '</span>').join('') + '</div></div></div>'
     : '<div class="banner ok">' + icon('check') + '<div><b>Gut besetzt.</b> Im gewählten Zeitraum ist nie die Hälfte des Teams gleichzeitig weg.</div></div>';
 
@@ -1780,10 +1816,14 @@ function settingsPage() {
   }).join('') || '<div class="empty-li">Keine geplanten Abwesenheiten.</div>');
 
   const ai = '<div class="notice">' + (S.ai.enabled
-    ? '✅ <b>Vertex AI ist aktiv</b> (Modell <code>' + esc(S.ai.model) + '</code>). Briefing, Quick-Add und Aufgaben-Zerlegung nutzen Gemini.'
-    : '<b>Regelbasierter Modus.</b> Alle smarten Funktionen laufen bereits mit Regeln (Quick-Add-Parser, Kapazitäts-Vorschläge, Briefing). ' +
+    ? L('✅ <b>Vertex AI ist aktiv</b> (Modell <code>' + esc(S.ai.model) + '</code>). Briefing, Quick-Add und Aufgaben-Zerlegung nutzen Gemini.',
+      '✅ <b>Vertex AI is on</b> (model <code>' + esc(S.ai.model) + '</code>). Briefing, quick add and task breakdown use Gemini.')
+    : L('<b>Regelbasierter Modus.</b> Alle smarten Funktionen laufen bereits mit Regeln (Quick-Add-Parser, Kapazitäts-Vorschläge, Briefing). ' +
       'Für KI: im Apps-Script-Projekt unter <i>Projekteinstellungen → Skripteigenschaften</i> den Wert <code>VERTEX_API_KEY</code> setzen ' +
-      '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optional <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.') + '</div>';
+      '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optional <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.',
+    '<b>Rule-based mode.</b> All smart features already work with rules (quick-add parser, capacity suggestions, briefing). ' +
+      'For AI: in the Apps Script project under <i>Project settings → Script properties</i> set <code>VERTEX_API_KEY</code> ' +
+      '(placeholder: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optionally <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.')) + '</div>';
 
   let admin = '';
   if (me.admin) {

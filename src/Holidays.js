@@ -14,18 +14,48 @@
 const Holidays = {
   CACHE_DAYS: 30,
 
+  /** English names of the built-in holidays (the fallback when no holiday service answers). */
+  EN_NAMES: {
+    'Neujahr': "New Year's Day", 'Heilige Drei Könige': 'Epiphany', 'Internationaler Frauentag': "International Women's Day",
+    'Karfreitag': 'Good Friday', 'Ostermontag': 'Easter Monday', 'Tag der Arbeit': 'Labour Day', 'Christi Himmelfahrt': 'Ascension Day',
+    'Pfingstmontag': 'Whit Monday', 'Fronleichnam': 'Corpus Christi', 'Mariä Himmelfahrt': 'Assumption Day', 'Weltkindertag': "World Children's Day",
+    'Tag der Deutschen Einheit': 'German Unity Day', 'Reformationstag': 'Reformation Day', 'Allerheiligen': "All Saints' Day",
+    'Buß- und Bettag': 'Day of Repentance and Prayer', '1. Weihnachtstag': 'Christmas Day', '2. Weihnachtstag': "St. Stephen's Day",
+    'Staatsfeiertag': 'National Holiday', 'Nationalfeiertag': 'National Day', 'Mariä Empfängnis': 'Immaculate Conception', 'Christtag': 'Christmas Day',
+    'Stefanitag': "St. Stephen's Day", 'Auffahrt': 'Ascension Day', 'Bundesfeier': 'Swiss National Day', 'Weihnachten': 'Christmas Day', 'Stephanstag': "St. Stephen's Day",
+    "Jour de l'an": "New Year's Day", 'Lundi de Pâques': 'Easter Monday', 'Fête du Travail': 'Labour Day', 'Victoire 1945': 'Victory in Europe Day',
+    'Ascension': 'Ascension Day', 'Lundi de Pentecôte': 'Whit Monday', 'Fête nationale': 'Bastille Day', 'Assomption': 'Assumption Day',
+    'Toussaint': "All Saints' Day", 'Armistice 1918': 'Armistice Day', 'Noël': 'Christmas Day',
+    'Capodanno': "New Year's Day", 'Epifania': 'Epiphany', "Lunedì dell'Angelo": 'Easter Monday', 'Festa della Liberazione': 'Liberation Day',
+    'Festa del Lavoro': 'Labour Day', 'Festa della Repubblica': 'Republic Day', 'Ferragosto': 'Assumption Day', 'Ognissanti': "All Saints' Day",
+    'Immacolata Concezione': 'Immaculate Conception', 'Natale': 'Christmas Day', 'Santo Stefano': "St. Stephen's Day",
+    'Año Nuevo': "New Year's Day", 'Epifanía del Señor': 'Epiphany', 'Viernes Santo': 'Good Friday', 'Fiesta del Trabajo': 'Labour Day',
+    'Asunción': 'Assumption Day', 'Fiesta Nacional de España': 'National Day of Spain', 'Todos los Santos': "All Saints' Day",
+    'Día de la Constitución': 'Constitution Day', 'Inmaculada Concepción': 'Immaculate Conception', 'Navidad': 'Christmas Day',
+    'Nieuwjaarsdag': "New Year's Day", 'Tweede paasdag': 'Easter Monday', 'Koningsdag': "King's Day", 'Hemelvaartsdag': 'Ascension Day',
+    'Tweede pinksterdag': 'Whit Monday', 'Eerste kerstdag': 'Christmas Day', 'Tweede kerstdag': "St. Stephen's Day",
+    'Nowy Rok': "New Year's Day", 'Trzech Króli': 'Epiphany', 'Poniedziałek Wielkanocny': 'Easter Monday', 'Święto Pracy': 'Labour Day',
+    'Święto Konstytucji 3 Maja': 'Constitution Day', 'Boże Ciało': 'Corpus Christi', 'Wniebowzięcie NMP': 'Assumption Day',
+    'Wszystkich Świętych': "All Saints' Day", 'Święto Niepodległości': 'Independence Day', 'Boże Narodzenie': 'Christmas Day',
+    'Drugi dzień Bożego Narodzenia': "St. Stephen's Day", 'Wigilia': 'Christmas Eve',
+  },
+  /** Name in the language of the reader. */
+  label(h, lang) { return (lang === 'en' && h.nameEn) || h.name; },
+
   forCountry(country, year) {
     country = String(country || '').toUpperCase();
     if (!/^[A-Z]{2}$/.test(country)) return [];
     const key = country + '-' + year;
     const cache = CacheService.getScriptCache();
-    const hit = cache.get('hol:' + key);
+    // v2: entries carry nameEn as well
+    const hit = cache.get('hol2:' + key);
     if (hit) return JSON.parse(hit);
 
     let list = null;
     const stored = Db.get('HolidayCache', key);
     if (stored && stored.fetchedAt && Shared.diffDays(stored.fetchedAt.slice(0, 10), Util.today()) < Holidays.CACHE_DAYS) {
       try { list = JSON.parse(stored.json); } catch (e) { list = null; }
+      if (list && list.length && list[0].nameEn === undefined) list = null; // stored before English names
     }
     if (!list) {
       list = Holidays.fetchNager_(country, year)
@@ -39,7 +69,7 @@ const Holidays = {
         });
       }
     }
-    cache.put('hol:' + key, JSON.stringify(list), 21600);
+    cache.put('hol2:' + key, JSON.stringify(list), 21600);
     return list;
   },
 
@@ -77,7 +107,7 @@ const Holidays = {
       if (!Array.isArray(data)) return null;
       return data
         .filter(h => !h.types || h.types.indexOf('Public') >= 0)
-        .map(h => ({ date: h.date, name: h.localName || h.name, country: country, counties: h.counties || null, source: 'nager' }));
+        .map(h => ({ date: h.date, name: h.localName || h.name, nameEn: h.name || h.localName, country: country, counties: h.counties || null, source: 'nager' }));
     } catch (e) {
       return null;
     }
@@ -90,7 +120,7 @@ const Holidays = {
       const events = cal.getEvents(new Date(Date.UTC(year, 0, 1)), new Date(Date.UTC(year + 1, 0, 1)));
       const list = events.map(ev => ({
         date: Utilities.formatDate(ev.getAllDayStartDate ? ev.getAllDayStartDate() : ev.getStartTime(), 'UTC', 'yyyy-MM-dd'),
-        name: ev.getTitle(), country: country, counties: null, source: 'google',
+        name: ev.getTitle(), nameEn: ev.getTitle(), country: country, counties: null, source: 'google',
       }));
       return list.length ? list : null;
     } catch (e) {
@@ -125,7 +155,7 @@ const Holidays = {
     // Wednesday before 23 November
     let bussUndBettag = d(11, 22);
     while (S.weekday(bussUndBettag) !== 3) bussUndBettag = S.addDays(bussUndBettag, -1);
-    const R = (date, name, counties) => ({ date: date, name: name, country: country, counties: counties || null, source: 'builtin' });
+    const R = (date, name, counties) => ({ date: date, name: name, nameEn: Holidays.EN_NAMES[name] || name, country: country, counties: counties || null, source: 'builtin' });
     const T = {
       DE: [R(d(1, 1), 'Neujahr'), R(d(1, 6), 'Heilige Drei Könige', ['DE-BW', 'DE-BY', 'DE-ST']),
         R(d(3, 8), 'Internationaler Frauentag', ['DE-BE', 'DE-MV']), R(E(-2), 'Karfreitag'), R(E(1), 'Ostermontag'),

@@ -61,7 +61,7 @@ const Availability = {
           const abs = absences.find(a => a.email === u.email && a.startDate <= d && a.endDate >= d);
           const hol = holidays.find(h => h.date === d && Holidays.appliesTo(h, u));
           if (abs) { cell.away = true; cell.kind = abs.type; cell.label = (S.ABSENCE_TYPES.find(x => x.key === abs.type) || {}).label || ''; }
-          else if (hol) { cell.away = true; cell.kind = 'holiday'; cell.label = hol.name; }
+          else if (hol) { cell.away = true; cell.kind = 'holiday'; cell.label = hol.name; cell.labelEn = hol.nameEn || hol.name; }
         }
         cells[u.email][d] = cell;
       });
@@ -73,7 +73,7 @@ const Availability = {
       return {
         date: d, total: working.length, absent: away.length, ratio: ratio,
         warn: working.length > 0 && away.length > 0 && ratio >= threshold,
-        people: away.map(u => ({ email: u.email, kind: cells[u.email][d].kind, label: cells[u.email][d].label })),
+        people: away.map(u => ({ email: u.email, kind: cells[u.email][d].kind, label: cells[u.email][d].label, labelEn: cells[u.email][d].labelEn })),
       };
     });
     return { days: days, cells: cells, team: team };

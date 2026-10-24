@@ -151,6 +151,7 @@ const Ai = {
    */
   suggestAssignee(p) {
     const me = Auth.currentUser();
+    const L = (de, e) => (p && p.lang === 'en' ? e : de);
     const task = p.id ? Db.get('Tasks', p.id) : p;
     if (!task) throw new Error('Aufgabe nicht gefunden.');
     let emails = [];
@@ -169,12 +170,13 @@ const Ai = {
     const ranked = cap.members.map(m => {
       const w = m.weeks[0];
       const free = Math.round((w.available - w.planned) * 10) / 10;
-      const reasons = [w.planned + ' von ' + w.available + ' h in KW ' + Shared.isoWeek(week) + ' verplant'];
-      w.holidays.forEach(h => reasons.push('Feiertag ' + h.name));
-      if (w.absentDays) reasons.push(w.absentDays + ' Tag(e) abwesend');
+      const reasons = [L(w.planned + ' von ' + w.available + ' h in KW ' + Shared.isoWeek(week) + ' verplant',
+        w.planned + ' of ' + w.available + ' h planned in week ' + Shared.isoWeek(week))];
+      w.holidays.forEach(h => reasons.push(L('Feiertag ', 'Holiday: ') + Holidays.label(h, p && p.lang)));
+      if (w.absentDays) reasons.push(L(w.absentDays + ' Tag(e) abwesend', w.absentDays + ' day(s) away'));
       const blocked = Db.all('Absences').some(a => a.email === m.email && a.startDate <= due && a.endDate >= due) ||
         w.holidays.some(h => h.date === due);
-      if (blocked) reasons.push('am Fälligkeitstag nicht da');
+      if (blocked) reasons.push(L('am Fälligkeitstag nicht da', 'away on the due date'));
       return { email: m.email, name: m.name, free: free, utilization: w.utilization, blocked: blocked, reasons: reasons };
     }).sort((a, b) => (a.blocked - b.blocked) || (b.free - a.free));
     return { week: week, candidates: ranked.slice(0, 6), source: 'rules', me: me.email };
@@ -185,9 +187,10 @@ const Ai = {
     const me = Auth.currentUser();
     const t = Db.get('Tasks', p.id);
     if (!t || !Access.canSeeTask(t, Access.context(me))) throw new Error('Aufgabe nicht gefunden.');
-    if (!Ai.enabled()) return Ai.dummyBreakdown_(t);
+    const en = !!(p && p.lang === 'en');
+    if (!Ai.enabled()) return Ai.dummyBreakdown_(t, en);
     const res = Ai.generate_([
-      'Zerlege die folgende Aufgabe in 3 bis 7 konkrete, umsetzbare Teilaufgaben auf Deutsch.',
+      'Zerlege die folgende Aufgabe in 3 bis 7 konkrete, umsetzbare Teilaufgaben ' + (en ? 'auf Englisch (Titel in English).' : 'auf Deutsch.'),
       'Schätze für jede Teilaufgabe den Aufwand in Stunden.',
       'Antworte als JSON: {"subtasks":[{"title":string,"estimate":number}]}',
       'Titel: ' + t.title,
@@ -200,18 +203,20 @@ const Ai = {
   },
 
   /** Without a key: a fixed, clearly marked example split so the flow can be tried end to end. */
-  dummyBreakdown_(t) {
+  dummyBreakdown_(t, en) {
     const total = Number(t.estimate) || 4;
     const part = share => Math.max(0.25, Math.round(total * share * 4) / 4);
+    const L = (de, e) => (en ? e : de);
     return {
       configured: false, dummy: true,
-      hint: 'Beispielvorschlag ohne KI (Platzhalter-Schlüssel). Mit hinterlegtem VERTEX_API_KEY schlägt Gemini passende Teilaufgaben vor.',
+      hint: L('Beispielvorschlag ohne KI (Platzhalter-Schlüssel). Mit hinterlegtem VERTEX_API_KEY schlägt Gemini passende Teilaufgaben vor.',
+        'Example split without AI (placeholder key). With a VERTEX_API_KEY set, Gemini suggests fitting sub-tasks.'),
       subtasks: [
-        { title: 'Ziel und Anforderungen klären: ' + t.title, estimate: part(0.15) },
-        { title: 'Umsetzung vorbereiten', estimate: part(0.25) },
-        { title: 'Umsetzen', estimate: part(0.4) },
-        { title: 'Prüfen und Feedback einholen', estimate: part(0.15) },
-        { title: 'Abschließen und dokumentieren', estimate: part(0.05) },
+        { title: L('Ziel und Anforderungen klären: ', 'Clarify goal and requirements: ') + t.title, estimate: part(0.15) },
+        { title: L('Umsetzung vorbereiten', 'Prepare the work'), estimate: part(0.25) },
+        { title: L('Umsetzen', 'Do the work'), estimate: part(0.4) },
+        { title: L('Prüfen und Feedback einholen', 'Review and get feedback'), estimate: part(0.15) },
+        { title: L('Abschließen und dokumentieren', 'Wrap up and document'), estimate: part(0.05) },
       ].map(x => ({ title: x.title.slice(0, 200), estimate: x.estimate })),
     };
   },
@@ -259,7 +264,7 @@ const Ai = {
       .map(a => ({ name: people[a.email].name, from: a.startDate, to: a.endDate, type: a.type }));
     const holidays = Holidays.inRange(Object.keys(people).map(e => people[e].country), from, to)
       .filter(h => Object.keys(people).some(e => Holidays.appliesTo(h, people[e])))
-      .map(h => ({ date: h.date, name: h.name, country: h.country }));
+      .map(h => ({ date: h.date, name: Holidays.label(h, en ? 'en' : 'de'), country: h.country }));
     const kpis = { done: done.length, created: created.length, overdue: overdue.length, due: due.length, utilization: utilization };
     const news = Ai.news_(me, ctx, visible, teamIds, en);
     const L = (de, e) => (en ? e : de);
@@ -441,7 +446,7 @@ const Ai = {
     const facts = {
       overdue: overdue.length, today: dueToday.length, week: thisWeek.length,
       utilization: week.utilization, available: week.available, planned: week.planned,
-      holidays: upcoming.slice(0, 3).map(h => ({ date: h.date, name: h.name })),
+      holidays: upcoming.slice(0, 3).map(h => ({ date: h.date, name: Holidays.label(h, en ? 'en' : 'de') })),
       focus: focus.map(t => ({ id: t.id, title: t.title, dueDate: t.dueDate, priority: t.priority })),
       teamWarnings: Availability.warnings(today, Shared.addDays(today, 27), Object.keys(ctx.teamIds))
         .map(w => ({ teamId: w.teamId, teamName: w.teamName, date: w.date, absent: w.absent, total: w.total })),
@@ -474,7 +479,7 @@ const Ai = {
         const w = facts.teamWarnings[0];
         text += ' Heads up: on ' + w.date + ', ' + w.absent + ' of ' + w.total + ' people in ' + w.teamName + ' are away.';
       }
-      if (upcoming.length) text += ' Next holiday: ' + upcoming[0].name + ' on ' + upcoming[0].date + '.';
+      if (upcoming.length) text += ' Next holiday: ' + Holidays.label(upcoming[0], 'en') + ' on ' + upcoming[0].date + '.';
     }
     if (!text) {
       const parts = [];

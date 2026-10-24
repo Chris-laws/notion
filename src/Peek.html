@@ -309,7 +309,7 @@ A['peek-more'] = el => {
 /* ----- smart helpers ----- */
 A['ai-suggest'] = () => {
   const id = S.peekId;
-  call('ai.suggestAssignee', { id: id }).then(d => { S.suggest = { taskId: id, data: d }; renderPeek(); }).catch(fail);
+  call('ai.suggestAssignee', { id: id, lang: LANG }).then(d => { S.suggest = { taskId: id, data: d }; renderPeek(); }).catch(fail);
 };
 A['suggest-close'] = () => { S.suggest = null; renderPeek(); };
 A['suggest-pick'] = el => {
@@ -320,7 +320,7 @@ A['suggest-pick'] = el => {
 A['ai-breakdown'] = () => {
   const id = S.peekId;
   toast(S.ai.enabled ? 'Gemini denkt nach…' : 'Beispielvorschlag wird erstellt…');
-  call('ai.breakdown', { id: id }).then(d => { S.breakdown = { taskId: id, data: d }; renderPeek(); }).catch(fail);
+  call('ai.breakdown', { id: id, lang: LANG }).then(d => { S.breakdown = { taskId: id, data: d }; renderPeek(); }).catch(fail);
 };
 A['breakdown-close'] = () => { S.breakdown = null; renderPeek(); };
 ON.submit.breakdown = form => {

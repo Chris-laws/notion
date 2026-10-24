@@ -190,7 +190,7 @@ const Capacity = {
           load += planned[d] || 0;
           if (workDays.indexOf(S.weekday(d)) >= 0) {
             const h = myHolidays.find(x => x.date === d);
-            if (h) hol.push({ date: d, name: h.name });
+            if (h) hol.push({ date: d, name: h.name, nameEn: h.nameEn || h.name });
             else if (myAbsences.some(a => a.startDate <= d && a.endDate >= d)) absent++;
           }
         }

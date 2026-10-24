@@ -1530,4 +1530,85 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
   .pm { max-width: none; height: 92vh; border-radius: 20px 20px 0 0; }
   .pm-role { display: none; }
 }
+
+/* agenda v2: day blocks with a clear header; colours only through the semantic tokens */
+.ag2 { gap: 6px; }
+.ag2-day { padding: 10px 0 8px; border-top: 1px solid var(--border); display: grid; gap: 4px; }
+.ag2-day:first-child { border-top: 0; padding-top: 0; }
+.ag2-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 4px 4px; font-size: 13px; }
+.ag2-head b { font-weight: 700; color: var(--text); }
+.ag2-head .date { color: var(--text-3); font-size: 12.5px; }
+.ag2-head .n { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-grid; place-items: center; font-size: 11.5px; font-weight: 700; background: var(--bg-hover); color: var(--text-2); }
+.ag2-day.today .ag2-head b { color: var(--accent-text); }
+.ag2-day.today .ag2-head b::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 0 2px var(--yellow-soft); vertical-align: 1px; }
+.ag2-day.over .ag2-head b { color: var(--danger); }
+.ag2-row { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 10px; border-radius: 10px; cursor: pointer; min-width: 0; }
+.ag2-row:hover { background: var(--bg-hover); }
+.ag2-row .tt { flex: 1; min-width: 0; font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag2-row.event { color: var(--accent-text); }
+.ag2-row.event .icon { color: var(--accent); }
+.ag2-row .meta { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.ag2-proj { flex: none; max-width: 34%; overflow: hidden; }
+.ag2-late { flex: none; font-size: 12px; font-weight: 600; color: var(--danger); white-space: nowrap; }
+.ag2-row.over { box-shadow: inset 3px 0 0 var(--danger); border-radius: 4px 10px 10px 4px; }
+.ag2-more { padding: 2px 10px; font-size: 12px; color: var(--text-3); }
+.ag2-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 10px; border-radius: 10px; font-size: 12.5px; color: var(--text-2); }
+.ag2-note .lbl { font-weight: 700; }
+.ag2-note .who { display: flex; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
+.ag2-person { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ag2-person .avatar { width: 20px; height: 20px; font-size: 9px; }
+.ag2-person small { color: var(--text-3); font-size: 12px; }
+.ag2-note.away { background: var(--bg-hover); }
+.ag2-note.hol { background: var(--warning-soft); color: var(--warning); }
+.ag2-note.hol .lbl, .ag2-note.hol span { color: inherit; }
+.ag2-note.warn { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+.ag2 .ag-empty { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 600px) { .ag2-proj { display: none; } }
+
+/* ==========================================================================
+   Semantic colours: one meaning, one token (light + dark).
+   success = done · warning = due soon, holiday, attention · danger = overdue, error, over capacity
+   info/accent = in progress, events, links · ai = AI · neutral = backlog, absence, low priority
+   ========================================================================== */
+:root {
+  --st-backlog: #8d98b0; --st-todo: #5b78a8; --st-doing: #1d5fd6; --st-review: #7a4fd0; --st-done: var(--success);
+  --prio-urgent: var(--danger); --prio-urgent-soft: var(--danger-soft);
+  --prio-high: #c2570c; --prio-high-soft: #fdebd9;
+  --prio-medium: var(--warning); --prio-medium-soft: var(--warning-soft);
+  --prio-low: var(--text-3); --prio-low-soft: var(--bg-hover);
+  --warning-strong: #f2b000; --on-warning: #241a00;
+  --heat-1: #c6dcf7; --heat-2: #7fb0ec; --heat-3: #2f7bd0; --heat-4: #0050aa;
+}
+:root[data-theme="dark"] {
+  --st-backlog: #7d89a3; --st-todo: #8aa3cf; --st-doing: #6fa2ff; --st-review: #b39cf5;
+  --prio-high: #ff9a5c; --prio-high-soft: #3a2414;
+  --warning-strong: #ffd84d;
+  --heat-1: #173058; --heat-2: #1f4f94; --heat-3: #3478d6; --heat-4: #7fb0ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --st-backlog: #7d89a3; --st-todo: #8aa3cf; --st-doing: #6fa2ff; --st-review: #b39cf5;
+    --prio-high: #ff9a5c; --prio-high-soft: #3a2414;
+    --warning-strong: #ffd84d;
+    --heat-1: #173058; --heat-2: #1f4f94; --heat-3: #3478d6; --heat-4: #7fb0ff;
+  }
+}
+/* status */
+.st-backlog { --sc: var(--st-backlog); } .st-todo { --sc: var(--st-todo); } .st-doing { --sc: var(--st-doing); }
+.st-review { --sc: var(--st-review); } .st-done { --sc: var(--st-done); }
+/* priority: the same colour for bars, pills, cards and planner blocks */
+.prio-urgent, .cprio.prio-urgent { color: var(--prio-urgent); } .prio-high, .cprio.prio-high { color: var(--prio-high); }
+.prio-medium, .cprio.prio-medium { color: var(--prio-medium); } .prio-low, .cprio.prio-low { color: var(--prio-low); }
+.ppill.prio-urgent { background: var(--prio-urgent-soft); color: var(--prio-urgent); }
+.ppill.prio-high { background: var(--prio-high-soft); color: var(--prio-high); }
+.ppill.prio-medium { background: var(--prio-medium-soft); color: var(--prio-medium); }
+.ppill.prio-low { background: var(--prio-low-soft); color: var(--text-2); }
+.blk-p.p-urgent { background: var(--prio-urgent); }
+.qa-prio { color: var(--prio-high); } .qa-date { color: var(--accent-text); } .qa-rec { color: var(--text-2); }
+/* attention: chips, toasts */
+.chip.warn { background: var(--warning-soft); color: var(--warning); }
+.toast.warn { background: var(--warning-strong); color: var(--on-warning); }
+.toast.warn .icon, .toast.warn button { color: inherit; }
+/* activity heatmap */
+.heat i.l1 { background: var(--heat-1); } .heat i.l2 { background: var(--heat-2); } .heat i.l3 { background: var(--heat-3); } .heat i.l4 { background: var(--heat-4); }
 </style>

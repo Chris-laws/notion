@@ -20,6 +20,30 @@ const EN = {
   'Gezeigt werden Aufgaben, die einer der gewählten Personen zugewiesen sind.': 'Shows tasks assigned to one of the selected people.',
   'Der Team-Lead bleibt Mitglied. Lead ändern: Team bearbeiten.': 'The team lead stays a member. To change the lead: edit team.', 'Keine Verbindung – du siehst den zuletzt geladenen Stand.': 'No connection – you are seeing the last loaded state.',
   '1 Person': '1 person', 'Wieder ganzes Team': 'Back to whole team',
+  '(ich)': '(me)', 'Keine Berechtigung.': 'No permission.',
+  'Person suchen oder per E-Mail einladen': 'Search person or invite by email', 'Aufgabe gelöscht': 'Task deleted', 'Firmen-Feiertag': 'Company holiday',
+  'Jedes Team hat eine eigene Farbe. Durchgestrichene Farben gehören schon zu Teams mit denselben Personen (höchstens 8 Teams pro Person).': 'Every team has its own colour. Crossed-out colours already belong to teams with the same people (at most 8 teams per person).',
+  'Guten Morgen': 'Good morning', 'Guten Abend': 'Good evening', 'Hallo': 'Hello',
+  // messages from the server
+  'Bitte beschreibe, was angelegt werden soll.': 'Please describe what should be created.', 'Aufgabe nicht gefunden.': 'Task not found.',
+  'Keine Google-Anmeldung erkannt. Die App muss für Nutzer deiner Google-Workspace-Domain freigegeben sein.': 'No Google sign-in detected. The app has to be shared with users of your Google Workspace domain.',
+  'Dein Zugang wurde deaktiviert. Bitte wende dich an eine Admin-Person.': 'Your access has been deactivated. Please contact an admin.',
+  'Zeitraum zu groß.': 'Time range too large.', 'Team nicht gefunden.': 'Team not found.', 'Bitte einen Titel angeben.': 'Please enter a title.',
+  'Bitte ein Startdatum angeben.': 'Please enter a start date.', 'Termin nicht gefunden.': 'Event not found.',
+  'Nur die erstellende Person oder Admins können den Termin löschen.': 'Only the person who created the event or admins can delete it.',
+  'Abwesenheiten anderer dürfen nur Admins eintragen.': "Only admins can enter other people's absences.", 'Nur Admins können Firmen-Feiertage pflegen.': 'Only admins can manage company holidays.',
+  'Bitte ein Datum angeben.': 'Please enter a date.', 'Bitte einen Namen angeben.': 'Please enter a name.',
+  'Die Datenbank ist noch nicht eingerichtet. Bitte im Apps-Script-Editor einmal setup() ausführen.': 'The database is not set up yet. Please run setup() once in the Apps Script editor.',
+  'Eintrag nicht gefunden.': 'Entry not found.', 'Aufgabe nicht gefunden – evtl. wurde sie gelöscht.': 'Task not found – it may have been deleted.',
+  'Keine Berechtigung für diese Aufgabe.': 'No permission for this task.', 'Übergeordnete Aufgabe fehlt.': 'Parent task is missing.',
+  'Löschen dürfen nur die erstellende Person, Team-Leads und Admins.': 'Only the creator, team leads and admins can delete.', 'Kommentar ist leer.': 'Comment is empty.',
+  'Projekt nicht gefunden.': 'Project not found.', 'Eine Aufgabe kann nicht ihre eigene Unteraufgabe sein.': 'A task cannot be its own sub-task.',
+  'Bitte einen Teamnamen angeben.': 'Please enter a team name.', 'Nur Team-Lead oder Admins können das Team bearbeiten.': 'Only the team lead or admins can edit the team.',
+  'Bitte einen Projektnamen angeben.': 'Please enter a project name.', 'Bitte ein Team für das Projekt wählen.': 'Please choose a team for the project.',
+  'Keine Berechtigung für dieses Projekt.': 'No permission for this project.',
+  'Nur die Person, die das Projekt angelegt hat, Team-Leads oder Admins können es löschen.': 'Only the person who created the project, team leads or admins can delete it.',
+  'Nur Admins können andere Profile bearbeiten.': "Only admins can edit other people's profiles.", 'Person nicht gefunden.': 'Person not found.',
+  'Eintrag existiert bereits.': 'Entry already exists.',
   'Personen hinzufügen': 'Add people', 'Person wählen': 'Choose person', 'Personen': 'People', 'Wieder ganzes Team': 'Back to whole team',
   'Personen hinzufügen oder entfernen': 'Add or remove people', 'Aus dem Projekt entfernen': 'Remove from project', 'Name oder E-Mail suchen': 'Search name or email',
   'Alle Mitglieder, auch künftige': 'All members, including future ones', 'Noch niemand im Projekt. Füge Personen hinzu.': 'Nobody in the project yet. Add people.',
@@ -205,6 +229,14 @@ const PATTERNS = [
   [/^(\d+) erledigt in 12 Monaten$/, '$1 done in 12 months'],
   [/^(\d+) von (\d+)$/, '$1 of $2'],
   [/^(\d+) ausgewählte Personen$/, '$1 selected people'],
+  [/^(\d+) von (\d+) erledigt$/, '$1 of $2 done'],
+  [/^Diese App ist nur für @(.+) freigegeben\.$/, 'This app is only available for @$1.'],
+  [/^Unbekannte Aktion: (.+)$/, 'Unknown action: $1'],
+  [/^Tabelle "(.+)" fehlt\. Bitte setup\(\) erneut ausführen\.$/, 'Table "$1" is missing. Please run setup() again.'],
+  [/^Diese Farbe hat schon das Team „(.+)“\. Bitte eine andere wählen\.$/, 'The team “$1” already has this colour. Please choose another one.'],
+  [/^Nur Mitglieder von „(.+)“ können dort Projekte anlegen\.$/, 'Only members of “$1” can create projects there.'],
+  [/^Ungültige E-Mail-Adresse: (.+)$/, 'Invalid email address: $1'],
+  [/^Vertex AI antwortet mit (\d+)$/, 'Vertex AI answered with $1'],
   [/^(\d+) Personen$/, '$1 people'],
   [/^(.+) entfernt$/, '$1 removed'],
   [/^(.+) · wird eingeladen$/, '$1 · will be invited'],
@@ -319,6 +351,10 @@ new MutationObserver(muts => {
 }).observe(document.body, { childList: true, subtree: true });
 
 let LANG = 'de';
+/** For sentences with markup inside: both languages at the source instead of fragments. */
+const L = (de, en) => (LANG === 'en' ? en : de);
+/** Holiday name in the reader's language (the server sends both). */
+const holName = h => (LANG === 'en' && (h.nameEn || h.labelEn)) || h.name || h.label;
 function setLang(lang) {
   LANG = lang === 'en' ? 'en' : 'de';
   const d = LANG_DATES[LANG];
