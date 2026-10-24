@@ -17,14 +17,18 @@ const Views = {
       case 'calendar': return calendarPage();
       case 'capacity': return capacityPage();
       case 'settings': return settingsPage();
-      default: return dashPage();
+      default: return notFound();
     }
   },
   after() { bindDrag(); bindCalSelect(); bindPlanner(); bindGantt(); bindPtabs(); },
 };
+/** 404: unknown link, deleted team/project/task. */
 function notFound() {
-  return '<div class="page"><div class="empty">' + icon('search') + '<div>Diese Seite gibt es nicht mehr.</div><br>' +
-    '<button class="btn outline" data-action="nav" data-view="home">Zu meinen Aufgaben</button></div></div>';
+  return '<div class="page"><div class="nf">' + logoMark() + '<div class="nf-code">404</div><h1>Diese Seite gibt es nicht (mehr)</h1>' +
+    '<p>Vielleicht wurde das Team, Projekt oder die Aufgabe gelöscht, oder der Link ist unvollständig.</p>' +
+    '<div class="nf-acts"><button class="btn primary" data-action="nav" data-view="dash">Zur Übersicht</button>' +
+    '<button class="btn outline" data-action="nav" data-view="home">Meine Aufgaben</button>' +
+    '<button class="btn outline" data-action="palette">' + icon('search', 'sm') + 'Suchen</button></div></div></div>';
 }
 
 /* ---------------- database (task collection) ---------------- */
@@ -799,6 +803,7 @@ function calStep(dir) {
 A['cal-prev'] = () => calStep(-1);
 A['cal-next'] = () => calStep(1);
 A['cal-today'] = () => { S.cal.cursor = TODAY().slice(0, 8) + '01'; focusDate(); S.plan.date = TODAY(); render(); };
+window.addEventListener('resize', debounce(() => { if (S.route && S.route.view === 'calendar') render({ peek: false }); }, 150));
 function weekTitle(days) {
   const a = days[0], b = days[days.length - 1];
   return 'KW ' + Shared.isoWeek(a) + ' · ' + fmtRange(a, b);
@@ -878,7 +883,8 @@ function trowHtml(t) {
 function briefingData() {
   if (!S.briefing) {
     S.briefing = 'loading';
-    call('ai.briefing', { lang: LANG }).then(b => { S.briefing = b; S.warnings = b.teamWarnings || []; render({ peek: false }); }).catch(() => { S.briefing = null; });
+    call('ai.briefing', { lang: LANG }).then(b => { S.briefing = b; S.warnings = b.teamWarnings || []; render({ peek: false }); })
+      .catch(() => { S.briefing = { text: 'Das Briefing konnte gerade nicht geladen werden.', focus: [], teamWarnings: [], source: 'error', failed: true }; render({ peek: false }); });
   }
   return S.briefing && S.briefing !== 'loading' ? S.briefing : null;
 }
@@ -996,7 +1002,8 @@ function dashPage() {
     '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + '<div class="brief-w">' + icon('sparkle', 'lg') + '<div class="txt">' +
     (b ? esc(b.text) : '<div class="skeleton" style="width:70%;margin:6px 0"></div><div class="skeleton" style="width:40%"></div>') +
     (b && b.focus.length ? '<div class="focus">' + b.focus.map(f => '<button data-action="open-task" data-id="' + esc(f.id) + '">' + (f.priority ? prioTag(f.priority, true) : glyph('todo')) + '<span>' + esc(f.title) + '</span></button>').join('') + '</div>' : '') +
-    (b ? '<div class="src">' + (b.source === 'ai' ? 'Zusammengefasst von Vertex AI' : 'Automatisch zusammengefasst') + '</div>' : '') +
+    (b ? '<div class="src">' + (b.failed ? '<button class="linkbtn" data-action="brief-reload">Erneut laden</button>'
+      : b.source === 'ai' ? 'Zusammengefasst von Vertex AI' : 'Automatisch zusammengefasst') + '</div>' : '') +
     '</div></div>' +
     '<div class="stiles">' + stile('', 'checksq', newWeek ? newWeek + ' neu diese Woche' : 'Keine neuen diese Woche', 'Aufgaben gesamt', my.length, 'home') +
     stile('green', 'check', doneWeek ? doneWeek + ' diese Woche' : 'Noch keine diese Woche', 'Erledigt', my.filter(isDone).length, 'home') +
@@ -1429,7 +1436,10 @@ const CAL_VIEWS = [['week', 'Woche', 'board'], ['day', 'Tag', 'sub'], ['month', 
 const AG_RANGES = { today: [1, 'Heute'], week: [7, 'Woche'], month: [31, 'Monat'], all: [90, '90 Tage'] };
 function calendarPage() {
   if (!S.cal.mode || S.cal.mode === 'planner') S.cal.mode = 'week';
-  const mode = S.cal.mode;
+  // phones: seven columns do not fit, show the day instead
+  const mode = S.cal.mode === 'week' && window.innerWidth < 700 ? 'day' : S.cal.mode;
+  // the hours fill the window: about 7–21 h are visible without scrolling, small windows still scroll
+  PL.hh = Math.max(24, Math.min(56, Math.floor(Math.max(320, window.innerHeight - 235) / 14)));
   // personal calendar by default; a team gives a quick look at that team (details: Verfügbarkeit)
   const teamId = S.cal.teamId && team(S.cal.teamId) ? S.cal.teamId : '';
   const people = teamId ? teamMembers(team(teamId)) : [S.me.email];

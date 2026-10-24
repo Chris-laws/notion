@@ -9,6 +9,7 @@ function toast(msg, opts) {
   opts = opts || {};
   const el = document.createElement('div');
   el.className = 'toast' + (opts.error ? ' err' : opts.warn ? ' warn' : '');
+  if (opts.error) el.setAttribute('role', 'alert');
   el.innerHTML = '<span>' + esc(msg) + '</span>' + (opts.action ? '<button>' + esc(opts.action.label) + '</button>' : '');
   if (opts.action) el.querySelector('button').onclick = () => { opts.action.fn(); el.remove(); };
   $('#toasts').appendChild(el);
@@ -250,30 +251,58 @@ A.prop = (el, e) => {
 
 /* ---------------- modals & forms ---------------- */
 let modalSubmit = null;
+let modalReturn = null;
+let modalDirty = false;
 function openModal(o) {
   closePop();
   modalSubmit = o.onSubmit;
+  if (!$('#modal-root').children.length) modalReturn = document.activeElement;
+  modalDirty = false;
   $('#modal-root').innerHTML =
-    '<div class="modal-bg" data-action="modal-bg"><form class="modal" data-on-submit="modal" autocomplete="off">' +
-    '<div class="modal-head">' + esc(o.title) + '<button type="button" class="icon-btn" data-action="modal-close" aria-label="Schließen">' + icon('x') + '</button></div>' +
+    '<div class="modal-bg" data-action="modal-bg"><form class="modal" data-on-submit="modal" autocomplete="off" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+    '<div class="modal-head"><span id="modal-title">' + esc(o.title) + '</span><button type="button" class="icon-btn" data-action="modal-close" aria-label="Schließen" title="Schließen (Esc)">' + icon('x') + '</button></div>' +
     '<div class="modal-body">' + o.body + '</div>' +
     '<div class="modal-foot">' + (o.danger ? '<button type="button" class="btn danger left" data-action="modal-danger">' + esc(o.danger.label) + '</button>' : '') +
     '<button type="button" class="btn" data-action="modal-close">Abbrechen</button>' +
     '<button type="submit" class="btn primary">' + esc(o.submitLabel || 'Speichern') + '</button></div></form></div>';
   A['modal-danger'] = () => o.danger && o.danger.onClick();
-  const first = $('#modal-root input:not([type=hidden]):not([type=checkbox]), #modal-root textarea');
+  const m = $('#modal-root .modal');
+  const first = $('input:not([type=hidden]):not([type=checkbox]):not([disabled]), textarea, select', m) || $('.modal-foot button[type=submit]', m);
   if (first) first.focus();
-  if (o.mount) o.mount($('#modal-root .modal'));
+  m.addEventListener('input', () => { modalDirty = true; });
+  // keep Tab inside the dialog
+  m.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const f = $$('button:not([disabled]), input:not([type=hidden]):not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])', m).filter(x => x.offsetParent);
+    if (!f.length) return;
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
+  if (o.mount) o.mount(m);
 }
-function closeModal() { $('#modal-root').innerHTML = ''; modalSubmit = null; }
+function closeModal() {
+  $('#modal-root').innerHTML = '';
+  modalSubmit = null;
+  // focus goes back to where the user was
+  if (modalReturn && document.contains(modalReturn) && modalReturn.focus) modalReturn.focus();
+  modalReturn = null;
+}
 A['modal-close'] = () => closeModal();
-A['modal-bg'] = (el, e) => { if (e.target === el) closeModal(); };
+// a click next to the dialog closes it only when nothing was typed yet, so input is never lost by accident
+A['modal-bg'] = (el, e) => {
+  if (e.target !== el) return;
+  if (!modalDirty) { closeModal(); return; }
+  const m = $('.modal', el);
+  m.classList.remove('nudge'); void m.offsetWidth; m.classList.add('nudge');
+};
 ON.submit.modal = form => {
   if (!modalSubmit) return;
   const btn = $('button[type=submit]', form);
   btn.disabled = true;
-  Promise.resolve(modalSubmit(formValues(form))).then(ok => { if (ok !== false) closeModal(); else btn.disabled = false; })
-    .catch(err => { btn.disabled = false; fail(err); });
+  btn.classList.add('loading');
+  const done = () => { btn.disabled = false; btn.classList.remove('loading'); };
+  Promise.resolve(modalSubmit(formValues(form))).then(ok => { if (ok !== false) { modalDirty = false; closeModal(); } else done(); })
+    .catch(err => { done(); fail(err); });
 };
 function formValues(form) {
   const out = {};

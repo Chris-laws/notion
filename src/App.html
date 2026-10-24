@@ -321,6 +321,16 @@ function call(method, payload) {
       return call(method, next);
     });
   }
+  // reading calls are retried twice (0.6 s, 1.8 s) when Google is busy or the connection hiccups
+  const READS = /^(bootstrap|tasks\.list|calendar\.range|availability|comments\.list|ai\.briefing|ai\.status)$/;
+  const attempt = n => runCall(method, payload).catch(err => {
+    const transient = /lock|timed? ?out|Zeitüberschreitung|too many|Rate Limit|NetworkError|network|Failed to fetch|503|500/i.test(err && err.message || '');
+    if (n < 2 && transient && READS.test(method)) return new Promise(r => setTimeout(r, 600 * Math.pow(3, n))).then(() => attempt(n + 1));
+    throw err;
+  });
+  return attempt(0);
+}
+function runCall(method, payload) {
   S.busy++;
   syncDot();
   return new Promise((resolve, reject) => {
@@ -335,9 +345,16 @@ function call(method, payload) {
       .api(method, JSON.stringify(payload || {}));
   });
 }
+/** Saving/loading feedback: pulsing dot next to the app name and a thin bar at the top (after 150 ms, no flicker). */
+let busyTimer = null;
 function syncDot() {
   const d = $('#sync');
   if (d) d.classList.toggle('busy', S.busy > 0);
+  let bar = $('#busy-bar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'busy-bar'; bar.setAttribute('aria-hidden', 'true'); document.body.appendChild(bar); }
+  clearTimeout(busyTimer);
+  if (S.busy > 0) busyTimer = setTimeout(() => bar.classList.add('on'), 150);
+  else bar.classList.remove('on');
 }
 function fail(err) {
   console.error(err);
@@ -711,25 +728,35 @@ document.addEventListener('click', e => {
     }
   });
 });
-document.addEventListener('keydown', e => {
-  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
+/**
+ * Shortcuts. Letters work with or without Shift/Caps Lock and on any keyboard layout (e.code as fallback);
+ * nothing fires while typing in a field or with a dialog open.
+ */
+window.addEventListener('keydown', e => {
+  const a = document.activeElement;
+  const typing = !!a && (/INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.isContentEditable);
+  const k = String(e.key || '').toLowerCase();
+  if ((e.metaKey || e.ctrlKey) && (k === 'k' || e.code === 'KeyK')) { e.preventDefault(); openPalette(); return; }
   if (e.key === 'Escape') {
     if (closeTopLayer()) { e.preventDefault(); return; }
     if (S.peekId && !typing) { closePeek(); return; }
   }
-  if (typing) return;
-  if ((S.route.view === 'calendar' || S.route.view === 'planner') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+  if (typing || e.metaKey || e.ctrlKey || e.altKey || !S.me) return;
+  if ($('#modal-root').children.length || $('#palette-root').children.length) return;
+  const letter = /^Key[A-Z]$/.test(e.code || '') ? e.code.slice(3).toLowerCase() : k;
+  if (k === '?' || (e.shiftKey && (e.code === 'Slash' || e.code === 'Minus')) || e.key === 'F1') { e.preventDefault(); A.help(); return; }
+  if (S.route.view === 'calendar') {
     const m = CAL_VIEWS.map(v => v[0])[Number(e.key) - 1];
     if (m) { A['cal-mode']({ dataset: { v: m } }); return; }
-    if (e.key === 't') { A['cal-today'](); return; }
     if (e.key === 'ArrowLeft') { A['cal-prev'](); return; }
     if (e.key === 'ArrowRight') { A['cal-next'](); return; }
   }
-  if (e.key === '?') { e.preventDefault(); A.help(); return; }
-  if (e.key === 'c' || e.key === 'n') { e.preventDefault(); openPalette(); }
-  if (e.key === '/') { e.preventDefault(); openPalette(); }
-});
+  if (letter === 't') { e.preventDefault(); if (S.route.view !== 'calendar') go('calendar'); A['cal-today'](); return; }
+  if (letter === 'n') { e.preventDefault(); A['new-task'](); return; }
+  if (letter === 'c' || k === '/') { e.preventDefault(); openPalette(); }
+}, true);
+// keyboard focus belongs to the app, not to the Google frame around it
+window.addEventListener('mouseenter', () => { if (document.activeElement === document.body) window.focus(); });
 
 /* ---------------- background sync ---------------- */
 function editing() {
@@ -765,6 +792,7 @@ function boot() {
       else if (last && last.view && (!last.id || team(last.id) || project(last.id))) S.route = last;
       render({ resetScroll: true });
       if (params.task && task(params.task)) openPeek(params.task);
+      else if (params.task) toast('Diese Aufgabe gibt es nicht mehr oder du hast keinen Zugriff darauf.', { warn: true });
     };
     try {
       google.script.url.getLocation(loc => start(loc.parameter || {}));
@@ -773,8 +801,10 @@ function boot() {
       if (ev.state && ev.state.view) { S.route = ev.state; render({ resetScroll: true }); }
     });
   }).catch(err => {
-    $('#view').innerHTML = '<div class="page"><div class="empty"><div class="big">🔒</div><h2>App konnte nicht geladen werden</h2>' +
-      '<p class="muted">' + esc(err.message) + '</p></div></div>';
+    $('#app').classList.remove('is-loading');
+    $('#view').innerHTML = '<div class="page"><div class="nf">' + logoMark() + '<h1>App konnte nicht geladen werden</h1>' +
+      '<p>' + esc(friendlyError(err.message || String(err))) + '</p>' +
+      '<div class="nf-acts"><button class="btn primary" onclick="location.reload()">Erneut versuchen</button></div></div></div>';
   });
 }
 window.addEventListener('load', boot);
