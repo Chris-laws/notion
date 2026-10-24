@@ -18,7 +18,7 @@ const S = {
   route: { view: 'dash' },
   peekId: null,
   peekFull: false,
-  cal: { cursor: null, mode: 'agenda', range: 'week', teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {} },
+  cal: { cursor: null, mode: 'week', range: 'week', teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {} },
   cap: { teamId: null, from: null, weeks: 6, data: null, loading: false },
   briefing: null,
   collapsed: {},
@@ -305,6 +305,8 @@ function dropTasks(ids) {
 function patchTask(id, patch, opts) {
   const t = task(id);
   if (!t) return Promise.resolve();
+  // Nobody left assigned: the task goes back to the person who created it.
+  if (patch.assignees && !patch.assignees.length) patch = Object.assign({}, patch, { assignees: [t.createdBy || S.me.email] });
   const before = Object.assign({}, t);
   Object.assign(t, patch);
   if (!(opts && opts.silent)) render({ peek: !(opts && opts.keepPeek) });
@@ -319,7 +321,9 @@ function patchTask(id, patch, opts) {
 }
 /** Shows the new task at once and swaps in the saved one when the server answers. */
 function createTask(fields, opts) {
-  const tmpId = 'tmp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  // Every task belongs to someone: the creator unless another person was picked.
+  if (!fields.assignees || !fields.assignees.length) fields = Object.assign({}, fields, { assignees: [S.me.email] });
+  const tmpId ='tmp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const now = new Date().toISOString();
   const draft = Object.assign({
     id: tmpId, title: 'Ohne Titel', description: '', status: 'todo', priority: '', projectId: '',
@@ -329,12 +333,17 @@ function createTask(fields, opts) {
   }, fields);
   if (!draft.title) draft.title = 'Ohne Titel';
   S.tasks.push(draft);
+  FRESH[tmpId] = true;
   if (opts && opts.open) openPeek(tmpId); else render();
   const saved = call('tasks.save', fields).then(changed => changed);
   PENDING[tmpId] = saved.then(changed => changed[0].id);
   return saved.then(changed => {
     const real = changed[0];
+    // Discarded while the request was running (discardIfBlank removes it on the server).
+    const gone = !S.tasks.some(t => t.id === tmpId);
     ALIAS[tmpId] = real.id;
+    if (gone) return real;
+    if (FRESH[tmpId]) FRESH[real.id] = true;
     S.tasks = S.tasks.filter(t => t.id !== tmpId);
     applyTasks(changed);
     if (S.peekId === tmpId) S.peekId = real.id;
@@ -350,6 +359,18 @@ function createTask(fields, opts) {
     fail(err);
   });
 }
+/** Tasks created in this session; untouched ones are thrown away when their panel closes. */
+const FRESH = {};
+function discardIfBlank(id) {
+  const t = id && task(id);
+  if (!t || !FRESH[t.id]) return;
+  const blank = (!t.title || t.title === 'Ohne Titel') && !String(t.description || '').trim() && !subtasks(t.id).length;
+  delete FRESH[t.id];
+  if (!blank) return;
+  dropTasks([t.id]);
+  // call() waits for the real id if the task is still being created.
+  call('tasks.remove', { id: t.id }).catch(() => {});
+}
 /** Defaults for "+ Neu" depending on where the user is. */
 function contextDefaults(extra) {
   const r = S.route;
@@ -363,7 +384,7 @@ function contextDefaults(extra) {
 /* ---------------- routing ---------------- */
 function go(view, id, opts) {
   S.route = { view: view, id: id || null };
-  if (!(opts && opts.keepPeek)) S.peekId = null;
+  if (!(opts && opts.keepPeek)) { discardIfBlank(S.peekId); S.peekId = null; }
   store.set('route', S.route);
   $('#app').classList.remove('side-open');
   try {
@@ -386,12 +407,21 @@ function render(opts) {
   renderSidebar();
   renderTopbar();
   const drafts = captureForms(view);
+  const inner = {};
+  $$('[data-keep-scroll]', view).forEach(el => { inner[el.dataset.keepScroll] = el.scrollTop; });
   const html = Views.render();
   // Only route changes play the page fade-in; data updates swap content in place.
   view.classList.toggle('enter', !!opts.resetScroll);
   const swapped = html === null || setHtml(view, html);
   restoreForms(view, drafts);
   view.scrollTop = top;
+  if (swapped) {
+    $$('[data-keep-scroll]', view).forEach(el => {
+      const k = el.dataset.keepScroll;
+      if (inner[k] !== undefined && !opts.resetScroll) el.scrollTop = inner[k];
+      else if (k === 'wk') el.scrollTop = Math.max(0, (7 * 60 - PL.from) / 60 * PL.hh); // start the day at 07:00
+    });
+  }
   const nb = $('.board', view);
   if (nb && !opts.resetScroll) nb.scrollLeft = left;
   if (opts.peek !== false) renderPeek();
@@ -457,14 +487,13 @@ function renderSidebar() {
 
   setHtml($('#sidebar'),
     '<div class="side-head"><div class="ws-mark">' + icon('check') + '</div><div class="ws-name">' + esc(S.appName) + '</div>' +
-    '<span id="sync" class="sync-dot" title="Synchronisiert"></span>' +
+    '<span id="sync" class="sync-dot" title="Wird gespeichert …"></span>' +
     '<button class="icon-btn rail-toggle" data-action="rail-toggle" title="Seitenleiste ein-/ausklappen">' + icon('menu') + '</button></div>' +
     '<div class="side-scroll">' +
     '<button class="side-search" data-action="palette">' + icon('search', 'sm') + '<span class="grow">Suchen …</span><span class="kbd">⌘K</span></button>' +
     navItem('dash', icon('home'), 'Übersicht') +
     navItem('home', icon('checksq'), 'Meine Aufgaben', mineOpen ? '<span class="count">' + mineOpen + '</span>' : '') +
     navItem('all', icon('inbox'), 'Alle Aufgaben') +
-    navItem('planner', icon('clock'), 'Tagesplaner') +
     navItem('calendar', icon('calendar'), 'Kalender') +
     navItem('capacity', icon('users'), 'Verfügbarkeit', warn) +
     '<div class="side-section"><span>Teams</span><button class="icon-btn sm" data-action="team-new" title="Neues Team">' + icon('plus', 'sm') + '</button></div>' +
@@ -481,7 +510,7 @@ A['toggle-team'] = el => { S.collapsed[el.dataset.id] = !S.collapsed[el.dataset.
 function renderTopbar() {
   const r = S.route;
   const crumbs = [];
-  const labels = { dash: 'Übersicht', home: 'Meine Aufgaben', all: 'Alle Aufgaben', planner: 'Tagesplaner', calendar: 'Kalender', capacity: 'Verfügbarkeit', settings: 'Einstellungen' };
+  const labels = { dash: 'Übersicht', home: 'Meine Aufgaben', all: 'Alle Aufgaben', calendar: 'Kalender', capacity: 'Verfügbarkeit', settings: 'Einstellungen' };
   if (labels[r.view]) crumbs.push({ html: esc(labels[r.view]) });
   if (r.view === 'team' && team(r.id)) crumbs.push({ html: mark(team(r.id)) + esc(team(r.id).name) });
   if (r.view === 'project' && project(r.id)) {
@@ -531,7 +560,7 @@ document.addEventListener('keydown', e => {
   }
   if (typing) return;
   if ((S.route.view === 'calendar' || S.route.view === 'planner') && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    const m = ['agenda', 'planner', 'month', 'week', 'day', 'heatmap'][Number(e.key) - 1];
+    const m = CAL_VIEWS.map(v => v[0])[Number(e.key) - 1];
     if (m) { A['cal-mode']({ dataset: { v: m } }); return; }
     if (e.key === 't') { A['cal-today'](); return; }
     if (e.key === 'ArrowLeft') { A['cal-prev'](); return; }

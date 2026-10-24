@@ -10,7 +10,7 @@ const Views = {
     switch (r.view) {
       case 'dash': return dashPage();
       case 'home': return homePage();
-      case 'planner': S.cal.mode = 'planner'; return calendarPage();
+      case 'planner': S.route = { view: 'calendar', id: null }; S.cal.mode = 'day'; return calendarPage();
       case 'all': return allPage();
       case 'team': return team(r.id) ? teamPage(team(r.id)) : notFound();
       case 'project': return project(r.id) ? projectPage(project(r.id)) : notFound();
@@ -711,7 +711,7 @@ A['day-away'] = (el, e) => {
   openMenu(el, items, { search: items.length > 6, onPick: v => { if (v.indexOf('h:') !== 0) absenceModal(calFind('absences', v)); } });
 };
 /** Which calendar view is active (database calendars are always the month grid). */
-function calMode() { return S.route.view === 'calendar' || S.route.view === 'planner' ? S.cal.mode || 'agenda' : 'month'; }
+function calMode() { return S.route.view === 'calendar' || S.route.view === 'planner' ? S.cal.mode || 'week' : 'month'; }
 function calStep(dir) {
   focusDate();
   const m = calMode();
@@ -855,12 +855,12 @@ function dashPage() {
       : '<div class="banner ok" style="margin:0 0 10px">' + icon('check') + '<div>Alle Teams sind ausreichend besetzt.</div></div>') +
     (absNext.length ? '<div class="hlist" style="margin-top:8px">' + absNext.map(a => '<div class="hitem">' + avatar(a.email, 'lg') + '<div class="what"><div>' + esc(user(a.email).name) + '</div><div class="muted">' +
       esc(absenceType(a.type).label + ' · ' + fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') + '</div>' : '') + '</div>';
-  // activity: tasks I finished per day, last 16 weeks
-  const start = Shared.addDays(Shared.mondayOf(t), -15 * 7);
+  // activity: tasks I finished per day, last 52 weeks (fills the full card width)
+  const start = Shared.addDays(Shared.mondayOf(t), -51 * 7);
   const counts = {};
   S.tasks.filter(x => isDone(x) && x.completedAt && isMine(x)).forEach(x => { const d = x.completedAt.slice(0, 10); counts[d] = (counts[d] || 0) + 1; });
   const cells = [];
-  for (let i = 0; i < 16 * 7; i++) {
+  for (let i = 0; i < 52 * 7; i++) {
     const d = Shared.addDays(start, i), c = counts[d] || 0;
     cells.push(d > t ? '<i style="visibility:hidden"></i>' : '<i class="' + (c >= 5 ? 'l4' : c >= 3 ? 'l3' : c >= 2 ? 'l2' : c >= 1 ? 'l1' : '') + (d === t ? ' today' : '') + '" title="' + esc(fmtDate(d, { absolute: true }) + ': ' + c + ' erledigt') + '"></i>');
   }
@@ -932,7 +932,7 @@ function dashPage() {
     teamCard +
     '<div class="card-w w-7"><h3>' + icon('calendar', 'sm') + 'Agenda, nächste 14 Tage<a class="more" data-action="cal-agenda">Alles ansehen</a></h3>' +
     (upcoming ? agendaHtml(upcoming, t, 14, { people: people, tasks: S.tasks.filter(x => isMine(x) && x.dueDate), compact: true }) : '<div class="skeleton"></div>') + '</div>' +
-    '<div class="card-w w-12"><h3>' + icon('check', 'sm') + 'Aktivität <span class="n">' + doneTotal + ' erledigt in 16 Wochen</span><a class="more" data-action="dash-heat">Ganzes Jahr</a></h3><div class="heat">' + cells.join('') + '</div>' +
+    '<div class="card-w w-12"><h3>' + icon('check', 'sm') + 'Aktivität <span class="n">' + doneTotal + ' erledigt in 12 Monaten</span><a class="more" data-action="dash-heat">Details</a></h3><div class="heat fill">' + cells.join('') + '</div>' +
     '<div class="heat-legend">weniger <i style="background:var(--bg-hover)"></i><i style="background:#c6dcf7"></i><i style="background:#7fb0ec"></i><i style="background:#2f7bd0"></i><i style="background:#0050aa"></i> mehr</div></div>' +
     '</div></div>';
 }
@@ -950,7 +950,7 @@ function homePage() {
 }
 
 /* day planner: pick tasks from the list, drop them on the time line */
-const PL = { from: 6 * 60, to: 20 * 60, hh: 64 };
+const PL = { from: 6 * 60, to: 21 * 60, hh: 44 };
 function plDur(t) { return Math.max(15, Math.round((Number(t.estimate) || 0.5) * 60 / 5) * 5); }
 function fmtClock(min) { return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
 const plPx = m => (m - PL.from) / 60 * PL.hh;
@@ -1000,31 +1000,19 @@ function dayFlags(data, d, o) {
   if (away.length) flags.push('<span class="chip" title="' + esc(away.map(e => user(e).name).join(', ')) + '">' + avatars(away, 3) + away.length + ' abwesend</span>');
   return flags;
 }
-function plannerInner() {
-  const d = focusDate(), today = TODAY();
+/** "Meine Aufgaben" next to the week/day grid: drag a task onto the time line to plan it. */
+function planListHtml(until, days) {
   const mine = S.tasks.filter(isMine);
-  const planned = mine.filter(x => x.planDate === d);
-  let cand = mine.filter(x => !isDone(x) && x.planDate !== d);
-  if (S.plan.filter === 'due') cand = cand.filter(x => x.dueDate && x.dueDate <= d);
+  let cand = mine.filter(x => !isDone(x) && days.indexOf(x.planDate) < 0);
+  if (S.plan.filter === 'due') cand = cand.filter(x => x.dueDate && x.dueDate <= until);
   else if (S.plan.filter === 'free') cand = cand.filter(x => !x.planDate);
   cand.sort((a, c) => (a.dueDate || '9').localeCompare(c.dueDate || '9') || rankPrio(a) - rankPrio(c));
-  const flags = dayFlags(calEnsure(d, d, ''), d, { people: null });
-  const wd = Shared.weekday(d);
-  const plannedMin = planned.reduce((s, t) => s + plDur(t), 0);
-  const perDay = (Number(S.me.hoursPerWeek) || 40) / Math.max(1, String(S.me.workDays || '1,2,3,4,5').split(',').filter(Boolean).length);
-  const item = t => '<div class="pl-item" draggable="true" data-plan-drag="' + esc(t.id) + '">' + glyph(t.status) + '<div class="tt">' + esc(t.title) + '<div>' + metaHtml(t, { skipEst: true }) + '</div></div><span class="dur">' + fmtHours(plDur(t) / 60) + '</span></div>';
+  const item = t => '<div class="pl-item" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '">' + glyph(t.status) + '<div class="tt">' + esc(t.title) + '<div>' + metaHtml(t, { skipEst: true }) + '</div></div><span class="dur">' + fmtHours(plDur(t) / 60) + '</span></div>';
   const fbtn = (k, l) => '<button class="' + (S.plan.filter === k ? 'on' : '') + '" data-action="pl-filter" data-k="' + k + '">' + l + '</button>';
-  return '<div class="planner"><div class="card-w pl-list" data-plan-return><h3>Aufgaben <span class="n">' + cand.length + '</span></h3>' +
-    '<div class="seg" style="margin-bottom:12px">' + fbtn('due', 'Fällig') + fbtn('free', 'Ungeplant') + fbtn('all', 'Alle offenen') + '</div>' +
-    (cand.length ? cand.slice(0, 60).map(item).join('') : '<div class="empty-w">Nichts zu planen.</div>') + '</div>' +
-    '<div class="card-w pl-day"><div class="pl-top"><span class="dl">' + esc(DOW_LONG[wd] + ', ' + fmtDate(d, { absolute: true })) + '</span>' +
-    '<button class="icon-btn" data-action="cal-prev" aria-label="Vorheriger Tag">' + icon('left') + '</button>' +
-    '<button class="icon-btn" data-action="cal-next" aria-label="Nächster Tag">' + icon('right') + '</button>' +
-    '<button class="btn outline sm" data-action="cal-today">Heute</button>' +
-    '<span class="tot">' + fmtHours(plannedMin / 60) + ' geplant · ' + fmtHours(perDay) + ' Arbeitszeit</span></div>' +
-    (flags.length ? '<div class="pl-flags">' + flags.join('') + '</div>' : '') +
-    '<div class="tl" style="--hh:' + PL.hh + 'px;height:' + ((PL.to - PL.from) / 60 * PL.hh) + 'px"><div class="tl-hours">' + hourLabels() + '</div>' +
-    '<div class="tl-grid" data-plan-date="' + d + '" data-action="wk-slot" data-date="' + d + '">' + blocksHtml(planned) + '</div>' + nowLineHtml(d) + '</div></div></div>';
+  return '<div class="card-w pl-list" data-plan-return><div class="pl-head"><h3>Meine Aufgaben <span class="n">' + cand.length + '</span></h3>' +
+    '<div class="seg">' + fbtn('due', 'Fällig') + fbtn('free', 'Ungeplant') + fbtn('all', 'Alle offenen') + '</div>' +
+    '<p class="pl-hint">Auf den Kalender ziehen, um einen Zeitblock zu planen.</p></div>' +
+    '<div class="pl-scroll" data-keep-scroll="pl">' + (cand.length ? cand.slice(0, 80).map(item).join('') : '<div class="empty-w">Nichts zu planen.</div>') + '</div></div>';
 }
 
 /** Week / day: one column per day with a time line, all-day strip on top. */
@@ -1052,7 +1040,7 @@ function timeGridHtml(days, o) {
     return '<div class="wk-col' + (d === today ? ' today' : '') + (wd === 0 || wd === 6 ? ' weekend' : '') + '" data-plan-date="' + d + '" data-action="wk-slot" data-date="' + d + '">' + blocksHtml(planned) + nowLineHtml(d) + '</div>';
   }).join('');
   const h = (PL.to - PL.from) / 60 * PL.hh;
-  return '<div class="card-w wk" style="--cols:' + days.length + ';--hh:' + PL.hh + 'px">' +
+  return '<div class="card-w wk" data-keep-scroll="wk" style="--cols:' + days.length + ';--hh:' + PL.hh + 'px;--tlh:' + h + 'px">' +
     '<div class="wk-corner"></div>' + head + '<div class="wk-corner a">ganztägig</div>' + allday +
     '<div class="wk-gutter" style="height:' + h + 'px">' + hourLabels() + '</div>' + cols + '</div>';
 }
@@ -1260,10 +1248,11 @@ function scopeButton(action, teamId) {
   const t = teamId && team(teamId);
   return '<button class="btn outline" data-action="' + action + '">' + (t ? mark(t) + esc(t.name) : icon('users', 'sm') + 'Alle Personen') + icon('chevron', 'sm') + '</button>';
 }
-const CAL_VIEWS = [['agenda', 'Agenda', 'list'], ['planner', 'Planer', 'clock'], ['month', 'Monat', 'calendar'], ['week', 'Woche', 'board'], ['day', 'Tag', 'sub'], ['heatmap', 'Heatmap', 'layers']];
+const CAL_VIEWS = [['week', 'Woche', 'board'], ['day', 'Tag', 'sub'], ['month', 'Monat', 'calendar'], ['agenda', 'Agenda', 'list'], ['heatmap', 'Heatmap', 'layers']];
 const AG_RANGES = { today: [1, 'Heute'], week: [7, 'Woche'], month: [31, 'Monat'], all: [90, '90 Tage'] };
 function calendarPage() {
-  const mode = S.cal.mode || 'agenda';
+  if (!S.cal.mode || S.cal.mode === 'planner') S.cal.mode = 'week';
+  const mode = S.cal.mode;
   const teamId = S.cal.teamId && team(S.cal.teamId) ? S.cal.teamId : '';
   const people = teamId ? teamMembers(team(teamId)) : null;
   const t = TODAY();
@@ -1300,26 +1289,27 @@ function calendarPage() {
     if (mode === 'day') days.push(f);
     else for (let i = 0; i < 7; i++) days.push(Shared.addDays(Shared.mondayOf(f), i));
     const data = calEnsure(days[0], days[days.length - 1], teamId);
-    main = calNav(mode === 'day' ? DOW_LONG[Shared.weekday(f)] + ', ' + fmtDate(f, { absolute: true }) : weekTitle(days)) +
-      timeGridHtml(days, { data: data, people: people, teamId: teamId, tasks: tasks, show: show });
-  } else if (mode === 'planner') {
-    main = plannerInner();
+    main = '<div class="cal-plan">' + planListHtml(days[days.length - 1], days) +
+      '<div class="cal-grid">' + calNav(mode === 'day' ? DOW_LONG[Shared.weekday(f)] + ', ' + fmtDate(f, { absolute: true }) : weekTitle(days)) +
+      timeGridHtml(days, { data: data, people: people, teamId: teamId, tasks: tasks, show: show }) + '</div></div>';
   } else if (mode === 'heatmap') {
     main = heatmapHtml(people);
   }
   const views = '<div class="seg views">' + CAL_VIEWS.map((v, i) => '<button class="' + (mode === v[0] ? 'on' : '') + '" data-action="cal-mode" data-v="' + v[0] + '" title="Taste ' + (i + 1) + '">' + icon(v[2], 'sm') + v[1] + '</button>').join('') + '</div>';
-  return '<div class="page wide">' +
-    '<div class="card-w cal-top"><div class="cal-top-l"><h1 class="page-title">Kalender</h1><p class="page-sub">Aufgaben, Termine, Urlaub und Feiertage aller Länder deines Teams. Im Monat über mehrere Tage ziehen, um Urlaub einzutragen.</p>' +
-    '<div class="cal-ctl">' + scopeButton('cal-team', teamId) + ctl.join('') + (mode === 'heatmap' || mode === 'planner' ? '' : filters) + '</div></div>' +
+  // The page itself does not scroll: list, grid and side panel scroll inside their own boxes.
+  return '<div class="page wide cal-fit">' +
+    '<div class="card-w cal-top"><div class="cal-top-l"><h1 class="page-title">Kalender</h1>' +
+    '<div class="cal-ctl">' + scopeButton('cal-team', teamId) + ctl.join('') + (mode === 'heatmap' ? '' : filters) + '</div></div>' +
     '<div class="cal-top-r">' + views + '<div class="cal-acts"><button class="btn outline" data-action="event-new">' + icon('plus', 'sm') + 'Termin</button>' +
     '<button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button></div></div></div>' +
-    (layoutSide ? '<div class="cal-layout"><div>' + main + '</div>' + side() + '</div>' : '<div class="cal-full">' + main + '</div>') +
-    '<div class="kbd-bar"><span><kbd>1</kbd>–<kbd>6</kbd> Ansicht</span><span><kbd>T</kbd> Heute</span><span><kbd>N</kbd> Neue Aufgabe</span><span><kbd>←</kbd><kbd>→</kbd> Zeitraum</span></div></div>';
+    '<div class="cal-body">' +
+    (layoutSide ? '<div class="cal-layout"><div class="cal-main" data-keep-scroll="main">' + main + '</div><div class="cal-side" data-keep-scroll="side">' + side() + '</div></div>'
+      : '<div class="cal-full">' + main + '</div>') + '</div></div>';
 }
 A['cal-mode'] = el => {
   S.cal.mode = el.dataset.v;
   if (S.cal.mode === 'month') S.cal.cursor = focusDate().slice(0, 8) + '01';
-  if (S.route.view === 'planner') go('calendar'); else render();
+  render();
 };
 A['cal-range'] = el => { S.cal.range = el.dataset.k; render(); };
 function sidePanel(d, people, o) {

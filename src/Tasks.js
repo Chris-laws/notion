@@ -23,6 +23,7 @@ const Tasks = {
         if (!prev) throw new Error('Aufgabe nicht gefunden – evtl. wurde sie gelöscht.');
         if (!Access.canSeeTask(prev, ctx)) throw new Error('Keine Berechtigung für diese Aufgabe.');
         fields.updatedAt = now;
+        if (fields.assignees && !fields.assignees.length) fields.assignees = [prev.createdBy || me.email];
         if (fields.status && fields.status !== prev.status) {
           fields.completedAt = fields.status === 'done' ? now : '';
         }
@@ -60,6 +61,7 @@ const Tasks = {
         spent: 0,
         timerStart: '',
       }, fields);
+      if (!task.assignees.length) task.assignees = [me.email];
       if (task.status === 'done') task.completedAt = now;
       return [Db.insert('Tasks', task)];
     });

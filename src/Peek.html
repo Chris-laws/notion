@@ -6,6 +6,7 @@
 
 function openPeek(id) {
   if (!task(id)) return;
+  if (S.peekId && task(S.peekId) !== task(id)) discardIfBlank(S.peekId);
   S.peekId = id;
   const fresh = /^tmp_/.test(id);
   S.comments = fresh ? { taskId: id, list: [] } : null;
@@ -22,6 +23,7 @@ function openPeek(id) {
   }).catch(() => { S.comments = { taskId: id, list: [] }; renderPeek(); });
 }
 function closePeek() {
+  discardIfBlank(S.peekId);
   S.peekId = null;
   S.peekFull = false;
   render();
