@@ -41,19 +41,35 @@ const GROUPS = [
 ];
 function dbKey() { return S.route.view + ':' + (S.route.id || ''); }
 function defaultPrefs() {
+  const home = S.route.view === 'home';
   return {
-    layout: S.route.view === 'home' ? 'list' : 'board', groupBy: 'status', who: 'all', prio: [],
-    showDone: S.route.view !== 'home', search: '', sort: { key: 'dueDate', dir: 1 }, rows: 50, page: 0, collapsedCols: {},
+    layout: home ? 'list' : 'board', groupBy: 'status', listGroup: home ? 'due' : 'status', people: [], prio: [], projects: [], statuses: [],
+    quick: 'open', showDone: !home, search: '', sort: { key: 'dueDate', dir: 1 }, rows: 50, page: 0, collapsedCols: {},
   };
 }
 function prefs() {
   if (!S.db) S.db = store.get('db', {});
   const k = dbKey();
   if (!S.db[k]) S.db[k] = defaultPrefs();
-  if (!S.db[k].collapsedCols) S.db[k].collapsedCols = {};
-  if (!LAYOUTS.some(l => l.key === S.db[k].layout)) S.db[k].layout = 'list';
-  return S.db[k];
+  const p = S.db[k];
+  // older saved prefs: fill in new fields, one "who" value becomes the people list
+  const d = defaultPrefs();
+  Object.keys(d).forEach(x => { if (p[x] === undefined) p[x] = d[x]; });
+  if (p.who && p.who !== 'all') p.people = [p.who === 'me' ? '__me' : p.who === 'none' ? '__none' : p.who];
+  delete p.who;
+  if (!LAYOUTS.some(l => l.key === p.layout)) p.layout = 'list';
+  return p;
 }
+/** "Meine Aufgaben" quick tabs (smart lists). */
+const QUICK = [
+  ['open', 'Alle offenen', t => !isDone(t)],
+  ['today', 'Heute', t => !isDone(t) && ((t.dueDate && t.dueDate <= TODAY()) || t.planDate === TODAY())],
+  ['upcoming', 'Anstehend', t => !isDone(t) && t.dueDate > TODAY() && t.dueDate <= Shared.addDays(TODAY(), 7)],
+  ['overdue', 'Überfällig', t => !isDone(t) && t.dueDate && t.dueDate < TODAY()],
+  ['nodate', 'Ohne Datum', t => !isDone(t) && !t.dueDate],
+  ['done', 'Erledigt', t => isDone(t)],
+];
+const LIST_GROUPS = [['due', 'Fälligkeit'], ['status', 'Status'], ['priority', 'Priorität'], ['project', 'Projekt']];
 function setPrefs(patch) {
   Object.assign(prefs(), patch);
   store.set('db', S.db);
@@ -63,10 +79,10 @@ function applyFilters(list, p) {
   const q = (p.search || '').trim().toLowerCase();
   return list.filter(t => {
     if (q && (t.title + ' ' + t.tags.join(' ')).toLowerCase().indexOf(q) < 0) return false;
-    if (p.who === 'me' && t.assignees.indexOf(S.me.email) < 0) return false;
-    if (p.who === 'none' && t.assignees.length) return false;
-    if (p.who && p.who.indexOf('@') > 0 && t.assignees.indexOf(p.who) < 0) return false;
+    if (p.people.length && !p.people.some(e => (e === '__none' ? !t.assignees.length : t.assignees.indexOf(e === '__me' ? S.me.email : e) >= 0))) return false;
     if (p.prio.length && p.prio.indexOf(t.priority) < 0) return false;
+    if (p.projects.length && p.projects.indexOf(t.projectId || '') < 0) return false;
+    if (p.statuses.length && p.statuses.indexOf(t.status) < 0) return false;
     return true;
   });
 }
@@ -76,8 +92,11 @@ function rankPrio(t) { return (prioOf(t.priority) || { rank: 9 }).rank; }
 function database(tasks, opts) {
   const p = prefs();
   opts = opts || {};
-  const filtered = applyFilters(tasks, p);
-  const whoLabel = p.who === 'all' ? '' : p.who === 'me' ? 'Mir zugewiesen' : p.who === 'none' ? 'Nicht zugewiesen' : user(p.who).name;
+  // "Meine Aufgaben" are mine anyway: no person filter there, smart quick tabs instead
+  const mine = S.route.view === 'home';
+  const pre = applyFilters(tasks, p);
+  const quick = mine ? (QUICK.find(q => q[0] === p.quick) || QUICK[0]) : null;
+  const filtered = quick ? pre.filter(quick[2]) : pre;
   const sortable = p.layout === 'table' || p.layout === 'gantt';
   const cnt = n => (n ? '<span class="tn">' + n + '</span>' : '');
   const views = savedViews();
@@ -87,24 +106,39 @@ function database(tasks, opts) {
     ? '<div class="dbh-top"><div><h1 class="page-title">' + esc(opts.title) + '</h1>' + (opts.sub ? '<p class="page-sub">' + opts.sub + '</p>' : '') + '</div>' +
       '<div class="dbh-r">' + sw + '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>'
     : '';
-  const tools = '<div class="dbh-tools">' +
-    '<button class="tbtn' + (p.who !== 'all' ? ' on' : '') + '" data-action="db-who">' + icon('filter', 'sm') + 'Person' + cnt(p.who !== 'all' ? 1 : 0) + '</button>' +
+  const quickTabs = mine ? '<div class="qtabs">' + QUICK.map(q => {
+    const n = pre.filter(q[2]).length;
+    return '<button class="' + (quick[0] === q[0] ? 'on' : '') + (q[0] === 'overdue' && n ? ' warn' : '') + '" data-action="db-quick" data-k="' + q[0] + '">' + q[1] + '<span class="n">' + n + '</span></button>';
+  }).join('') + '</div>' : '';
+  const listGroup = LIST_GROUPS.find(g => g[0] === p.listGroup) || LIST_GROUPS[0];
+  const tools = quickTabs + '<div class="dbh-tools">' +
+    (mine ? '' : '<button class="tbtn' + (p.people.length ? ' on' : '') + '" data-action="db-who">' + icon('user', 'sm') + 'Person' + cnt(p.people.length) + '</button>') +
     '<button class="tbtn' + (p.prio.length ? ' on' : '') + '" data-action="db-prio">' + icon('flag', 'sm') + 'Priorität' + cnt(p.prio.length) + '</button>' +
+    (opts.hideProject ? '' : '<button class="tbtn' + (p.projects.length ? ' on' : '') + '" data-action="db-proj">' + icon('folder', 'sm') + 'Projekt' + cnt(p.projects.length) + '</button>') +
+    '<button class="tbtn' + (p.statuses.length ? ' on' : '') + '" data-action="db-status">' + icon('status', 'sm') + 'Status' + cnt(p.statuses.length) + '</button>' +
     (sortable ? '<button class="tbtn" data-action="db-sort">' + icon('sort', 'sm') + 'Sortierung' + cnt(1) + '</button>' : '') +
     (p.layout === 'board' ? '<button class="tbtn" data-action="db-group">' + icon('layers', 'sm') + 'Gruppe: ' + esc(GROUPS.find(g => g.key === p.groupBy).label) + '</button>' : '') +
-    (p.layout !== 'board' ? '<button class="tbtn' + (p.showDone ? ' on' : '') + '" data-action="db-done">' + icon('checksq', 'sm') + 'Erledigte</button>' : '') +
+    (p.layout === 'list' ? '<button class="tbtn" data-action="db-lgroup">' + icon('layers', 'sm') + 'Gruppe: ' + esc(listGroup[1]) + '</button>' : '') +
+    (p.layout !== 'board' && !mine ? '<button class="tbtn' + (p.showDone ? ' on' : '') + '" data-action="db-done">' + icon('checksq', 'sm') + 'Erledigte</button>' : '') +
     '<input class="db-search' + (p.search ? ' open' : '') + '" placeholder="Suchen…" value="' + esc(p.search) + '" data-on-input="db-search">' +
     '<button class="icon-btn" data-action="db-search-open" title="Suchen">' + icon('search') + '</button>' +
     '<span class="grow"></span>' + (opts.title ? '' : sw) +
     '<span class="vlbl">Gespeicherte Ansichten</span><button class="tbtn sel" data-action="view-menu">' + esc(p.view || 'Standard') + icon('chevron', 'sm') + '</button>' +
     '<button class="icon-btn" data-action="view-save" title="Aktuelle Ansicht speichern">' + icon('plus') + '</button></div>';
+  // active filters as chips; people are one chip each plus "+" to add more
   const chips = [];
-  if (whoLabel) chips.push('<button class="fchip" data-action="db-clear" data-k="who">' + icon('user', 'sm') + esc(whoLabel) + icon('x', 'sm') + '</button>');
+  if (!mine && p.people.length) {
+    p.people.forEach(e => chips.push('<button class="fchip" data-action="db-unperson" data-v="' + esc(e) + '">' +
+      (e === '__me' ? icon('user', 'sm') + 'Mir zugewiesen' : e === '__none' ? icon('circle', 'sm') + 'Nicht zugewiesen' : avatar(e) + esc(user(e).name)) + icon('x', 'sm') + '</button>'));
+    chips.push('<button class="fchip add" data-action="db-who" title="Person hinzufügen">' + icon('plus', 'sm') + '</button>');
+  }
   if (p.prio.length) chips.push('<button class="fchip" data-action="db-clear" data-k="prio">' + icon('flag', 'sm') + esc(p.prio.map(k => (prioOf(k) || { label: 'Keine' }).label).join(', ')) + icon('x', 'sm') + '</button>');
+  if (p.projects.length) chips.push('<button class="fchip" data-action="db-clear" data-k="projects">' + icon('folder', 'sm') + esc(p.projects.map(id => (project(id) || { name: 'Ohne Projekt' }).name).join(', ')) + icon('x', 'sm') + '</button>');
+  if (p.statuses.length) chips.push('<button class="fchip" data-action="db-clear" data-k="statuses">' + icon('status', 'sm') + esc(p.statuses.map(k => (Shared.STATUSES.find(s => s.key === k) || {}).label).join(', ')) + icon('x', 'sm') + '</button>');
   const chipsHtml = chips.length ? '<div class="filter-chips">' + chips.join('') + '</div>' : '';
 
   let body;
-  const visibleDone = p.showDone ? filtered : filtered.filter(t => !isDone(t));
+  const visibleDone = p.showDone || mine ? filtered : filtered.filter(t => !isDone(t));
   const top = l => l.filter(t => !t.parentId || opts.includeSub);
   if (p.layout === 'board') body = boardHtml(top(filtered), p, opts);
   else if (p.layout === 'table') body = tableHtml(top(visibleDone), p, opts);
@@ -121,8 +155,23 @@ function savedViews() {
 }
 A['view-menu'] = el => {
   const list = savedViews();
-  openMenu(el, [{ value: '', html: '<span>Standard</span>', search: '' }].concat(list.map(v => ({ value: v.name, html: '<span>' + esc(v.name) + '</span>', search: v.name }))), {
+  openMenu(el, [{ value: '', html: '<span>Standard</span>', search: '' }].concat(list.map(v => ({ value: v.name, html: '<span>' + esc(v.name) + '</span>', search: v.name, deletable: true }))), {
     search: false, selected: [prefs().view || ''],
+    onDelete: name => {
+      const all = store.get('views', {});
+      const kept = (all[dbKey()] || []).filter(x => x.name !== name);
+      const gone = (all[dbKey()] || []).find(x => x.name === name);
+      all[dbKey()] = kept;
+      store.set('views', all);
+      if (prefs().view === name) { prefs().view = ''; store.set('db', S.db); }
+      render({ peek: false });
+      toast('Ansicht „' + name + '“ gelöscht', { action: { label: 'Rückgängig', fn: () => {
+        const again = store.get('views', {});
+        again[dbKey()] = (again[dbKey()] || []).concat([gone]);
+        store.set('views', again);
+        render({ peek: false });
+      } } });
+    },
     onPick: name => {
       const d = defaultPrefs();
       const v = list.find(x => x.name === name);
@@ -162,7 +211,24 @@ A['db-sort'] = el => {
 };
 A.layout = el => setPrefs({ layout: el.dataset.v });
 A['db-done'] = () => setPrefs({ showDone: !prefs().showDone });
-A['db-clear'] = el => setPrefs(el.dataset.k === 'who' ? { who: 'all' } : { prio: [] });
+A['db-clear'] = el => setPrefs({ [el.dataset.k]: [] });
+A['db-unperson'] = el => setPrefs({ people: prefs().people.filter(e => e !== el.dataset.v) });
+A['db-quick'] = el => setPrefs({ quick: el.dataset.k });
+A['db-lgroup'] = el => openMenu(el, LIST_GROUPS.map(g => ({ value: g[0], html: '<span>' + g[1] + '</span>', search: g[1] })),
+  { selected: [prefs().listGroup], search: false, onPick: v => setPrefs({ listGroup: v }) });
+const multiFilter = key => (v, sel) => { prefs()[key] = sel; store.set('db', S.db); render(); };
+A['db-proj'] = el => {
+  const items = [{ value: '', html: '<span class="faint">Ohne Projekt</span>', search: 'ohne kein' }];
+  S.teams.forEach(tm => {
+    const ps = S.projects.filter(x => x.teamId === tm.id);
+    if (!ps.length) return;
+    items.push({ label: tm.name, search: '' });
+    ps.forEach(x => items.push({ value: x.id, html: projectChip(x), search: x.name + ' ' + tm.name }));
+  });
+  openMenu(el, items, { multi: true, search: true, placeholder: 'Projekt suchen…', selected: prefs().projects, onPick: multiFilter('projects') });
+};
+A['db-status'] = el => openMenu(el, Shared.STATUSES.map(s => ({ value: s.key, html: statusTag(s.key), search: s.label })),
+  { multi: true, search: false, selected: prefs().statuses, onPick: multiFilter('statuses') });
 A['db-search-open'] = () => { const i = $('.db-search'); i.classList.add('open'); i.focus(); };
 ON.input['db-search'] = debounce(el => {
   prefs().search = el.value;
@@ -172,11 +238,11 @@ ON.input['db-search'] = debounce(el => {
   const n = $('.db-search');
   if (n) { n.focus(); n.setSelectionRange(pos, pos); }
 }, 200);
+/** Person filter: type a few letters, pick several people; they show up as chips with a "+" to add more. */
 A['db-who'] = el => openMenu(el, [
-  { value: 'all', html: icon('users', 'sm') + '<span>Alle</span>', search: 'alle' },
-  { value: 'me', html: icon('user', 'sm') + '<span>Mir zugewiesen</span>', search: 'ich mir' },
-  { value: 'none', html: icon('circle', 'sm') + '<span>Nicht zugewiesen</span>', search: 'niemand' },
-].concat(peopleItems()), { selected: [prefs().who], onPick: v => setPrefs({ who: v }) });
+  { value: '__me', html: icon('user', 'sm') + '<span>Mir zugewiesen</span>', search: 'ich mir me' },
+  { value: '__none', html: icon('circle', 'sm') + '<span>Nicht zugewiesen</span>', search: 'nicht zugewiesen' },
+].concat(peopleItems()), { multi: true, search: true, placeholder: 'Name oder E-Mail suchen…', selected: prefs().people, onPick: multiFilter('people') });
 A['db-prio'] = el => openMenu(el, Shared.PRIORITIES.map(p => ({ value: p.key, html: prioTag(p.key), search: p.label }))
   .concat([{ value: '', html: '<span class="faint">Keine</span>', search: 'keine' }]),
 { multi: true, search: false, selected: prefs().prio, onPick: (v, sel) => { prefs().prio = sel; store.set('db', S.db); render(); } });
@@ -349,7 +415,7 @@ const COLUMNS = [
   { key: 'status', label: 'Status', cell: t => statusTag(t.status) },
   { key: 'priority', label: 'Priorität', cell: t => prioTag(t.priority) },
   { key: 'projectId', label: 'Projekt', cell: t => projectPill(project(t.projectId)) || '<span class="faint">Kein Projekt</span>' },
-  { key: 'assignees', label: 'Zugewiesen', cell: t => (t.assignees.length ? avatars(t.assignees, 4) : '') },
+  { key: 'assignees', label: 'Zugewiesen', cell: t => (t.assignees.length ? avatars(t.assignees, 4) : '') + '<span class="add-p" title="Person hinzufügen">' + icon('plus', 'sm') + '</span>' },
   { key: 'startDate', label: 'Start', cell: t => (t.startDate ? '<span class="dtc">' + esc(fmtShort(t.startDate)) + '</span>' : '<span class="faint">Kein Start</span>') },
   { key: 'dueDate', label: 'Fällig', cell: t => (t.dueDate
     ? '<span class="dtc' + (!isDone(t) && t.dueDate < TODAY() ? ' over' : '') + '">' + esc(fmtShort(t.dueDate)) + '</span>' + (t.recurrence ? icon('repeat', 'sm faint') : '')
@@ -556,21 +622,30 @@ function listRow(t, opts) {
     '<div class="t"><span class="title' + (isDone(t) ? ' done' : '') + '">' + esc(t.title) + '</span>' +
     (t.parentId && task(t.parentId) ? '<span class="parent">↳ ' + esc(task(t.parentId).title) + '</span>' : '') + '</div>' +
     '<div class="side">' + metaHtml(t, Object.assign({ withTags: true }, opts)) + (p ? '<span class="meta">' + mark(p) + esc(p.name) + '</span>' : '') +
-    (t.assignees.length ? avatars(t.assignees) : '') + '</div></div>';
+    (t.assignees.length ? avatars(t.assignees) : '') +
+    '<button class="add-p" data-action="prop" data-id="' + esc(t.id) + '" data-field="assignees" title="Person hinzufügen">' + icon('plus', 'sm') + '</button></div></div>';
 }
 function listHtml(tasks, opts) {
   const today = TODAY();
   const weekEnd = Shared.addDays(Shared.mondayOf(today), 6);
+  const tomorrow = Shared.addDays(today, 1);
+  const by = prefs().listGroup;
   let groups;
-  if (S.route.view === 'home') {
+  if (by === 'due') {
     groups = [
       { label: 'Überfällig', danger: true, f: t => !isDone(t) && t.dueDate && t.dueDate < today },
       { label: 'Heute', f: t => !isDone(t) && t.dueDate === today },
-      { label: 'Diese Woche', f: t => !isDone(t) && t.dueDate > today && t.dueDate <= weekEnd },
-      { label: 'Später', f: t => !isDone(t) && t.dueDate > weekEnd },
+      { label: 'Morgen', f: t => !isDone(t) && t.dueDate === tomorrow },
+      { label: 'Diese Woche', f: t => !isDone(t) && t.dueDate > tomorrow && t.dueDate <= weekEnd },
+      { label: 'Später', f: t => !isDone(t) && t.dueDate > weekEnd && t.dueDate > tomorrow },
       { label: 'Ohne Datum', f: t => !isDone(t) && !t.dueDate },
       { label: 'Erledigt', f: isDone },
     ];
+  } else if (by === 'priority') {
+    groups = Shared.PRIORITIES.map(x => ({ label: x.label, f: t => t.priority === x.key }))
+      .concat([{ label: 'Keine Priorität', f: t => !t.priority }]);
+  } else if (by === 'project') {
+    groups = S.projects.map(x => ({ label: x.name, f: t => t.projectId === x.id })).concat([{ label: 'Ohne Projekt', f: t => !t.projectId || !project(t.projectId) }]);
   } else {
     groups = Shared.STATUSES.map(s => ({ label: s.label, glyph: s.key, f: t => t.status === s.key }));
   }

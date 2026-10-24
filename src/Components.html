@@ -76,7 +76,8 @@ function openMenu(anchor, items, opts) {
     $('.pop-list', pop).innerHTML = list.map((it, i) => it.label
       ? '<div class="pop-label">' + esc(it.label) + '</div>'
       : '<button class="pop-item' + (i === hover ? ' hover' : '') + '" data-i="' + i + '">' + it.html +
-        (selected.indexOf(it.value) >= 0 ? '<span class="tick">' + icon('check', 'sm') + '</span>' : '') + '</button>').join('') ||
+        (selected.indexOf(it.value) >= 0 ? '<span class="tick">' + icon('check', 'sm') + '</span>' : '') +
+        (it.deletable && opts.onDelete ? '<span class="pop-del" data-del="' + i + '" title="Löschen">' + icon('trash', 'sm') + '</span>' : '') + '</button>').join('') ||
       '<div class="faint" style="padding:8px">Keine Treffer</div>';
   };
   const pick = (pop, it) => {
@@ -104,6 +105,14 @@ function openMenu(anchor, items, opts) {
     pop => {
       draw(pop);
       pop.addEventListener('click', e => {
+        const del = e.target.closest('[data-del]');
+        if (del) {
+          const it = visible()[Number(del.dataset.del)];
+          items.splice(items.indexOf(it), 1);
+          opts.onDelete(it.value);
+          draw(pop);
+          return;
+        }
         const b = e.target.closest('.pop-item');
         if (b) pick(pop, visible()[Number(b.dataset.i)]);
       });

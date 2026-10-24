@@ -122,6 +122,8 @@ const EN = {
   'Ganzes Land (nur landesweite Feiertage)': 'Whole country (national holidays only)', 'Kärnten': 'Carinthia',
   'Niederösterreich': 'Lower Austria', 'Oberösterreich': 'Upper Austria', 'Steiermark': 'Styria', 'Tirol': 'Tyrol', 'Wien': 'Vienna',
   'Nordirland': 'Northern Ireland', 'Schottland': 'Scotland', 'Tasmanien': 'Tasmania', 'Genf': 'Geneva', 'Tessin': 'Ticino',
+  'Alle offenen': 'All open', 'Anstehend': 'Upcoming', 'Projekt suchen…': 'Search project…', 'Name oder E-Mail suchen…': 'Search name or e-mail…',
+  'Rückgängig': 'Undo', 'Person hinzufügen': 'Add person',
   'Design: wie System': 'Theme: system', 'Design: Hell': 'Theme: light', 'Design: Dunkel': 'Theme: dark',
 
   // countries and German states
@@ -157,7 +159,8 @@ const PATTERNS = [
   [/^(.+) · (\d+) Tage? weg$/, (m, x, n) => x + ' · ' + n + (n === '1' ? ' day' : ' days') + ' away'],
   [/^(.+) \(([A-Z]{2})\)$/, (m, x, cc) => trText(x) + ' (' + cc + ')'],
   [/^([\d,.]+) von ([\d,.]+) h$/, '$1 of $2 h'], [/^(\d+) % von (.+) geplant$/, '$1 % of $2 planned'],
-  [/^Alle \((\d+)\)$/, 'All ($1)'], [/^(\d+) heute fällig$/, '$1 due today'],
+  [/^Alle \((\d+)\)$/, 'All ($1)'], [/^Gruppe: (.+)$/, (m, x) => 'Group: ' + trText(x)],
+  [/^Ansicht „(.+)“ gelöscht$/, 'View “$1” deleted'], [/^(\d+) heute fällig$/, '$1 due today'],
   [/^in (.+) abwesend$/, 'away in $1'], [/^(\d+) bis (\d+) von (\d+) Aufgaben$/, '$1–$2 of $3 tasks'],
   [/^(\d+) offene Aufgabe\(n\) ohne Fälligkeitsdatum sind hier nicht zu sehen\.$/, '$1 open task(s) without a due date are not shown here.'],
   [/^(.*)(\d) Uhr$/, '$1$2:00'],

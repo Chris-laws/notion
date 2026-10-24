@@ -276,6 +276,25 @@ svg.i.lg { width: 18px; height: 18px; }
 .db-search.open, .db-search:focus { width: 180px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 14px; }
 .fchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.fchip .avatar { width: 18px; height: 18px; font-size: 9px; margin-left: -4px; }
+.fchip.add { padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); color: var(--text-2); }
+.filter-chips { margin-top: 10px; }
+/* smart quick tabs on "Meine Aufgaben" */
+.qtabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 12px; }
+.qtabs button { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.qtabs button:hover { background: var(--bg-hover); color: var(--text); }
+.qtabs button.on { background: var(--accent); color: #fff; }
+.qtabs .n { font-size: 11.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--bg-hover); color: var(--text-2); }
+.qtabs button.on .n { background: rgba(255, 255, 255, .22); color: #fff; }
+.qtabs button.warn:not(.on) .n { background: var(--danger-soft); color: var(--danger); }
+/* "+" next to the assignees of a task row */
+.add-p { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: var(--text-3); border: 1px dashed var(--border-strong); opacity: 0; transition: opacity .12s; flex: none; }
+.lrow:hover .add-p, tr:hover .add-p, .add-p:focus-visible { opacity: 1; }
+.add-p:hover { color: var(--accent); border-color: var(--accent); }
+.pop-item .pop-del { margin-left: 6px; color: var(--text-3); display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; }
+.pop-item .pop-del:hover { color: var(--danger); background: var(--danger-soft); }
+.pop-item .tick + .pop-del { margin-left: 4px; }
+.pop-item:not(:has(.tick)) .pop-del { margin-left: auto; }
 
 /* ---------- board ---------- */
 .board { display: flex; gap: 14px; align-items: stretch; overflow-x: auto; padding-bottom: 16px; min-height: 420px; }
