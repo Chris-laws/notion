@@ -286,7 +286,53 @@ function SharedFactory() {
     return out;
   }
 
+  /**
+   * One filter for every task list: tabs, status filter, "Erledigte", grouping and counts.
+   * f: { search, people, prio, projects, statuses, showDone, quick }
+   * c: { me, today, quickTabs (bool), includeSub (bool), allDone (bool: board shows done column) }
+   * An explicit status filter wins over hiding done tasks; a quick tab only narrows by date.
+   */
+  const QUICK_TABS = ['open', 'today', 'upcoming', 'overdue', 'nodate', 'done'];
+  function quickDate_(key, t, today) {
+    if (key === 'today') return !!((t.dueDate && t.dueDate <= today) || t.planDate === today);
+    if (key === 'upcoming') return !!(t.dueDate && t.dueDate > today && t.dueDate <= addDays(today, 7));
+    if (key === 'overdue') return !!(t.dueDate && t.dueDate < today);
+    if (key === 'nodate') return !t.dueDate;
+    return true;
+  }
+  function taskQuery(tasks, f, c) {
+    f = f || {}; c = c || {};
+    const arr = x => x || [];
+    const q = String(f.search || '').trim().toLowerCase();
+    const statuses = arr(f.statuses);
+    const base = (tasks || []).filter(t => {
+      if (!c.includeSub && t.parentId) return false;
+      if (q && (t.title + ' ' + arr(t.tags).join(' ')).toLowerCase().indexOf(q) < 0) return false;
+      const who = arr(t.assignees);
+      if (arr(f.people).length && !f.people.some(e => (e === '__none' ? !who.length : who.indexOf(e === '__me' ? c.me : e) >= 0))) return false;
+      if (arr(f.prio).length && f.prio.indexOf(t.priority) < 0) return false;
+      if (arr(f.projects).length && f.projects.indexOf(t.projectId || '') < 0) return false;
+      if (statuses.length && statuses.indexOf(t.status) < 0) return false;
+      return true;
+    });
+    const wantsDone = statuses.indexOf('done') >= 0;
+    const doneRule = key => {
+      const r = key ? (key === 'done' ? 'done' : 'open') : (f.showDone || c.allDone ? 'any' : 'open');
+      return r === 'open' && wantsDone ? 'any' : r;
+    };
+    const pass = key => {
+      const r = doneRule(key);
+      return t => (r === 'any' || (r === 'done') === (t.status === 'done')) && quickDate_(key, t, c.today);
+    };
+    const quick = c.quickTabs ? (QUICK_TABS.indexOf(f.quick) >= 0 ? f.quick : 'open') : '';
+    const list = base.filter(pass(quick));
+    const counts = {};
+    if (c.quickTabs) QUICK_TABS.forEach(k => { counts[k] = base.filter(pass(k)).length; });
+    return { list, counts, quick, hidesDone: doneRule(quick) === 'open' };
+  }
+
   return {
+    QUICK_TABS, taskQuery,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,
     endOfMonth, nextOccurrence, parse, norm,

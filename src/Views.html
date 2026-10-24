@@ -65,29 +65,18 @@ function prefs() {
   return p;
 }
 /** "Meine Aufgaben" quick tabs (smart lists). */
-const QUICK = [
-  ['open', 'Alle offenen', t => !isDone(t)],
-  ['today', 'Heute', t => !isDone(t) && ((t.dueDate && t.dueDate <= TODAY()) || t.planDate === TODAY())],
-  ['upcoming', 'Anstehend', t => !isDone(t) && t.dueDate > TODAY() && t.dueDate <= Shared.addDays(TODAY(), 7)],
-  ['overdue', 'Überfällig', t => !isDone(t) && t.dueDate && t.dueDate < TODAY()],
-  ['nodate', 'Ohne Datum', t => !isDone(t) && !t.dueDate],
-  ['done', 'Erledigt', t => isDone(t)],
-];
+const QUICK = [['open', 'Alle offenen'], ['today', 'Heute'], ['upcoming', 'Anstehend'], ['overdue', 'Überfällig'], ['nodate', 'Ohne Datum'], ['done', 'Erledigt']];
 const LIST_GROUPS = [['due', 'Fälligkeit'], ['status', 'Status'], ['priority', 'Priorität'], ['project', 'Projekt']];
 function setPrefs(patch) {
   Object.assign(prefs(), patch);
   store.set('db', S.db);
   render();
 }
-function applyFilters(list, p) {
-  const q = (p.search || '').trim().toLowerCase();
-  return list.filter(t => {
-    if (q && (t.title + ' ' + t.tags.join(' ')).toLowerCase().indexOf(q) < 0) return false;
-    if (p.people.length && !p.people.some(e => (e === '__none' ? !t.assignees.length : t.assignees.indexOf(e === '__me' ? S.me.email : e) >= 0))) return false;
-    if (p.prio.length && p.prio.indexOf(t.priority) < 0) return false;
-    if (p.projects.length && p.projects.indexOf(t.projectId || '') < 0) return false;
-    if (p.statuses.length && p.statuses.indexOf(t.status) < 0) return false;
-    return true;
+/** Every list, count and tab goes through Shared.taskQuery, so they always agree. */
+function queryTasks(tasks, p, opts) {
+  const mine = S.route.view === 'home';
+  return Shared.taskQuery(tasks, mine ? Object.assign({}, p, { people: [] }) : p, {
+    me: S.me.email, today: TODAY(), quickTabs: mine, includeSub: mine || !!(opts && opts.includeSub), allDone: p.layout === 'board',
   });
 }
 function bySort(a, b) { return (a.sort || 0) - (b.sort || 0) || (a.createdAt < b.createdAt ? -1 : 1); }
@@ -98,9 +87,7 @@ function database(tasks, opts) {
   opts = opts || {};
   // "Meine Aufgaben" are mine anyway: no person filter there, smart quick tabs instead
   const mine = S.route.view === 'home';
-  const pre = applyFilters(tasks, p);
-  const quick = mine ? (QUICK.find(q => q[0] === p.quick) || QUICK[0]) : null;
-  const filtered = quick ? pre.filter(quick[2]) : pre;
+  const res = queryTasks(tasks, p, opts);
   const sortable = p.layout === 'table' || p.layout === 'gantt';
   const cnt = n => (n ? '<span class="tn">' + n + '</span>' : '');
   const views = savedViews();
@@ -111,8 +98,8 @@ function database(tasks, opts) {
       '<div class="dbh-r">' + sw + '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>'
     : '';
   const quickTabs = mine ? '<div class="qtabs">' + QUICK.map(q => {
-    const n = pre.filter(q[2]).length;
-    return '<button class="' + (quick[0] === q[0] ? 'on' : '') + (q[0] === 'overdue' && n ? ' warn' : '') + '" data-action="db-quick" data-k="' + q[0] + '">' + q[1] + '<span class="n">' + n + '</span></button>';
+    const n = res.counts[q[0]];
+    return '<button class="' + (res.quick === q[0] ? 'on' : '') + (q[0] === 'overdue' && n ? ' warn' : '') + '" data-action="db-quick" data-k="' + q[0] + '">' + q[1] + '<span class="n">' + n + '</span></button>';
   }).join('') + '</div>' : '';
   const listGroup = LIST_GROUPS.find(g => g[0] === p.listGroup) || LIST_GROUPS[0];
   const tools = quickTabs + '<div class="dbh-tools">' +
@@ -123,7 +110,7 @@ function database(tasks, opts) {
     (sortable ? '<button class="tbtn" data-action="db-sort">' + icon('sort', 'sm') + 'Sortierung' + cnt(1) + '</button>' : '') +
     (p.layout === 'board' ? '<button class="tbtn" data-action="db-group">' + icon('layers', 'sm') + 'Gruppe: ' + esc(GROUPS.find(g => g.key === p.groupBy).label) + '</button>' : '') +
     (p.layout === 'list' ? '<button class="tbtn" data-action="db-lgroup">' + icon('layers', 'sm') + 'Gruppe: ' + esc(listGroup[1]) + '</button>' : '') +
-    (p.layout !== 'board' && !mine ? '<button class="tbtn' + (p.showDone ? ' on' : '') + '" data-action="db-done">' + icon('checksq', 'sm') + 'Erledigte</button>' : '') +
+    (p.layout !== 'board' && !mine ? '<button class="tbtn' + (res.hidesDone ? '' : ' on') + '" data-action="db-done"' + (p.statuses.indexOf('done') >= 0 ? ' title="Der Status-Filter „Erledigt“ zeigt erledigte Aufgaben immer an"' : '') + '>' + icon('checksq', 'sm') + 'Erledigte</button>' : '') +
     '<input class="db-search' + (p.search ? ' open' : '') + '" placeholder="Suchen…" value="' + esc(p.search) + '" data-on-input="db-search">' +
     '<button class="icon-btn" data-action="db-search-open" title="Suchen">' + icon('search') + '</button>' +
     '<span class="grow"></span>' + (opts.title ? '' : sw) +
@@ -142,13 +129,12 @@ function database(tasks, opts) {
   const chipsHtml = chips.length ? '<div class="filter-chips">' + chips.join('') + '</div>' : '';
 
   let body;
-  const visibleDone = p.showDone || mine ? filtered : filtered.filter(t => !isDone(t));
-  const top = l => l.filter(t => !t.parentId || opts.includeSub);
-  if (p.layout === 'board') body = boardHtml(top(filtered), p, opts);
-  else if (p.layout === 'table') body = tableHtml(top(visibleDone), p, opts);
-  else if (p.layout === 'calendar') body = taskCalendarHtml(visibleDone, opts);
-  else if (p.layout === 'gantt') body = ganttHtml(top(visibleDone), p, opts);
-  else body = listHtml(visibleDone, opts);
+  const list = res.list;
+  if (p.layout === 'board') body = boardHtml(list, p, opts);
+  else if (p.layout === 'table') body = tableHtml(list, p, opts);
+  else if (p.layout === 'calendar') body = taskCalendarHtml(list, opts);
+  else if (p.layout === 'gantt') body = ganttHtml(list, p, opts);
+  else body = listHtml(list, opts);
   return '<div class="card-w dbh' + (opts.title ? ' titled' : '') + '">' + titleRow + tools + '</div>' +
     '<div class="fit-body db-body" data-keep-scroll="db">' + chipsHtml + body + '</div>';
 }

@@ -40,6 +40,40 @@ test('date helpers', () => {
   assert.strictEqual(S.nextOccurrence('2026-10-23', 'weekdays'), '2026-10-26');
 });
 
+test('task filter: status filter, done toggle, tabs and counts agree', () => {
+  const day = '2026-10-23';
+  const mk = (id, status, due, extra) => Object.assign({ id, title: id, status, dueDate: due || '', tags: [], assignees: [ME], priority: '' }, extra || {});
+  const tasks = [
+    mk('a', 'todo', '2026-10-20'), mk('b', 'done', '2026-10-21'), mk('c', 'doing', ''),
+    mk('d', 'done', ''), mk('e', 'todo', '2026-10-25'), mk('s', 'done', '', { parentId: 'a' }),
+  ];
+  const q = (f, c) => S.taskQuery(tasks, f, Object.assign({ me: ME, today: day }, c));
+  const ids = r => r.list.map(t => t.id).join('');
+  // project page: done hidden by default, status filter "done" wins over hiding
+  assert.strictEqual(ids(q({ showDone: false })), 'ace');
+  assert.strictEqual(ids(q({ showDone: false, statuses: ['done'] })), 'bd');
+  assert.strictEqual(ids(q({ showDone: true, statuses: ['done'] })), 'bd');
+  assert.strictEqual(ids(q({ showDone: true })), 'abcde');
+  assert.strictEqual(q({ statuses: ['done'] }).hidesDone, false);
+  // board always shows its done column
+  assert.strictEqual(ids(q({ showDone: false }, { allDone: true })), 'abcde');
+  // my tasks: tabs and counts are the same predicate; subtasks count there
+  const home = f => q(f, { quickTabs: true, includeSub: true });
+  const r = home({ quick: 'open' });
+  assert.strictEqual(ids(r), 'ace');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(r.counts)), { open: 3, today: 1, upcoming: 1, overdue: 1, nodate: 1, done: 3 });
+  S.QUICK_TABS.forEach(k => assert.strictEqual(home({ quick: k }).list.length, r.counts[k], k));
+  assert.strictEqual(ids(home({ quick: 'done' })), 'bds');
+  // status "done" on the "open" tab shows done tasks too, and the counts follow
+  const rs = home({ quick: 'open', statuses: ['done'] });
+  assert.strictEqual(ids(rs), 'bds');
+  assert.strictEqual(rs.counts.open, 3);
+  assert.strictEqual(ids(home({ quick: 'done', statuses: ['todo'] })), '');
+  // other filters
+  assert.strictEqual(ids(q({ showDone: true, people: ['__none'] })), '');
+  assert.strictEqual(ids(q({ showDone: true, search: 'E' })), 'e');
+});
+
 test('quick-add parser', () => {
   const pctx = {
     today: '2026-10-23', me: ME,
