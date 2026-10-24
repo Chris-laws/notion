@@ -1024,7 +1024,7 @@ function dashPage() {
     '<div class="stiles">' + stile('', 'checksq', newWeek ? newWeek + ' neu diese Woche' : 'Keine neuen diese Woche', 'Aufgaben gesamt', my.length, 'home') +
     stile('green', 'check', doneWeek ? doneWeek + ' diese Woche' : 'Noch keine diese Woche', 'Erledigt', my.filter(isDone).length, 'home') +
     stile('yellow', 'clock', dueSoon ? dueSoon + ' bald fällig' : 'Nichts bald fällig', 'Aktiv', open.length, 'home') +
-    stile('red', 'alert', overdueN ? 'Jetzt handeln' : 'Alles im Plan', 'Überfällig', overdueN, 'home') + '</div>' +
+    stile(overdueN ? 'red hot' : 'red', 'alert', overdueN ? 'Jetzt handeln' : 'Alles im Plan', 'Überfällig', overdueN, 'home') + '</div>' +
     '<div class="dash-grid"><div class="w-8">' + projCard + '</div><div class="w-4">' + focusCard + '</div>' +
     teamCard +
     '<div class="card-w w-7"><h3>' + icon('calendar', 'sm') + 'Agenda, nächste 14 Tage<a class="more" data-action="cal-agenda">Alles ansehen</a></h3>' +
@@ -1055,24 +1055,25 @@ function reportCard() {
   const r = S.report.range;
   const seg = '<div class="seg sm">' + [['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat']].map(x =>
     '<button class="' + (r === x[0] ? 'on' : '') + '" data-action="report-range" data-v="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
-  const kpi = (v, l, cls) => '<div class="rk' + (cls ? ' ' + cls : '') + '"><b>' + v + '</b><span>' + l + '</span></div>';
-  const warns = d ? d.warnings || [] : [];
-  const head = '<div class="rep-head"><h3>' + icon('sparkle', 'sm') + 'Schnellreport</h3>' + seg +
-    (warns.length ? '<button class="chip danger" data-action="nav" data-view="capacity" title="Team-Warnungen">' + icon('alert', 'sm') + warns.length + ' Team-Warnung' + (warns.length > 1 ? 'en' : '') + '</button>' : '') +
-    '<span class="grow"></span>' + (d && !d.failed ? '<span class="rep-src">' + (d.source === 'ai' ? 'Gemini' : 'Automatisch') + ' · ' + esc(timeAgo(d.at)) + '</span>' : '') +
+  // calm by design: a short summary, what is new since the last visit, at most one quiet link
+  const head = '<div class="rep-head"><h3>' + icon('sparkle', 'sm') + 'Schnellreport</h3>' + seg + '<span class="grow"></span>' +
+    (d && !d.failed ? '<span class="rep-src">' + (d.source === 'ai' ? 'Gemini' : 'Automatisch') + ' · ' + esc(timeAgo(d.at)) + '</span>' : '') +
     '<button class="icon-btn" data-action="report-reload" title="Aktualisieren" aria-label="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>';
   if (!d) {
-    return '<div class="card-w rep">' + head + '<div class="rep-body"><div class="rep-kpis">' + '<div class="skeleton" style="height:44px"></div>'.repeat(5) + '</div>' +
-      '<div class="skeleton" style="width:70%;margin-top:10px"></div></div></div>';
+    return '<div class="card-w rep">' + head + '<div class="skeleton" style="width:80%;margin-top:12px"></div><div class="skeleton" style="width:55%;margin-top:8px"></div></div>';
   }
-  const k = d.kpis || {};
-  return '<div class="card-w rep">' + head + '<div class="rep-body">' +
-    (d.failed ? '' : '<div class="rep-kpis">' + kpi(k.done, 'erledigt', 'ok') + kpi(k.due, 'noch fällig') + kpi(k.overdue, 'überfällig', k.overdue ? 'bad' : '') +
-      kpi(k.created, 'neu') + kpi(k.utilization + ' %', 'Auslastung', k.utilization > 100 ? 'bad' : k.utilization >= 80 ? 'warn' : '') + '</div>') +
-    '<div class="rep-main"><p class="rep-text">' + esc(d.text) + '</p>' +
-    (d.bullets && d.bullets.length ? '<ul class="rep-bul">' + d.bullets.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>' +
-    (d.actions && d.actions.length ? '<div class="rep-acts">' + d.actions.map(a => '<button class="btn sm outline" data-action="report-go" data-view="' + esc(a.view) + '" data-quick="' + esc(a.quick || '') + '">' + esc(a.label) + icon('right', 'sm') + '</button>').join('') + '</div>' : '') +
-    '</div></div>';
+  const warns = d.warnings || [];
+  const news = d.news || [];
+  const act = (d.actions || [])[0];
+  const NI = { task: 'checksq', comment: 'msg', absence: 'plane', project: 'folder', holiday: 'globe' };
+  return '<div class="card-w rep">' + head +
+    '<p class="rep-text">' + esc(d.text) + '</p>' +
+    (news.length ? '<div class="rep-news"><div class="rep-sub">Neu seit deinem letzten Besuch</div><ul>' + news.map(n =>
+      '<li' + (n.taskId ? ' data-action="open-task" data-id="' + esc(n.taskId) + '" class="link"' : '') + '>' + icon(NI[n.kind] || 'sparkle', 'sm') + '<span>' + esc(n.text) + '</span></li>').join('') + '</ul></div>' : '') +
+    (warns.length || act ? '<div class="rep-foot">' +
+      (warns.length ? '<button class="linkbtn warn" data-action="nav" data-view="capacity">' + icon('alert', 'sm') + warns.length + ' Team-Warnung' + (warns.length > 1 ? 'en' : '') + '</button>' : '') +
+      (act ? '<button class="linkbtn" data-action="report-go" data-view="' + esc(act.view) + '" data-quick="' + esc(act.quick || '') + '">' + esc(act.label) + ' →</button>' : '') + '</div>' : '') +
+    '</div>';
 }
 A['report-range'] = el => { S.report.range = el.dataset.v; store.set('reportRange', el.dataset.v); render({ peek: false }); };
 A['report-reload'] = () => { S.reportDirty = true; render({ peek: false }); };

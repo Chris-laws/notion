@@ -352,25 +352,23 @@ input.ai-title { height: 32px; }
 #perf th, #perf td { padding: 2px 6px; text-align: right; border-bottom: 1px solid var(--border); }
 #perf th:first-child, #perf td:first-child { text-align: left; }
 #perf tr.err td { color: var(--danger); }
-/* quick report on the dashboard */
-.rep { margin-bottom: 10px; padding: 12px 16px; }
+/* quick report on the dashboard: quiet card, short text, news list */
+.rep { margin-bottom: 12px; padding: 14px 18px; }
 .rep-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .rep-head h3 { margin: 0; }
 .rep-head .grow { flex: 1; }
 .rep-src { font-size: 11.5px; color: var(--text-3); }
-.seg.sm button { height: 28px; padding: 0 10px; font-size: 12.5px; }
-.rep-body { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; align-items: start; margin-top: 10px; }
-.rep-kpis { display: grid; grid-template-columns: repeat(5, minmax(64px, auto)); gap: 6px; }
-.rk { background: var(--bg-subtle); border-radius: var(--r-sm); padding: 6px 10px; display: grid; line-height: 1.2; }
-.rk b { font-size: 20px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-.rk span { font-size: 11.5px; color: var(--text-2); }
-.rk.ok b { color: var(--success); } .rk.bad b { color: var(--danger); } .rk.warn b { color: var(--warning); }
-.rep-text { margin: 0 0 4px; font-weight: 600; font-size: 13.5px; line-height: 1.45; }
-.rep-bul { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--text-2); line-height: 1.5; columns: 2; column-gap: 24px; }
-.rep-acts { display: grid; gap: 6px; }
-.rep-acts .btn { justify-content: space-between; gap: 8px; }
-@media (max-width: 1180px) { .rep-body { grid-template-columns: 1fr; } .rep-bul { columns: 1; } .rep-acts { display: flex; flex-wrap: wrap; } }
-@media (max-width: 600px) { .rep-kpis { grid-template-columns: repeat(3, 1fr); } }
+.seg.sm button { height: 26px; padding: 0 10px; font-size: 12px; }
+.rep-text { margin: 10px 0 0; font-size: 14px; line-height: 1.55; color: var(--text); max-width: 90ch; }
+.rep-news { margin-top: 10px; }
+.rep-sub { font-size: 11.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.rep-news ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.rep-news li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); padding: 4px 6px; border-radius: 8px; }
+.rep-news li svg { color: var(--text-3); flex: none; }
+.rep-news li.link { cursor: pointer; }
+.rep-news li.link:hover { background: var(--bg-hover); color: var(--text); }
+.rep-foot { display: flex; gap: 16px; margin-top: 8px; font-size: 12.5px; }
+.linkbtn.warn { color: var(--danger); display: inline-flex; align-items: center; gap: 5px; }
 /* 404 and start errors */
 .nf { max-width: 520px; margin: 10vh auto 0; text-align: center; display: grid; justify-items: center; gap: 10px; }
 .nf .logo { width: 64px; height: 64px; filter: drop-shadow(0 8px 18px rgba(11, 91, 211, .35)); }
@@ -1371,4 +1369,25 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
   .lrow .side { flex: 1 1 100%; flex-wrap: wrap; gap: 8px 12px; padding-left: 30px; }
   .ag-day { grid-template-columns: 48px minmax(0, 1fr); gap: 10px; }
 }
-</style>
+/* ---------- calm dashboard: neutral cards, colour only as a small signal ---------- */
+.stile { box-shadow: none; border: 1px solid var(--border); padding: 14px 16px 12px; gap: 4px; }
+.stile:hover { transform: none; border-color: var(--border-strong); }
+.stile .sr { margin-bottom: 4px; }
+.stile .sic, .stile.green .sic, .stile.yellow .sic, .stile.red .sic { width: 30px; height: 30px; border-radius: 9px; background: var(--bg-subtle); color: var(--text-3); }
+.sbadge, .stile.red .sbadge { background: none; padding: 0; font-weight: 500; color: var(--text-3); }
+.stile .sv { font-size: 26px; font-weight: 650; }
+.stile.red .sv { color: var(--text); }
+.stile.red.hot .sv, .stile.red.hot .sbadge { color: var(--danger); }
+.dash-grid .card-w, .rep, .dash-top { box-shadow: none; border: 1px solid var(--border); }
+.dash-top { background: var(--bg); }
+.du .avatar.xl { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--border-strong); }
+/* project banners: a quiet card with a thin colour line instead of stripes and a big yellow disc */
+.pbanner, .pj-banner { background: var(--bg-subtle) !important; color: var(--text) !important; border: 1px solid var(--border); border-left: 4px solid var(--pc, var(--accent)); min-height: 0; padding: 14px 18px; }
+.pbanner::before, .pbanner::after, .pj-banner::before, .pj-banner::after { display: none !important; }
+.pbanner p, .pj-l p { opacity: 1; color: var(--text-2); }
+.pb-chip { background: var(--bg); color: var(--text-2); box-shadow: inset 0 0 0 1px var(--border-strong); font-weight: 600; }
+.pj-m > button, .pj-m > span { color: var(--text-2); }
+.pj-l .mark.lg { background: color-mix(in srgb, var(--pc, var(--accent)) 16%, var(--bg)) !important; color: var(--text); }
+.pj-t h1 { font-size: 24px; }
+.pj-acts .icon-btn.sq { background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }
+.pbanner .mstack > .mark:first-child { box-shadow: 0 0 0 2px var(--bg-subtle); }</style>

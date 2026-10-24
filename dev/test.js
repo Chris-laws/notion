@@ -371,6 +371,16 @@ test('quick report: day/week/month numbers, actions and cache', () => {
   assert.ok(m.to.slice(0, 7) === m.from.slice(0, 7) && m.from.slice(8) === '01', 'month runs from the 1st to the last day');
   const again = call('ai.report', { range: 'month' });
   assert.strictEqual(again.at, m.at, 'second call within 5 minutes comes from the cache');
+  // news since the last visit: a task from someone else and their comment show up
+  as('anna.schmidt@firma.de');
+  const gift = call('tasks.save', { title: 'Von Anna für dich', assignees: [ME] })[0];
+  call('comments.add', { taskId: gift.id, body: 'Schau mal' });
+  as(ME);
+  const n = call('ai.report', { range: 'day', fresh: true });
+  assert.ok(n.news.some(x => x.kind === 'task' && x.taskId === gift.id), 'new task from Anna is listed');
+  assert.ok(n.news.some(x => x.kind === 'comment' && x.taskId === gift.id), 'Anna’s comment is listed');
+  assert.ok(n.news.length <= 5 && n.since);
+  call('tasks.remove', { id: gift.id });
   const en = call('ai.report', { range: 'week', lang: 'en', fresh: true });
   assert.ok(/[a-z]/.test(en.text) && !/überfällig|fällig/.test(en.text), 'English text');
 });

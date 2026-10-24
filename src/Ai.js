@@ -261,6 +261,7 @@ const Ai = {
       .filter(h => Object.keys(people).some(e => Holidays.appliesTo(h, people[e])))
       .map(h => ({ date: h.date, name: h.name, country: h.country }));
     const kpis = { done: done.length, created: created.length, overdue: overdue.length, due: due.length, utilization: utilization };
+    const news = Ai.news_(me, ctx, visible, teamIds, en);
     const L = (de, e) => (en ? e : de);
     const bullets = [];
     const actions = [];
@@ -297,24 +298,70 @@ const Ai = {
         const res = Ai.generate_([
           L('Fasse für ' + me.name + ' den Stand für ' + label + ' in 2 Sätzen zusammen (duzen, konkret, keine Aufzählung).',
             'Summarise the state for ' + me.name + ' for ' + label + ' in 2 sentences (informal, concrete, no list).'),
-          'Daten: ' + JSON.stringify({ kpis: kpis, overdue: overdue.slice(0, 5).map(t => t.title), due: due.slice(0, 5).map(t => t.title), warnings: warnings.slice(0, 3), holidays: holidays.slice(0, 3), absences: absences.slice(0, 4) }),
+          'Daten: ' + JSON.stringify({ kpis: kpis, overdue: overdue.slice(0, 5).map(t => t.title), due: due.slice(0, 5).map(t => t.title), news: news.items.map(n => n.text), warnings: warnings.slice(0, 3), holidays: holidays.slice(0, 3), absences: absences.slice(0, 4) }),
           'Antworte als JSON: {"text": string}',
         ].join('\n'), true);
         if (res && res.text) { text = String(res.text).slice(0, 600); source = 'ai'; }
       } catch (e) { /* rules below */ }
     }
     if (!text) {
-      text = overdue.length
+      const newBit = news.items.length ? L(' Seit deinem letzten Besuch gibt es ' + news.items.length + ' Neuerung(en).', ' Since your last visit there are ' + news.items.length + ' update(s).') : '';
+      text = (overdue.length
         ? L('Für ' + label + ': ' + overdue.length + ' überfällig und ' + due.length + ' noch fällig – zuerst das Überfällige klären.',
           'For ' + label + ': ' + overdue.length + ' overdue and ' + due.length + ' still due – sort out the overdue ones first.')
         : due.length
           ? L('Für ' + label + ' stehen ' + due.length + ' Aufgabe(n) an, nichts ist überfällig.', due.length + ' task(s) due ' + label + ', nothing is overdue.')
-          : L('Für ' + label + ' ist nichts fällig – Zeit für Planung oder Tiefenarbeit.', 'Nothing due ' + label + ' – time for planning or deep work.');
+          : L('Für ' + label + ' ist nichts fällig – Zeit für Planung oder Tiefenarbeit.', 'Nothing due ' + label + ' – time for planning or deep work.')) + newBit;
     }
     const out = { range: range, from: from, to: to, kpis: kpis, bullets: bullets.slice(0, 5), actions: actions.slice(0, 3),
-      warnings: warnings.slice(0, 5), text: text, source: source, at: new Date().toISOString() };
+      news: news.items, since: news.since, warnings: warnings.slice(0, 5), text: text, source: source, at: new Date().toISOString() };
     cache.put(cacheKey, JSON.stringify(out), 300);
     return out;
+  },
+
+  /**
+   * What changed since the person's last visit: new tasks for them from others, comments from others
+   * on their tasks, new absences and projects in their teams, holidays in the next 7 days.
+   * "Last visit" is kept per person in the script properties; a visit lasts until 30 minutes of quiet,
+   * so reloading the dashboard keeps showing the same news.
+   */
+  news_(me, ctx, visible, teamIds, en) {
+    const L = (de, e) => (en ? e : de);
+    const props = PropertiesService.getScriptProperties();
+    const keyCur = 'seen_cur_' + me.email, keyPrev = 'seen_prev_' + me.email;
+    const now = new Date().toISOString();
+    let cur = props.getProperty(keyCur), prev = props.getProperty(keyPrev);
+    if (!cur || Date.now() - new Date(cur).getTime() > 30 * 60 * 1000) {
+      prev = cur || new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      props.setProperty(keyPrev, prev);
+      props.setProperty(keyCur, now);
+    } else {
+      props.setProperty(keyCur, now);
+    }
+    const since = prev || new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const users = {};
+    Users.list().forEach(u => { users[u.email] = u; });
+    const name = e => (users[e] ? users[e].name.split(' ')[0] : e);
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = d => (en ? MON[Number(d.slice(5, 7)) - 1] + ' ' + Number(d.slice(8)) : Number(d.slice(8)) + '.' + Number(d.slice(5, 7)) + '.');
+    const items = [];
+    visible.filter(t => (t.assignees || []).indexOf(me.email) >= 0 && t.createdBy !== me.email && String(t.createdAt) > since)
+      .slice(0, 3).forEach(t => items.push({ kind: 'task', taskId: t.id, text: L('Neu für dich von ' + name(t.createdBy) + ': ', 'New for you from ' + name(t.createdBy) + ': ') + t.title }));
+    const mine = {};
+    visible.forEach(t => { if ((t.assignees || []).indexOf(me.email) >= 0 || t.createdBy === me.email) mine[t.id] = t; });
+    Db.all('Comments').filter(c => mine[c.taskId] && c.author !== me.email && String(c.createdAt) > since).slice(-3)
+      .forEach(c => items.push({ kind: 'comment', taskId: c.taskId, text: L(name(c.author) + ' kommentiert „', name(c.author) + ' commented on “') + mine[c.taskId].title + L('“', '”') }));
+    const teamPeople = {};
+    teamIds.forEach(id => Calendar.people_(id).forEach(u => { teamPeople[u.email] = 1; }));
+    Db.all('Absences').filter(a => teamPeople[a.email] && a.email !== me.email && String(a.createdAt) > since).slice(0, 3)
+      .forEach(a => items.push({ kind: 'absence', text: L(name(a.email) + ' ist ', name(a.email) + ' is away ') + day(a.startDate) + (a.endDate !== a.startDate ? '–' + day(a.endDate) : '') + L(' abwesend', '') }));
+    Db.all('Projects').filter(x => ctx.teamIds[x.teamId] && x.createdBy !== me.email && String(x.createdAt) > since).slice(0, 2)
+      .forEach(x => items.push({ kind: 'project', text: L('Neues Projekt: ', 'New project: ') + x.name }));
+    const today = Util.today();
+    const soon = Holidays.inRange(Object.keys(teamPeople).concat([me.email]).map(e => (users[e] || me).country), today, Shared.addDays(today, 7))
+      .filter(h => Holidays.appliesTo(h, me) || Object.keys(teamPeople).some(e => users[e] && Holidays.appliesTo(h, users[e])));
+    if (soon.length) items.push({ kind: 'holiday', text: L('Feiertag bald: ', 'Holiday soon: ') + soon[0].name + ' (' + soon[0].country + ', ' + day(soon[0].date) + ')' });
+    return { since: since, items: items.slice(0, 5) };
   },
 
   briefing(p) {
