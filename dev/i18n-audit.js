@@ -122,6 +122,8 @@ async function main() {
   await run('ai breakdown', "A['ai-breakdown'] && A['ai-breakdown']()", 500);
   await run('empty list', "closePeek(); go('home'); setPrefs({ quick: 'done', search: 'zzzz-nichts' })");
   await run('dashboard again', "setPrefs({ search: '', quick: 'open' }); S.report.data = {}; go('dash')", 700);
+  await run('dashboard (new layout)', "store.set('dashLayout', 'new'); go('home'); go('dash')", 700);
+  await run('dashboard back to classic', "store.set('dashLayout', 'classic'); go('home'); go('dash')", 500);
 
   // messages the server can send back (shown as toasts): each needs an English version
   const src = path.join(__dirname, '..', 'src');

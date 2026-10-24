@@ -848,6 +848,11 @@ function skPage(route) {
   const head = '<div class="sk-head">' + sk('220px', '24px') + sk('320px', '12px') + '</div>';
   const card = inner => '<div class="card-w">' + inner + '</div>';
   const tabs = (n, w) => '<div class="sk-tabs">' + skRep(n, () => sk(w, '26px', 'pill')) + '</div>';
+  if (v === 'dash' && store.get('dashLayout', 'classic') === 'new') {
+    // same shape as the new overview: situation bar, then plan (left) and today (right)
+    return '<div class="page wide sk-page">' + head + card(sk('100%', '10px', 'pill') + '<div class="sk-tabs" style="margin-top:10px">' + skRep(4, () => sk('90px', '12px')) + '</div>') +
+      '<div class="sk-2">' + card(skLines(4)) + card('<div class="sk-line">' + sk('40%', '13px') + '</div>' + skRows(5)) + '</div>' + card(skCalGrid(5, 2)) + '</div>';
+  }
   if (v === 'dash') {
     return '<div class="page wide sk-page">' + head + skTiles(4) + '<div class="sk-2">' + card('<div class="sk-line">' + sk('34%', '13px') + '</div>' + skRows(5)) +
       card('<div class="sk-line">' + sk('40%', '13px') + '</div>' + skLines(4)) + '</div>' + card(skCards(3)) + '</div>';
