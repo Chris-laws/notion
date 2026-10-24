@@ -1,10 +1,15 @@
 /** Tasks, sub-tasks and comments. */
 const Tasks = {
-  list() {
+  /** With p.ver from the last call: { same: true } while nothing changed, so polling stays tiny. */
+  list(p) {
+    const ver = Tasks.version_();
+    if (p && p.ver && p.ver === ver) return { ver: ver, same: true };
     const me = Auth.currentUser();
     const ctx = Access.context(me);
-    return Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx));
+    return { ver: ver, tasks: Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx)) };
   },
+  /** Taken before reading, so a write that lands meanwhile shows up next time. */
+  version_() { return Db.version(['Tasks', 'Teams', 'Projects', 'Users']); },
 
   /**
    * Creates or updates a task. Only the fields present in the payload are

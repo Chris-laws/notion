@@ -12,6 +12,7 @@ const read = f => fs.readFileSync(path.join(SRC, f), 'utf8');
 
 let html = read('Index.html')
   .replace(/<\?!= include\('(\w+)'\) \?>/g, (m, name) => read(name + '.html'))
+  .replace(/<\?!= JSON\.stringify\(String\(userEmail.*?\?>/, () => '(new URLSearchParams(location.search).get("user") || "chris@firma.de")')
   .replace('<?!= clientLib() ?>', () => 'var Shared = (' + ctx.SharedFactory.toString() + ')();');
 
 const server = serverFiles().map(f => '// ---- ' + f + '\n' + read(f)).join('\n');

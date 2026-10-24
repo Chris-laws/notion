@@ -163,11 +163,11 @@ test('visibility: outsiders only see their own tasks', () => {
   assert.strictEqual(b.me.admin, false);
   assert.strictEqual(b.tasks.length, 0);
   const created = call('tasks.save', { title: 'Privat', assignees: ['extern@firma.de'] });
-  assert.strictEqual(call('tasks.list').length, 1);
+  assert.strictEqual(call('tasks.list').tasks.length, 1);
   as('lea.huber@firma.de');
-  assert.ok(!call('tasks.list').some(t => t.id === created[0].id));
+  assert.ok(!call('tasks.list').tasks.some(t => t.id === created[0].id));
   const product = b.teams.find(t => t.name === 'Produkt');
-  const productTasks = call('tasks.list').filter(t => t.teams.indexOf(product.id) >= 0);
+  const productTasks = call('tasks.list').tasks.filter(t => t.teams.indexOf(product.id) >= 0);
   assert.strictEqual(productTasks.length, 0, 'Lea is not in team Produkt');
   assert.ok(fails('tasks.save', { id: created[0].id, title: 'Hack' }));
 });
@@ -184,7 +184,7 @@ test('assign to several people and teams, edit, delete with subtasks', () => {
   assert.deepStrictEqual(t.assignees, ['anna.schmidt@firma.de', 'neu.person@firma.de']);
   assert.ok(call('bootstrap').users.some(u => u.email === 'neu.person@firma.de'), 'invited user is created');
   as('lea.huber@firma.de'); // Marketing lead
-  assert.ok(call('tasks.list').some(x => x.id === t.id), 'team assignment makes it visible');
+  assert.ok(call('tasks.list').tasks.some(x => x.id === t.id), 'team assignment makes it visible');
   as(ME);
   const [sub] = call('tasks.save', { title: 'Teil', parentId: t.id });
   const [upd] = call('tasks.save', { id: t.id, status: 'done' });
@@ -213,7 +213,7 @@ test('day planner: time block is stored in 5-minute steps and cleared with the d
   assert.strictEqual(p.planStart, 9 * 60 + 10);
   const [c] = call('tasks.save', { id: t.id, planDate: '' });
   assert.strictEqual(c.planStart, 0);
-  assert.strictEqual(call('tasks.list').find(x => x.id === t.id).planDate, '');
+  assert.strictEqual(call('tasks.list').tasks.find(x => x.id === t.id).planDate, '');
 });
 
 test('progress is clamped, time tracking stores minutes and a running timer', () => {
@@ -232,7 +232,7 @@ test('progress is clamped, time tracking stores minutes and a running timer', ()
 
 test('board move updates several tasks', () => {
   as(ME);
-  const tasks = call('tasks.list').slice(0, 2);
+  const tasks = call('tasks.list').tasks.slice(0, 2);
   const changed = call('tasks.move', { items: tasks.map((t, i) => ({ id: t.id, status: 'review', sort: i })) });
   assert.strictEqual(changed.length, 2);
   assert.ok(changed.every(t => t.status === 'review'));
@@ -240,7 +240,7 @@ test('board move updates several tasks', () => {
 
 test('comments', () => {
   as(ME);
-  const t = call('tasks.list')[0];
+  const t = call('tasks.list').tasks[0];
   call('comments.add', { taskId: t.id, body: 'Sieht gut aus 👍' });
   assert.strictEqual(call('comments.list', { taskId: t.id }).length, 1);
   as('extern@firma.de');
@@ -259,7 +259,7 @@ test('teams & projects permissions', () => {
   as('sofia.rossi@firma.de');
   const [t] = call('tasks.save', { title: 'In Mixed', projectId: p.id });
   as('anna.schmidt@firma.de');
-  assert.ok(call('tasks.list').some(x => x.id === t.id), 'team member sees project task');
+  assert.ok(call('tasks.list').tasks.some(x => x.id === t.id), 'team member sees project task');
   as('extern@firma.de');
   call('teams.remove', { id: own.id });
   assert.ok(!call('bootstrap').projects.some(x => x.id === p.id));
@@ -330,11 +330,11 @@ test('AI placeholder: rules mode works without key', () => {
   const parsed = call('ai.parse', { text: 'Budget prüfen morgen @anna 2h' });
   assert.strictEqual(parsed.source, 'rules');
   assert.strictEqual(parsed.assignees[0], 'anna.schmidt@firma.de');
-  const b = call('ai.breakdown', { id: call('tasks.list')[0].id });
+  const b = call('ai.breakdown', { id: call('tasks.list').tasks[0].id });
   assert.strictEqual(b.configured, false);
   assert.strictEqual(b.dummy, true);
   assert.ok(b.subtasks.length >= 3 && b.subtasks.every(x => x.title && x.estimate > 0), 'dummy split is usable');
-  const sug = call('ai.suggestAssignee', { id: call('tasks.list').find(t => t.projectId).id });
+  const sug = call('ai.suggestAssignee', { id: call('tasks.list').tasks.find(t => t.projectId).id });
   assert.ok(sug.candidates.length > 0);
   const brief = call('ai.briefing');
   assert.ok(brief.text.length > 10);
@@ -431,7 +431,7 @@ test('quick report: day/week/month numbers, actions and cache', () => {
 
 test('quick report with Gemini: strict JSON, links checked, max 4 points', () => {
   as(ME);
-  const anyTask = call('tasks.list')[0];
+  const anyTask = call('tasks.list').tasks[0];
   ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_API_KEY', 'test-key');
   let prompt = '';
   ctx.__GAS_FETCH__ = (url, opts) => {
@@ -500,13 +500,31 @@ test('AI uses Vertex when a key is configured', () => {
       getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"subtasks":[{"title":"Schritt 1","estimate":2}]}' }] } }] }),
     };
   };
-  const res = call('ai.breakdown', { id: call('tasks.list')[0].id });
+  const res = call('ai.breakdown', { id: call('tasks.list').tasks[0].id });
   assert.deepStrictEqual(JSON.parse(JSON.stringify(res.subtasks)), [{ title: 'Schritt 1', estimate: 2 }]);
   assert.ok(seen.url.indexOf('aiplatform.googleapis.com') > 0);
   assert.strictEqual(seen.opts.headers['x-goog-api-key'], 'test-key');
   assert.ok(seen.url.indexOf('test-key') < 0, 'key is not put into the URL');
   ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_API_KEY', 'PLATZHALTER_VERTEX_AI_API_KEY');
   ctx.__GAS_FETCH__ = null;
+});
+
+test('table cache: repeat reads skip the sheet, writes invalidate, polling says "same"', () => {
+  as(ME);
+  const raw = (m, p) => JSON.parse(ctx.api(m, JSON.stringify(p || {})));
+  const first = raw('tasks.list').data;
+  const again = raw('tasks.list');
+  assert.strictEqual(again.reads, 0, 'second read comes from the cache');
+  assert.strictEqual(again.data.tasks.length, first.tasks.length);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(raw('tasks.list', { ver: first.ver }).data)), { ver: first.ver, same: true });
+  const [t] = call('tasks.save', { title: 'Cache-Test', assignees: [ME] });
+  const after = raw('tasks.list', { ver: first.ver }).data;
+  assert.notStrictEqual(after.ver, first.ver, 'a write changes the version');
+  assert.ok(after.tasks.some(x => x.id === t.id), 'the new task is there right away');
+  call('tasks.save', { id: t.id, title: 'Cache-Test 2' });
+  assert.strictEqual(raw('tasks.list').data.tasks.find(x => x.id === t.id).title, 'Cache-Test 2');
+  call('tasks.remove', { id: t.id });
+  assert.ok(!raw('tasks.list').data.tasks.some(x => x.id === t.id));
 });
 
 test('errors are returned, not thrown', () => {

@@ -95,6 +95,9 @@
       get: k => (k in cache ? cache[k] : null),
       put: (k, v) => { cache[k] = v; },
       remove: k => { delete cache[k]; },
+      getAll: ks => { const o = {}; ks.forEach(k => { if (k in cache) o[k] = cache[k]; }); return o; },
+      putAll: o => { Object.keys(o).forEach(k => { cache[k] = o[k]; }); },
+      removeAll: ks => { ks.forEach(k => { delete cache[k]; }); },
     }),
   };
   root.Utilities = {

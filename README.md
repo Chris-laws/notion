@@ -35,6 +35,14 @@ Anmeldung per Google SSO, Daten in einem Google Sheet, Oberfläche im Stil von N
 - Mit Vertex-AI-Schlüssel übernimmt Gemini: verfeinertes Quick-Add, formuliertes Briefing, Zerlegen von Aufgaben in Teilaufgaben mit Aufwandsschätzung
 - Der Schlüssel liegt nur serverseitig in den Skripteigenschaften und erreicht nie den Browser
 
+## Performance
+
+- **Tabellen-Cache:** Jede Tabelle liegt zusätzlich im Script-Cache (große Tabellen in Stücken von 90 KB). Pro Tabelle gibt es ein Versions-Token, das jeder Schreibzugriff nach dem `flush` erneuert. Eine Kopie gilt nur, solange ihr Token aktuell ist. Lesen kommt so meist ohne Tabellenzugriff aus, nach dem Schreiben sieht man trotzdem sofort den neuen Stand. Schreiben (`Db.tx`) liest immer direkt aus der Tabelle, damit die Zeilennummern stimmen. Wer Zeilen von Hand in der Tabelle ändert, sieht das nach spätestens 10 Minuten.
+- **Polling:** `tasks.list` bekommt die zuletzt gesehene Version. Solange sich nichts geändert hat, antwortet der Server nur `{ same: true }`.
+- **Start:** Der Bootstrap-Aufruf startet sofort beim Laden der Seite. Der letzte Stand liegt im Browser (`localStorage`, nur für dieselbe Person, höchstens 7 Tage alt, unter 2 MB), daher erscheint die App sofort und wird dann aktualisiert. Bis dahin zeigt sie Skeleton-Platzhalter in der Form der Zielseite.
+- **Seitengröße:** Das Logo ist WebP in doppelter Anzeigegröße (27 KB statt 167 KB). Die Webfont blockiert das erste Bild nicht.
+- `?perf=1` an der App-URL zeigt Dauer und Tabellenzugriffe je Aufruf.
+
 ## Einrichtung
 
 Voraussetzung: Google-Workspace-Konto (die Anmeldung per Google SSO liefert die E-Mail nur für Konten derselben Workspace-Domain, private Gmail-Konten werden nicht erkannt), Node.js.

@@ -6,7 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet">
+    <!-- the font must not hold back the first paint: load it async, system font until then -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet"></noscript>
     <?!= include('Styles') ?>
   </head>
   <body>
@@ -25,6 +27,7 @@
     <div id="modal-root"></div>
     <div id="palette-root"></div>
     <div id="toasts" class="toasts" aria-live="polite"></div>
+    <script>var BOOT_USER = <?!= JSON.stringify(String(userEmail || '')).replace(/</g, '\\u003c') ?>;</script>
     <script><?!= clientLib() ?></script>
     <?!= include('LogoAssets') ?>
     <?!= include('App') ?>

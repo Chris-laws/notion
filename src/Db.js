@@ -51,28 +51,77 @@ const Db = (function () {
   let txDepth = 0;
   let dirty = false;
   let sheetReads = 0; // spreadsheet reads in this request (for the timing log)
-  // Small, rarely changing tables are also kept in the script cache so most
-  // requests skip a spreadsheet round trip. Every write drops the entry.
-  const CACHED = { Users: 1, Teams: 1, Projects: 1, CompanyHolidays: 1 };
-  const CACHE_TTL = 120;
+  // Tables are also kept in the script cache so most reads skip the spreadsheet.
+  // Each table has a version token; every write replaces it, so a cached copy is
+  // only used while its token is still current (no stale reads after a write).
+  // Big tables are split into chunks (the cache takes up to 100 KB per value).
+  const CACHED = { Users: 1, Teams: 1, Projects: 1, CompanyHolidays: 1, Tasks: 1, Events: 1, Absences: 1, Comments: 1 };
+  const CACHE_TTL = 600;
+  const CHUNK = 90000;
+  const MAX_CHUNKS = 30;
+  const newToken = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-  function cacheGet(table) {
-    if (!CACHED[table]) return null;
-    try {
-      const raw = CacheService.getScriptCache().get('tbl_' + table);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+  function scriptCache() {
+    try { return CacheService.getScriptCache(); } catch (e) { return null; }
   }
-  function cachePut(table, entries) {
-    if (!CACHED[table]) return;
+  /** Returns { entries, ver }: entries when the cached copy is current, ver = token seen. */
+  function cacheGet(table) {
+    const c = CACHED[table] && scriptCache();
+    if (!c) return { entries: null, ver: null };
+    try {
+      const k = 'tbl_' + table;
+      const first = c.getAll(['ver_' + table, k + '_h', k + '_0']);
+      const ver = first['ver_' + table] || null;
+      const head = first[k + '_h'] ? JSON.parse(first[k + '_h']) : null;
+      if (!ver || !head || head.ver !== ver) return { entries: null, ver: ver };
+      let raw = first[k + '_0'];
+      if (raw == null) return { entries: null, ver: ver };
+      if (head.n > 1) {
+        const keys = [];
+        for (let i = 1; i < head.n; i++) keys.push(k + '_' + i);
+        const rest = c.getAll(keys);
+        for (let i = 0; i < keys.length; i++) {
+          if (rest[keys[i]] == null) return { entries: null, ver: ver };
+          raw += rest[keys[i]];
+        }
+      }
+      return { entries: JSON.parse(raw), ver: ver };
+    } catch (e) { return { entries: null, ver: null }; }
+  }
+  function cachePut(table, entries, seen) {
+    const c = CACHED[table] && scriptCache();
+    if (!c) return;
     try {
       const raw = JSON.stringify(entries);
-      if (raw.length < 90000) CacheService.getScriptCache().put('tbl_' + table, raw, CACHE_TTL);
+      const n = Math.max(1, Math.ceil(raw.length / CHUNK));
+      if (n > MAX_CHUNKS) return;
+      // someone wrote meanwhile: our copy may be old, leave it out
+      let ver = c.get('ver_' + table);
+      if (ver !== seen) return;
+      if (!ver) { ver = newToken(); c.put('ver_' + table, ver, 21600); }
+      const k = 'tbl_' + table;
+      const out = {};
+      out[k + '_h'] = JSON.stringify({ ver: ver, n: n });
+      for (let i = 0; i < n; i++) out[k + '_' + i] = raw.slice(i * CHUNK, (i + 1) * CHUNK);
+      c.putAll(out, CACHE_TTL);
     } catch (e) { /* cache is optional */ }
   }
-  function cacheDrop(table) {
-    if (!CACHED[table]) return;
-    try { CacheService.getScriptCache().remove('tbl_' + table); } catch (e) { /* optional */ }
+  /**
+   * After a write: a new token makes every cached copy of the table invalid.
+   * Set once the write has landed (end of tx), so nobody caches the old rows under it.
+   */
+  let written = {};
+  function cacheDrop(table) { written[table] = 1; }
+  function bumpVersions() {
+    const c = scriptCache();
+    const tables = Object.keys(written);
+    written = {};
+    if (!c || !tables.length) return;
+    try {
+      const out = {};
+      tables.forEach(t => { if (CACHED[t]) out['ver_' + t] = newToken(); });
+      c.putAll(out, 21600);
+    } catch (e) { /* optional */ }
   }
 
   function open() {
@@ -136,8 +185,9 @@ const Db = (function () {
 
   function load(table) {
     if (memo[table]) return memo[table];
-    const cached = cacheGet(table);
-    if (cached) { memo[table] = cached; return cached; }
+    // writes (inside tx) always work on the sheet itself, so row numbers are exact
+    const hit = txDepth ? { entries: null, ver: null } : cacheGet(table);
+    if (hit.entries) { memo[table] = hit.entries; return hit.entries; }
     const d = def(table);
     const sh = sheet(table);
     sheetReads++;
@@ -149,7 +199,7 @@ const Db = (function () {
       entries.push({ obj: toObj(d, r), row: i + 2 });
     });
     memo[table] = entries;
-    cachePut(table, entries);
+    if (!txDepth) cachePut(table, entries, hit.ver);
     return entries;
   }
 
@@ -170,6 +220,7 @@ const Db = (function () {
       txDepth--;
       if (dirty) SpreadsheetApp.flush();
       dirty = false;
+      bumpVersions();
       lock.releaseLock();
     }
   }
@@ -177,6 +228,20 @@ const Db = (function () {
   return {
     tx: tx,
     reads() { return sheetReads; },
+
+    /** Version token over some tables: changes whenever one of them is written. */
+    version(tables) {
+      const c = scriptCache();
+      if (!c) return newToken();
+      try {
+        const keys = tables.map(t => 'ver_' + t);
+        const got = c.getAll(keys);
+        const missing = {};
+        keys.forEach(k => { if (!got[k]) { got[k] = newToken(); missing[k] = got[k]; } });
+        if (Object.keys(missing).length) c.putAll(missing, 21600);
+        return keys.map(k => got[k]).join('.');
+      } catch (e) { return newToken(); }
+    },
 
     all(table) {
       return load(table).map(e => e.obj);

@@ -781,13 +781,15 @@ function editing() {
 }
 function refresh() {
   if (document.visibilityState !== 'visible' || editing() || S.busy) return;
-  call('tasks.list').then(list => {
-    if (editing() || S.busy) return;
+  call('tasks.list', { ver: S.tasksVer || '' }).then(res => {
+    if (res.same || editing() || S.busy) return;
+    const list = res.tasks;
     const pending = S.tasks.filter(t => PENDING[t.id]);
     if (pending.length) return;
     // Only redraw when someone else actually changed something.
-    if (JSON.stringify(list) === JSON.stringify(S.tasks)) return;
+    if (JSON.stringify(list) === JSON.stringify(S.tasks)) { S.tasksVer = res.ver; return; }
     S.tasks = list;
+    S.tasksVer = res.ver;
     S.reportDirty = true;
     render();
   }).catch(() => { /* next round */ });
@@ -863,38 +865,74 @@ function skSidebar() {
 }
 
 /* ---------------- start ---------------- */
+/*
+ * Start: the bootstrap request leaves right away (not after fonts and images).
+ * The last start data of this user is kept in the browser, so the app shows at
+ * once from that copy and swaps in the fresh data when it arrives.
+ */
+const SNAP_MAX_AGE = 7 * 864e5;
+const BOOT_REQ = call('bootstrap');
+function readSnap() {
+  const snap = store.get('snap', null);
+  return snap && BOOT_USER && snap.user === BOOT_USER && Date.now() - snap.at < SNAP_MAX_AGE && snap.d ? snap.d : null;
+}
+function saveSnap(d) {
+  try {
+    const raw = JSON.stringify({ user: BOOT_USER, at: Date.now(), d: d });
+    // keep well below the ~5 MB browser limit; a too big copy is simply not kept
+    if (raw.length < 2e6) localStorage.setItem('tr:snap', raw); else localStorage.removeItem('tr:snap');
+  } catch (e) { /* storage full or private mode */ }
+}
+function applyBoot(d) {
+  Object.assign(S, d);
+  S.appName = d.appName || S.appName;
+  document.title = S.appName;
+  $('#app').classList.remove('is-loading');
+}
 function boot() {
   S.collapsed = store.get('collapsed', {});
-  call('bootstrap').then(d => {
-    Object.assign(S, d);
-    S.appName = d.appName || S.appName;
-    document.title = S.appName;
-    $('#app').classList.remove('is-loading');
-    const start = params => {
-      if (params.perf === '1') { S.perf = true; perfPanel(); }
-      calPrefetch();
-      const last = store.get('route', null);
-      if (params.view) S.route = { view: params.view, id: params.id || null };
-      else if (last && last.view && (!last.id || team(last.id) || project(last.id))) S.route = last;
-      render({ resetScroll: true });
-      if (params.task && task(params.task)) openPeek(params.task);
-      else if (params.task) toast('Diese Aufgabe gibt es nicht mehr oder du hast keinen Zugriff darauf.', { warn: true });
-    };
-    try {
-      google.script.url.getLocation(loc => start(loc.parameter || {}));
-    } catch (e) { start({}); }
-    if (google.script.history) google.script.history.setChangeHandler(ev => {
-      if (ev.state && ev.state.view) { S.route = ev.state; render({ resetScroll: true }); }
-    });
+  let started = false;
+  const start = params => {
+    started = true;
+    if (params.perf === '1') { S.perf = true; perfPanel(); }
+    calPrefetch();
+    const last = store.get('route', null);
+    if (params.view) S.route = { view: params.view, id: params.id || null };
+    else if (last && last.view && (!last.id || team(last.id) || project(last.id))) S.route = last;
+    render({ resetScroll: true });
+    if (params.task && task(params.task)) openPeek(params.task);
+    else if (params.task && !S.fromSnap) toast('Diese Aufgabe gibt es nicht mehr oder du hast keinen Zugriff darauf.', { warn: true });
+  };
+  const go0 = () => { try { google.script.url.getLocation(loc => start(loc.parameter || {})); } catch (e) { start({}); } };
+  const snap = readSnap();
+  if (snap) { S.fromSnap = true; applyBoot(snap); go0(); }
+  BOOT_REQ.then(d => {
+    saveSnap(d);
+    if (!S.fromSnap) { applyBoot(d); go0(); return; }
+    // fresh data replaces the copy; tasks created in the meantime stay until the next poll
+    const keep = Object.keys(PENDING).length ? S.tasks : null;
+    S.fromSnap = false;
+    applyBoot(d);
+    if (keep) { S.tasks = keep; S.tasksVer = ''; }
+    // the copy may point at a team or calendar scope that is gone meanwhile
+    if (S.cap.teamId && !team(S.cap.teamId)) { S.cap.teamId = null; S.cap.data = null; }
+    if (S.cal.teamId && !team(S.cal.teamId)) S.cal.teamId = '';
+    S.reportDirty = true;
+    if (started) render();
   }).catch(err => {
+    if (S.fromSnap) { toast('Keine Verbindung – du siehst den zuletzt geladenen Stand.', { warn: true }); return; }
     $('#app').classList.remove('is-loading');
     $('#sidebar').innerHTML = '';
     $('#view').innerHTML = '<div class="page"><div class="nf">' + logoMark() + '<h1>App konnte nicht geladen werden</h1>' +
       '<p>' + esc(friendlyError(err.message || String(err))) + '</p>' +
       '<div class="nf-acts"><button class="btn primary" onclick="location.reload()">Erneut versuchen</button></div></div></div>';
   });
+  if (google.script.history) google.script.history.setChangeHandler(ev => {
+    if (ev.state && ev.state.view) { S.route = ev.state; render({ resetScroll: true }); }
+  });
 }
-window.addEventListener('load', boot);
+// all scripts are parsed by then; fonts and images may still load
+document.addEventListener('DOMContentLoaded', boot);
 // placeholders shaped like the page that will open, drawn right away (before fonts and data)
 (function () {
   const saved = store.get('route', null);

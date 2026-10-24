@@ -25,7 +25,7 @@ function clientLib() {
 
 const ROUTES = {
   'bootstrap': () => App.bootstrap(),
-  'tasks.list': () => Tasks.list(),
+  'tasks.list': p => Tasks.list(p),
   'tasks.save': p => Tasks.save(p),
   'tasks.move': p => Tasks.move(p),
   'tasks.remove': p => Tasks.remove(p.id),
@@ -75,7 +75,9 @@ const App = {
     const me = Auth.currentUser();
     Teams.fixColors_();
     const ctx = Access.context(me);
+    const tasksVer = Tasks.version_();
     return {
+      tasksVer: tasksVer,
       appName: Config.get('APP_NAME'),
       today: Util.today(),
       me: Object.assign({}, me, { admin: ctx.admin }),
