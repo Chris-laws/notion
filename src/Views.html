@@ -20,7 +20,7 @@ const Views = {
       default: return dashPage();
     }
   },
-  after() { bindDrag(); bindCalSelect(); bindPlanner(); bindGantt(); },
+  after() { bindDrag(); bindCalSelect(); bindPlanner(); bindGantt(); bindPtabs(); },
 };
 function notFound() {
   return '<div class="page"><div class="empty">' + icon('search') + '<div>Diese Seite gibt es nicht mehr.</div><br>' +
@@ -926,7 +926,7 @@ function dashPage() {
   // grouped by team so "Data › n" and "Forecast › m" stand together
   const teamOrder = id => (team(id) ? team(id).name : '');
   const projects = S.projects.filter(p => p.status !== 'done' && myTeams().some(x => x.id === p.teamId))
-    .sort((a, b) => teamOrder(a.teamId).localeCompare(teamOrder(b.teamId)) || a.name.localeCompare(b.name)).slice(0, 8);
+    .sort((a, b) => teamOrder(a.teamId).localeCompare(teamOrder(b.teamId)) || a.name.localeCompare(b.name));
   const absNext = upcoming ? upcoming.absences.filter(a => a.endDate >= t && people.indexOf(a.email) >= 0).sort((a, c) => a.startDate.localeCompare(c.startDate)).slice(0, 3) : [];
   const teamCard = '<div class="card-w w-5"><h3>' + icon('users', 'sm') + 'Team<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>' +
     (warns.length ? '<div class="hlist">' + warns.slice(0, 3).map(w => '<div class="hitem warnitem" data-action="warn-open" data-team="' + esc(w.teamId) + '" style="cursor:pointer">' + dayBox(w.date) +
@@ -961,7 +961,9 @@ function dashPage() {
     const counts = Shared.STATUSES.map(x => '<div class="sc"><b>' + ptasks.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
     const next = ptasks.filter(x => !isDone(x) && x.dueDate).sort((x, y) => x.dueDate.localeCompare(y.dueDate)).slice(0, 3);
     return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Projektübersicht<button class="btn white sm more2" data-action="proj-all">Alle Projekte</button></h3>' +
-      '<div class="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '" title="' + esc(projectPath(x)) + '">' + projectMark(x) + esc(x.name) + '</button>').join('') + '</div>' +
+      '<div class="ptabs-wrap"><button class="ptabs-arrow l" data-action="ptabs-scroll" data-d="-1" aria-label="Nach links" title="Nach links">' + icon('left', 'sm') + '</button>' +
+      '<div class="ptabs" data-keep-scroll="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '" title="' + esc(projectPath(x)) + '">' + projectMark(x) + esc(x.name) + '</button>').join('') + '</div>' +
+      '<button class="ptabs-arrow r" data-action="ptabs-scroll" data-d="1" aria-label="Nach rechts" title="Nach rechts">' + icon('right', 'sm') + '</button></div>' +
       '<div class="pbanner" style="--pc:' + pc + '">' +
       '<div class="pb-t" title="' + esc(projectPath(sp)) + '">' + projectMark(sp, 'md') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
       '<p>' + esc(sp.description || 'Keine Beschreibung.') + '</p></div>' +
@@ -1082,7 +1084,34 @@ function doneWeeksCard(t) {
     (weeks.some(w => w.n) ? '<div class="dw-chart">' + bars + '</div>'
       : '<div class="empty-w">Noch nichts erledigt. Sobald du Aufgaben abhakst, siehst du hier deinen Wochenverlauf.</div>') + '</div>';
 }
-A['proj-all'] = () => { const sp = project(S.dashProj); S.teamTab = 'projects'; go('team', sp ? sp.teamId : (S.teams[0] || {}).id); };
+/** Project tabs on the dashboard: one row; arrows appear when it does not fit, wheel and swipe scroll sideways. */
+function bindPtabs() {
+  const row = $('.ptabs');
+  if (!row) return;
+  const wrap = row.parentNode;
+  const arrows = () => {
+    wrap.classList.toggle('can-l', row.scrollLeft > 2);
+    wrap.classList.toggle('can-r', row.scrollLeft + row.clientWidth < row.scrollWidth - 2);
+  };
+  const on = $('button.on', row);
+  if (on && (on.offsetLeft < row.scrollLeft || on.offsetLeft + on.offsetWidth > row.scrollLeft + row.clientWidth)) {
+    row.scrollLeft = on.offsetLeft - 8;
+  }
+  row.addEventListener('scroll', arrows);
+  row.updateArrows = arrows;
+  row.addEventListener('wheel', e => {
+    if (row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    row.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+  arrows();
+}
+A['ptabs-scroll'] = el => {
+  const row = $('.ptabs');
+  row.scrollLeft += Number(el.dataset.d) * row.clientWidth * 0.7;
+  if (row.updateArrows) row.updateArrows();
+};
+A['proj-all'] =() => { const sp = project(S.dashProj); S.teamTab = 'projects'; go('team', sp ? sp.teamId : (S.teams[0] || {}).id); };
 A['dash-proj'] = el => { S.dashProj = el.dataset.id; render(); };
 A['dash-heat'] = () => { S.cal.mode = 'heatmap'; go('calendar'); };
 A['brief-reload'] = () => { S.briefing = null; render({ peek: false }); };
@@ -1391,24 +1420,27 @@ function projectPage(p) {
 A['proj-tab'] = el => { S.projTab = el.dataset.v; render(); };
 
 /* ---------------- team calendar ---------------- */
-function scopeButton(action, teamId) {
+function scopeButton(action, teamId, personal) {
   const t = teamId && team(teamId);
-  return '<button class="btn outline" data-action="' + action + '">' + (t ? mark(t) + esc(t.name) : icon('users', 'sm') + 'Alle Personen') + icon('chevron', 'sm') + '</button>';
+  return '<button class="btn outline sm" data-action="' + action + '">' + (t ? mark(t) + esc(t.name)
+    : personal ? icon('user', 'sm') + 'Persönlich' : icon('users', 'sm') + 'Alle Personen') + icon('chevron', 'sm') + '</button>';
 }
 const CAL_VIEWS = [['week', 'Woche', 'board'], ['day', 'Tag', 'sub'], ['month', 'Monat', 'calendar'], ['agenda', 'Agenda', 'list'], ['heatmap', 'Heatmap', 'layers']];
 const AG_RANGES = { today: [1, 'Heute'], week: [7, 'Woche'], month: [31, 'Monat'], all: [90, '90 Tage'] };
 function calendarPage() {
   if (!S.cal.mode || S.cal.mode === 'planner') S.cal.mode = 'week';
   const mode = S.cal.mode;
+  // personal calendar by default; a team gives a quick look at that team (details: Verfügbarkeit)
   const teamId = S.cal.teamId && team(S.cal.teamId) ? S.cal.teamId : '';
-  const people = teamId ? teamMembers(team(teamId)) : null;
+  const people = teamId ? teamMembers(team(teamId)) : [S.me.email];
   const t = TODAY();
   const show = S.cal.show;
-  const scoped = x => !people || x.assignees.some(e => people.indexOf(e) >= 0) || x.teams.indexOf(teamId) >= 0;
+  const scoped = x => (teamId ? x.assignees.some(e => people.indexOf(e) >= 0) || x.teams.indexOf(teamId) >= 0 : isMine(x));
   const tasks = S.tasks.filter(x => x.dueDate && scoped(x));
   const upcoming = calEnsure(t, Shared.addDays(t, 90), teamId);
-  const toggle = (k, label) => '<button class="' + (show[k] ? 'on' : '') + '" data-action="cal-show" data-k="' + k + '">' + label + '</button>';
-  const filters = '<div class="seg">' + toggle('absences', 'Abwesenheiten') + toggle('holidays', 'Feiertage') + toggle('events', 'Termine') + toggle('tasks', 'Aufgaben') + '</div>';
+  const hidden = ['absences', 'holidays', 'events', 'tasks'].filter(k => !show[k]).length;
+  const filters = '<button class="btn outline sm' + (hidden ? ' active' : '') + '" data-action="cal-layers" title="Was im Kalender angezeigt wird">' + icon('layers', 'sm') + 'Ebenen' +
+    (hidden ? ' <span class="tn">' + (4 - hidden) + '/4</span>' : '') + '</button>';
   const side = () => '<aside>' + (upcoming ? sidePanel(upcoming, people) : '<div class="panel"><div class="skeleton"></div></div>') + '</aside>';
   let main = '', layoutSide = false;
   const ctl = [];
@@ -1442,11 +1474,11 @@ function calendarPage() {
   } else if (mode === 'heatmap') {
     main = heatmapHtml(people);
   }
-  const views = '<div class="seg views">' + CAL_VIEWS.map((v, i) => '<button class="' + (mode === v[0] ? 'on' : '') + '" data-action="cal-mode" data-v="' + v[0] + '" title="Taste ' + (i + 1) + '">' + icon(v[2], 'sm') + v[1] + '</button>').join('') + '</div>';
+  const views = '<div class="seg views">' + CAL_VIEWS.map((v, i) => '<button class="' + (mode === v[0] ? 'on' : '') + '" data-action="cal-mode" data-v="' + v[0] + '" title="' + v[1] + ' (Taste ' + (i + 1) + ')">' + icon(v[2], 'sm') + v[1] + '</button>').join('') + '</div>';
   // The page itself does not scroll: list, grid and side panel scroll inside their own boxes.
   return '<div class="page wide cal-fit">' +
-    '<div class="card-w cal-top"><div class="cal-top-l"><h1 class="page-title">Kalender</h1>' +
-    '<div class="cal-ctl">' + scopeButton('cal-team', teamId) + ctl.join('') + (mode === 'heatmap' ? '' : filters) + '</div></div>' +
+    '<div class="card-w cal-top slim"><div class="cal-top-l"><h1 class="page-title">Kalender</h1>' +
+    '<div class="cal-ctl">' + scopeButton('cal-team', teamId, true) + ctl.join('') + (mode === 'heatmap' ? '' : filters) + '</div></div>' +
     '<div class="cal-top-r">' + views + '<div class="cal-acts"><button class="btn outline" data-action="event-new">' + icon('plus', 'sm') + 'Termin</button>' +
     '<button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button></div>' + prefControls() + '</div></div>' +
     '<div class="cal-body">' +
@@ -1494,7 +1526,16 @@ function scopeMenu(el, current, onPick) {
   openMenu(el, [{ value: '', html: icon('users', 'sm') + '<span>Alle Personen</span>', search: 'alle' }]
     .concat(S.teams.map(t => ({ value: t.id, html: teamChip(t), search: t.name }))), { selected: [current || ''], onPick: onPick });
 }
-A['cal-team'] = el => scopeMenu(el, S.cal.teamId, v => { S.cal.teamId = v; render(); });
+A['cal-team'] = el => openMenu(el, [{ value: '', html: icon('user', 'sm') + '<span>Persönlich</span><small>nur ich</small>', search: 'persönlich ich' }]
+  .concat(myTeams().length ? [{ label: 'Teams' }] : [])
+  .concat(myTeams().map(t => ({ value: t.id, html: teamChip(t), search: t.name }))),
+{ selected: [S.cal.teamId || ''], search: false, onPick: v => { S.cal.teamId = v; render(); } });
+A['cal-layers'] = el => openMenu(el, [['absences', 'Abwesenheiten', 'plane'], ['holidays', 'Feiertage', 'globe'], ['events', 'Termine', 'calendar'], ['tasks', 'Aufgaben', 'checksq']]
+  .map(x => ({ value: x[0], html: icon(x[2], 'sm') + '<span>' + x[1] + '</span>', search: x[1] })),
+{ multi: true, search: false, selected: Object.keys(S.cal.show).filter(k => S.cal.show[k]), onPick: (v, sel) => {
+  Object.keys(S.cal.show).forEach(k => { S.cal.show[k] = sel.indexOf(k) >= 0; });
+  render();
+} });
 
 /* ---------------- availability (capacity) ---------------- */
 const ABS_LETTER = { vacation: 'U', sick: 'K', training: 'F', other: 'A', holiday: 'FT' };

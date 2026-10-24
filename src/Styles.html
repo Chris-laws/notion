@@ -561,6 +561,15 @@ table.db tr:hover .title-cell .open { opacity: 1; }
 .cal-fit .cal-top { align-items: center; gap: 10px 16px; padding: 10px 16px; margin-bottom: 12px; }
 .cal-fit .cal-top-l { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-width: 0; }
 .cal-fit .cal-top-l .page-title { font-size: 20px; }
+/* calendar: everything in one slim row */
+.cal-fit .cal-top.slim { flex-wrap: nowrap; padding: 8px 12px; gap: 10px; margin-bottom: 10px; }
+.cal-top.slim .cal-top-l { flex: 1 1 auto; flex-wrap: nowrap; gap: 10px; }
+.cal-top.slim .page-title { font-size: 18px; }
+.cal-top.slim .cal-ctl { flex-wrap: nowrap; }
+.cal-top.slim .cal-top-r { flex-wrap: nowrap; }
+.cal-top.slim .seg.views button { padding: 0 9px; }
+.cal-top.slim .btn { height: 32px; }
+@media (max-width: 1400px) { .cal-top.slim .seg.views button { font-size: 0; gap: 0; } .cal-top.slim .seg.views button svg { font-size: 13px; } }
 .cal-fit .cal-top-r { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .cal-body { flex: 1; min-height: 0; }
 .cal-fit .cal-full { height: 100%; overflow: auto; }
@@ -1109,7 +1118,20 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .dash-grid .w-8 { grid-column: span 8; } .dash-grid .w-4 { grid-column: span 4; }
 .dash-grid .w-8 > .card-w, .dash-grid .w-4 > .card-w { height: 100%; }
 .more2 { margin-left: auto; }
-.ptabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.ptabs { display: flex; gap: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px; }
+.ptabs::-webkit-scrollbar { display: none; }
+.ptabs button { flex: none; white-space: nowrap; }
+/* one row with arrows when the tabs do not fit */
+.ptabs-wrap { position: relative; margin-bottom: 14px; }
+.ptabs-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 30px; height: 30px; border-radius: 50%; display: none; place-items: center;
+  background: var(--bg-elevated); color: var(--text); box-shadow: var(--shadow-pop); }
+.ptabs-arrow:hover { color: var(--accent); }
+.ptabs-arrow.l { left: -6px; }
+.ptabs-arrow.r { right: -6px; }
+.ptabs-wrap.can-l .ptabs-arrow.l, .ptabs-wrap.can-r .ptabs-arrow.r { display: grid; }
+.ptabs-wrap.can-l .ptabs { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 40px); mask-image: linear-gradient(90deg, transparent 0, #000 40px); }
+.ptabs-wrap.can-r .ptabs { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 40px), transparent); }
+.ptabs-wrap.can-l.can-r .ptabs { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 40px, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(90deg, transparent 0, #000 40px, #000 calc(100% - 40px), transparent); }
 .ptabs button { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 10px; background: var(--canvas); font-size: 13px; font-weight: 600; color: var(--text-2); }
 .ptabs button.on { background: var(--accent-soft); color: var(--accent-text); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 .pbanner { position: relative; border-radius: 14px; padding: 22px 24px 20px; color: #fff; overflow: hidden; margin-bottom: 12px; min-height: 118px;

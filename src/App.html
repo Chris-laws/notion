@@ -506,7 +506,7 @@ function render(opts) {
   renderTopbar();
   const drafts = captureForms(view);
   const inner = {};
-  $$('[data-keep-scroll]', view).forEach(el => { inner[el.dataset.keepScroll] = el.scrollTop; });
+  $$('[data-keep-scroll]', view).forEach(el => { inner[el.dataset.keepScroll] = el.scrollTop; inner[el.dataset.keepScroll + ':x'] = el.scrollLeft; });
   const html = Views.render();
   // Only route changes play the page fade-in; data updates swap content in place.
   view.classList.toggle('enter', !!opts.resetScroll);
@@ -516,7 +516,7 @@ function render(opts) {
   if (swapped) {
     $$('[data-keep-scroll]', view).forEach(el => {
       const k = el.dataset.keepScroll;
-      if (inner[k] !== undefined && !opts.resetScroll) el.scrollTop = inner[k];
+      if (inner[k] !== undefined && !opts.resetScroll) { el.scrollTop = inner[k]; el.scrollLeft = inner[k + ':x']; }
       else if (k === 'wk') el.scrollTop = Math.max(0, (7 * 60 - PL.from) / 60 * PL.hh); // start the day at 07:00
     });
   }
