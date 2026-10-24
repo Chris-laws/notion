@@ -49,6 +49,30 @@ const Db = (function () {
   let spreadsheet = null;
   let memo = {};
   let txDepth = 0;
+  let dirty = false;
+  // Small, rarely changing tables are also kept in the script cache so most
+  // requests skip a spreadsheet round trip. Every write drops the entry.
+  const CACHED = { Users: 1, Teams: 1, Projects: 1, CompanyHolidays: 1 };
+  const CACHE_TTL = 120;
+
+  function cacheGet(table) {
+    if (!CACHED[table]) return null;
+    try {
+      const raw = CacheService.getScriptCache().get('tbl_' + table);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  function cachePut(table, entries) {
+    if (!CACHED[table]) return;
+    try {
+      const raw = JSON.stringify(entries);
+      if (raw.length < 90000) CacheService.getScriptCache().put('tbl_' + table, raw, CACHE_TTL);
+    } catch (e) { /* cache is optional */ }
+  }
+  function cacheDrop(table) {
+    if (!CACHED[table]) return;
+    try { CacheService.getScriptCache().remove('tbl_' + table); } catch (e) { /* optional */ }
+  }
 
   function open() {
     if (spreadsheet) return spreadsheet;
@@ -111,6 +135,8 @@ const Db = (function () {
 
   function load(table) {
     if (memo[table]) return memo[table];
+    const cached = cacheGet(table);
+    if (cached) { memo[table] = cached; return cached; }
     const d = def(table);
     const sh = sheet(table);
     const last = sh.getLastRow();
@@ -121,6 +147,7 @@ const Db = (function () {
       entries.push({ obj: toObj(d, r), row: i + 2 });
     });
     memo[table] = entries;
+    cachePut(table, entries);
     return entries;
   }
 
@@ -139,7 +166,8 @@ const Db = (function () {
       return fn();
     } finally {
       txDepth--;
-      SpreadsheetApp.flush();
+      if (dirty) SpreadsheetApp.flush();
+      dirty = false;
       lock.releaseLock();
     }
   }
@@ -161,6 +189,8 @@ const Db = (function () {
         const d = def(table);
         if (find(table, obj[d.cols[0]])) throw new Error('Eintrag existiert bereits.');
         const sh = sheet(table);
+        cacheDrop(table);
+        dirty = true;
         const row = sh.getLastRow() + 1;
         sh.getRange(row, 1, 1, d.cols.length).setValues([toRow(d, obj)]);
         const clean = toObj(d, toRow(d, obj).map(v => (typeof v === 'string' && v.charAt(0) === "'" ? v.slice(1) : v)));
@@ -174,6 +204,8 @@ const Db = (function () {
         const d = def(table);
         const e = find(table, key);
         if (!e) throw new Error('Eintrag nicht gefunden.');
+        cacheDrop(table);
+        dirty = true;
         const merged = Object.assign({}, e.obj, patch);
         merged[d.cols[0]] = e.obj[d.cols[0]];
         sheet(table).getRange(e.row, 1, 1, d.cols.length).setValues([toRow(d, merged)]);
@@ -186,6 +218,8 @@ const Db = (function () {
       return tx(() => {
         const e = find(table, key);
         if (!e) return false;
+        cacheDrop(table);
+        dirty = true;
         sheet(table).deleteRow(e.row);
         delete memo[table];
         return true;
@@ -211,6 +245,7 @@ const Db = (function () {
     reset() {
       spreadsheet = null;
       memo = {};
+      if (typeof Config !== 'undefined' && Config.reset) Config.reset();
     },
   };
 })();

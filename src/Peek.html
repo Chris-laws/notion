@@ -7,17 +7,19 @@
 function openPeek(id) {
   if (!task(id)) return;
   S.peekId = id;
-  S.comments = null;
+  const fresh = /^tmp_/.test(id);
+  S.comments = fresh ? { taskId: id, list: [] } : null;
   S.suggest = null;
   S.breakdown = null;
   render({ peek: true });
+  const title = $('#peek .peek-title');
+  if (title && task(id).title === 'Ohne Titel') { title.value = ''; title.focus(); }
+  if (fresh) return;
   call('comments.list', { taskId: id }).then(list => {
     if (S.peekId !== id) return;
     S.comments = { taskId: id, list: list };
     renderPeek();
   }).catch(() => { S.comments = { taskId: id, list: [] }; renderPeek(); });
-  const title = $('#peek .peek-title');
-  if (title && task(id).title === 'Ohne Titel') { title.value = ''; title.focus(); }
 }
 function closePeek() {
   S.peekId = null;

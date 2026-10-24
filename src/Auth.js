@@ -94,8 +94,14 @@ const Config = {
     VERTEX_LOCATION: 'global',
   },
 
+  props_: null,
+
+  /** Script properties are read once per request. */
+  reset() { Config.props_ = null; },
+
   get(name) {
-    const v = PropertiesService.getScriptProperties().getProperty(name);
+    if (!Config.props_) Config.props_ = PropertiesService.getScriptProperties().getProperties();
+    const v = Config.props_[name];
     return v === null || v === undefined ? (Config.DEFAULTS[name] || '') : v;
   },
 

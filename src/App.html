@@ -93,7 +93,9 @@ function flag(cc) {
 const user = email => S.users.find(u => u.email === email) || { email: email, name: (email || '?').split('@')[0], color: '#9b9a97' };
 const team = id => S.teams.find(t => t.id === id);
 const project = id => S.projects.find(p => p.id === id);
-const task = id => S.tasks.find(t => t.id === id);
+/** Temporary id of an optimistically created task -> id the server gave it. */
+const ALIAS = {};
+const task = id => { id = ALIAS[id] || id; return S.tasks.find(t => t.id === id); };
 const statusOf = k => Shared.STATUSES.find(s => s.key === k) || Shared.STATUSES[1];
 const prioOf = k => Shared.PRIORITIES.find(p => p.key === k);
 const isDone = t => t.status === 'done';
@@ -255,7 +257,17 @@ function teamChip(t) {
 }
 
 /* ---------------- server ---------------- */
+/** Tasks that were created optimistically: temporary id -> promise of the real id. */
+const PENDING = {};
 function call(method, payload) {
+  const keys = ['id', 'taskId', 'parentId'].filter(k => payload && payload[k] && PENDING[payload[k]]);
+  if (keys.length) {
+    return Promise.all(keys.map(k => PENDING[payload[k]])).then(ids => {
+      const next = Object.assign({}, payload);
+      keys.forEach((k, i) => { next[k] = ids[i]; });
+      return call(method, next);
+    });
+  }
   S.busy++;
   syncDot();
   return new Promise((resolve, reject) => {
@@ -305,13 +317,38 @@ function patchTask(id, patch, opts) {
     })
     .catch(err => { Object.assign(t, before); render(); fail(err); });
 }
+/** Shows the new task at once and swaps in the saved one when the server answers. */
 function createTask(fields, opts) {
-  return call('tasks.save', fields).then(changed => {
+  const tmpId = 'tmp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const now = new Date().toISOString();
+  const draft = Object.assign({
+    id: tmpId, title: 'Ohne Titel', description: '', status: 'todo', priority: '', projectId: '',
+    teams: [], assignees: [], tags: [], startDate: '', dueDate: '', estimate: 0, parentId: '', recurrence: '',
+    sort: Date.now(), createdBy: S.me.email, createdAt: now, updatedAt: now, completedAt: '',
+    planDate: '', planStart: 0, progress: 0, spent: 0, timerStart: '',
+  }, fields);
+  if (!draft.title) draft.title = 'Ohne Titel';
+  S.tasks.push(draft);
+  if (opts && opts.open) openPeek(tmpId); else render();
+  const saved = call('tasks.save', fields).then(changed => changed);
+  PENDING[tmpId] = saved.then(changed => changed[0].id);
+  return saved.then(changed => {
+    const real = changed[0];
+    ALIAS[tmpId] = real.id;
+    S.tasks = S.tasks.filter(t => t.id !== tmpId);
     applyTasks(changed);
-    if (opts && opts.open) openPeek(changed[0].id);
-    else render();
-    return changed[0];
-  }).catch(fail);
+    if (S.peekId === tmpId) S.peekId = real.id;
+    if (S.comments && S.comments.taskId === tmpId) S.comments.taskId = real.id;
+    // The side panel keeps its DOM (and what is being typed); its handlers resolve the old id through ALIAS.
+    render({ peek: false });
+    return real;
+  }).catch(err => {
+    delete PENDING[tmpId];
+    S.tasks = S.tasks.filter(t => t.id !== tmpId);
+    if (S.peekId === tmpId) S.peekId = null;
+    render();
+    fail(err);
+  });
 }
 /** Defaults for "+ Neu" depending on where the user is. */
 function contextDefaults(extra) {
@@ -501,12 +538,16 @@ function editing() {
 function refresh() {
   if (document.visibilityState !== 'visible' || editing() || S.busy) return;
   call('tasks.list').then(list => {
-    if (editing()) return;
+    if (editing() || S.busy) return;
+    const pending = S.tasks.filter(t => PENDING[t.id]);
+    if (pending.length) return;
+    // Only redraw when someone else actually changed something.
+    if (JSON.stringify(list) === JSON.stringify(S.tasks)) return;
     S.tasks = list;
     render();
   }).catch(() => { /* next round */ });
 }
-setInterval(refresh, 60000);
+setInterval(refresh, 90000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
 
 /* ---------------- start ---------------- */
