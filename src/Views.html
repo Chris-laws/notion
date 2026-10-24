@@ -802,7 +802,7 @@ function trowHtml(t) {
 function briefingData() {
   if (!S.briefing) {
     S.briefing = 'loading';
-    call('ai.briefing').then(b => { S.briefing = b; S.warnings = b.teamWarnings || []; render({ peek: false }); }).catch(() => { S.briefing = null; });
+    call('ai.briefing', { lang: LANG }).then(b => { S.briefing = b; S.warnings = b.teamWarnings || []; render({ peek: false }); }).catch(() => { S.briefing = null; });
   }
   return S.briefing && S.briefing !== 'loading' ? S.briefing : null;
 }

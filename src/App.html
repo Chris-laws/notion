@@ -57,14 +57,16 @@ function fmtDate(iso, opts) {
   if (!iso) return '';
   const t = TODAY();
   const diff = Shared.diffDays(t, iso);
+  const en = LANG === 'en';
   if (!(opts && opts.absolute)) {
-    if (diff === 0) return 'Heute';
-    if (diff === 1) return 'Morgen';
-    if (diff === -1) return 'Gestern';
+    if (diff === 0) return en ? 'Today' : 'Heute';
+    if (diff === 1) return en ? 'Tomorrow' : 'Morgen';
+    if (diff === -1) return en ? 'Yesterday' : 'Gestern';
     if (diff > 1 && diff < 7) return DOW_LONG[Shared.weekday(iso)];
   }
   const [y, m, d] = iso.split('-').map(Number);
-  return d + '. ' + MONTHS[m - 1] + (String(y) !== t.slice(0, 4) ? ' ' + y : '');
+  const year = String(y) !== t.slice(0, 4) ? ' ' + y : '';
+  return en ? MONTHS[m - 1] + ' ' + d + (year ? ',' + year : '') : d + '. ' + MONTHS[m - 1] + year;
 }
 function fmtRange(a, b) {
   if (!b || a === b) return fmtDate(a, { absolute: true });
@@ -74,7 +76,8 @@ function fmtHours(h) {
   h = Number(h) || 0;
   if (!h) return '';
   if (h < 1) return Math.round(h * 60) + ' min';
-  return (Math.round(h * 10) / 10).toString().replace('.', ',') + ' h';
+  const n = (Math.round(h * 10) / 10).toString();
+  return (LANG === 'en' ? n : n.replace('.', ',')) + ' h';
 }
 function timeAgo(iso) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -501,7 +504,9 @@ function renderSidebar() {
     '</div>' +
     '<div class="side-foot"><button class="me-row" data-action="nav" data-view="settings">' + avatar(S.me.email, 'lg') +
     '<div class="me-meta"><div style="font-weight:500">' + esc(S.me.name) + '</div><div class="faint">' +
-    esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button></div>');
+    esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button>' +
+    '<div class="lang-sw" role="group" aria-label="Sprache">' + ['de', 'en'].map(l =>
+      '<button class="' + (LANG === l ? 'on' : '') + '" data-action="lang" data-lang="' + l + '">' + l.toUpperCase() + '</button>').join('') + '</div></div>');
   syncDot();
 }
 A['rail-toggle'] = () => { S.rail = !S.rail; store.set('rail', S.rail); renderSidebar(); };

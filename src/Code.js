@@ -49,7 +49,7 @@ const ROUTES = {
   'ai.parse': p => Ai.parse(p),
   'ai.suggestAssignee': p => Ai.suggestAssignee(p),
   'ai.breakdown': p => Ai.breakdown(p),
-  'ai.briefing': () => Ai.briefing(),
+  'ai.briefing': p => Ai.briefing(p),
 };
 
 function api(method, payload) {

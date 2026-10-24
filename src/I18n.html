@@ -1,0 +1,250 @@
+<script>
+/* ==========================================================================
+   Language switch (DE / EN). The UI is written in German; in English mode the
+   rendered markup runs through tr(): whole text nodes and attributes are looked
+   up in EN, sentences with numbers go through PATTERNS and FRAGMENTS.
+   Dates, weekdays and months switch at the source (see setLang).
+   ========================================================================== */
+
+const EN = {
+  // navigation and pages
+  'Übersicht': 'Overview', 'Meine Aufgaben': 'My tasks', 'Alle Aufgaben': 'All tasks', 'Kalender': 'Calendar',
+  'Verfügbarkeit': 'Availability', 'Einstellungen': 'Settings', 'Teams': 'Teams', 'Team': 'Team', 'Projekte': 'Projects',
+  'Projekt': 'Project', 'Suchen …': 'Search …', 'Suchen…': 'Search…', 'Suchen': 'Search', 'Aufgaben und Projekte suchen': 'Search tasks and projects',
+  'Neue Aufgabe': 'New task', 'Neues Projekt': 'New project', 'Neues Team': 'New team', 'Noch keine Teams.': 'No teams yet.',
+  'Menü': 'Menu', 'Seitenleiste ein-/ausklappen': 'Toggle sidebar', 'Ein-/ausklappen': 'Expand/collapse', 'Wird gespeichert …': 'Saving …',
+  'Team-Abwesenheit über der Warnschwelle': 'Team absence above the warning threshold', 'Profil': 'Profile',
+  'Diese Seite gibt es nicht mehr.': 'This page no longer exists.', 'Zu meinen Aufgaben': 'Go to my tasks',
+  'App konnte nicht geladen werden': 'The app could not be loaded', 'Ungültige Antwort vom Server': 'Invalid response from the server',
+  'KI aktiv': 'AI on', 'Mehr': 'More', 'Schließen': 'Close', 'Schließen (Esc)': 'Close (Esc)', 'Zurück': 'Back', 'Ganze Seite': 'Full page',
+  'Weiter': 'Next', 'Vor': 'Next', 'Abbrechen': 'Cancel', 'Speichern': 'Save', 'Löschen': 'Delete', 'Bearbeiten': 'Edit', 'Entfernen': 'Remove',
+  'Öffnen': 'Open', 'Ansehen': 'View', 'Verwalten': 'Manage', 'Duplizieren': 'Duplicate', 'Übernehmen': 'Apply', 'Senden': 'Send',
+  'Starten': 'Start', 'Stopp': 'Stop', 'Wirklich löschen?': 'Really delete?', 'Gelöscht': 'Deleted', 'Leer': 'Empty', 'Keine': 'None',
+  'Alle': 'All', 'alle': 'all', 'Standard': 'Default', 'Details': 'Details', 'Extra': 'Extra',
+
+  // dashboard
+  'Guten Morgen': 'Good morning', 'Hallo': 'Hello', 'Guten Abend': 'Good evening', 'Dein Fortschritt heute': 'Your progress today',
+  'Heute ist nichts fällig': 'Nothing due today', 'Team-Warnungen': 'Team warnings', 'Briefing aktualisieren': 'Refresh briefing',
+  'Zusammengefasst von Vertex AI': 'Summarised by Vertex AI', 'Automatisch zusammengefasst': 'Summarised automatically',
+  'Aufgaben gesamt': 'Total tasks', 'Erledigt': 'Done', 'Aktiv': 'Active', 'Überfällig': 'Overdue', 'Jetzt handeln': 'Act now',
+  'Alles im Plan': 'All on track', 'Nichts bald fällig': 'Nothing due soon', 'Keine neuen diese Woche': 'None new this week',
+  'Noch keine diese Woche': 'None yet this week', 'Projektübersicht': 'Project overview', 'Alle Projekte': 'All projects',
+  'Noch keine Projekte in deinen Teams.': 'No projects in your teams yet.', 'Keine Beschreibung.': 'No description.',
+  'Fortschritt': 'Progress', 'Aufgaben': 'Tasks', 'Aufgabenstatus': 'Task status', 'Als Nächstes fällig': 'Due next',
+  'Nichts Offenes mit Datum.': 'Nothing open with a date.', 'Heute im Fokus': 'Today’s focus',
+  'Aufgaben mit Fälligkeit oder Zeitblock heute und früher': 'Tasks due or scheduled today or earlier',
+  'Nichts fällig. Mit ⌘K legst du die nächste Aufgabe an.': 'Nothing due. Press ⌘K to add the next task.',
+  'Nichts offen. Mit ⌘K legst du die nächste Aufgabe an.': 'Nothing open. Press ⌘K to add the next task.',
+  'Alle Teams sind ausreichend besetzt.': 'All teams are sufficiently staffed.', 'Agenda, nächste 14 Tage': 'Agenda, next 14 days',
+  'Alles ansehen': 'View all', 'Aktivität': 'Activity', 'Kurzstatistik': 'Quick stats', 'Abschlussquote': 'Completion rate',
+  'Offene Aufgaben': 'Open tasks', 'Überfällige Aufgaben': 'Overdue tasks', 'Aufgabenverteilung': 'Task distribution',
+  'Alles, was dir zugewiesen ist: persönlich, über Teams und in Projekten.': 'Everything assigned to you: personally, through teams and in projects.',
+  'Deine Aufgaben und die deiner Teams und Projekte.': 'Your tasks and those of your teams and projects.',
+  'aktive Tage': 'active days', 'bester Tag': 'best day', 'Werktage in Folge (Bestwert)': 'workdays in a row (best)',
+  'erledigt in 12 Monaten': 'done in 12 months',
+
+  // task fields
+  'Status': 'Status', 'Priorität': 'Priority', 'Keine Priorität': 'No priority', 'Fällig': 'Due', 'Fälligkeit': 'Due date', 'Start': 'Start',
+  'Kein Start': 'No start', 'Kein Datum': 'No date', 'Ohne Datum': 'No date', 'Datum': 'Date', 'Datum entfernen': 'Remove date',
+  'Zugewiesen': 'Assignees', 'Nicht zugewiesen': 'Unassigned', 'zugewiesen': 'assigned', 'Zuweisen': 'Assign', 'zuweisen': 'assign',
+  'Mir zugewiesen': 'Assigned to me', 'Kein Projekt': 'No project', 'Ohne Projekt': 'No project', 'Aufwand': 'Estimate', 'Tags': 'Tags',
+  'Wiederholung': 'Repeat', 'Wiederholt sich': 'Repeats', 'Ohne Titel': 'Untitled', 'Titel': 'Title', 'Beschreibung': 'Description',
+  'Beschreibung, Notizen, Links …': 'Description, notes, links …', 'Unteraufgaben': 'Subtasks',
+  'Unteraufgabe hinzufügen und Enter drücken': 'Add a subtask and press Enter', 'Kommentare': 'Comments',
+  'Kommentar schreiben…': 'Write a comment…', 'Wieder öffnen': 'Reopen', 'Alle Änderungen gespeichert': 'All changes saved',
+  'Aus Status und Unteraufgaben berechnet': 'Calculated from status and subtasks', 'Auf automatisch zurücksetzen': 'Reset to automatic',
+  'automatisch': 'automatic', 'manuell': 'manual', 'Automatisch': 'Automatic', 'Manuell': 'Manual',
+  'Kontext, Vorgehen und Ressourcen festhalten, damit später klar ist, was zu tun ist und warum.': 'Capture context, approach and resources so it is clear later what to do and why.',
+  'Unteraufgaben sind vollwertige Aufgaben mit eigener Person, Fälligkeit und Status.': 'Subtasks are full tasks with their own assignee, due date and status.',
+  'Überschrift': 'Heading', 'Aufzählung': 'Bullet list', 'Checkliste': 'Checklist', 'Heutiges Datum einfügen': 'Insert today’s date',
+  'Smarte Hilfen': 'Smart helpers', 'Smarte Funktionen': 'Smart features', 'Wer hat Kapazität?': 'Who has capacity?',
+  'In Teilaufgaben zerlegen': 'Break into subtasks', 'Vorschlag für Teilaufgaben': 'Suggested subtasks', 'ausgelastet': 'fully booked',
+  'Zeiterfassung': 'Time tracking', 'Gebuchte Zeit': 'Logged time', 'Minuten nachtragen und Enter drücken': 'Add minutes and press Enter',
+  'Fortschritt im Detail': 'Progress in detail', 'So setzt sich der Gesamtfortschritt zusammen.': 'How the overall progress is calculated.',
+  'Geplante Stunden, die abgeschlossen sind': 'Planned hours that are done', 'Hauptaufgaben des Projekts': 'Main tasks of the project',
+  'Einzelne Arbeitsschritte': 'Individual steps', 'Zu Unteraufgabe von…': 'Make subtask of…', 'Gemini denkt nach…': 'Gemini is thinking…',
+  'Beispielvorschlag wird erstellt…': 'Creating a sample suggestion…', 'KI analysiert die Eingabe…': 'AI is analysing the input…',
+  'Person': 'Person', 'Person hinzufügen': 'Add person', 'Person suchen…': 'Search person…', 'Person filtern…': 'Filter people…',
+  'Tag suchen oder neu anlegen…': 'Search or create a tag…', 'Projekt oder Tag': 'Project or tag', 'Aufgabe': 'Task',
+  'Aufgabe anlegen': 'Create task', 'Aufgabe hinzufügen': 'Add task', 'Aufgabe eingeben oder suchen': 'Type a task or search',
+  'Suchen und erstellen': 'Search and create', 'Keine Treffer': 'No results', '↑↓ auswählen': '↑↓ select', '↵ anlegen': '↵ create',
+  'Strg+↵ anlegen und öffnen': 'Ctrl+↵ create and open', 'Esc schließen': 'Esc close', 'Gruppe': 'Group',
+
+  // statuses, priorities, repeats, absences, events, project statuses (Shared.js)
+  'Backlog': 'Backlog', 'Offen': 'To do', 'In Arbeit': 'In progress', 'Review': 'Review', 'Dringend': 'Urgent', 'Hoch': 'High',
+  'Mittel': 'Medium', 'Niedrig': 'Low', 'Täglich': 'Daily', 'Werktags': 'Weekdays', 'Wöchentlich': 'Weekly', 'Monatlich': 'Monthly',
+  'Urlaub': 'Vacation', 'Krank': 'Sick', 'Fortbildung': 'Training', 'Abwesend': 'Away', 'Termin': 'Event', 'Meilenstein': 'Milestone',
+  'Deadline': 'Deadline', 'Offsite / Event': 'Offsite / event', 'Geplant': 'Planned', 'Pausiert': 'Paused', 'Abgeschlossen': 'Completed',
+  'Feiertag': 'Holiday', 'Feiertage': 'Holidays',
+
+  // database views
+  'Liste': 'List', 'Board': 'Board', 'Tabelle': 'Table', 'Gantt': 'Gantt', 'Sortierung': 'Sort', 'aufsteigend': 'ascending',
+  'absteigend': 'descending', 'Erledigte': 'Completed', 'Ansicht speichern': 'Save view', 'Aktuelle Ansicht speichern': 'Save current view',
+  'Gespeicherte Ansichten': 'Saved views', 'z. B. Meine offenen Aufgaben': 'e.g. My open tasks',
+  'Gespeichert werden Layout, Filter, Gruppierung und Sortierung dieser Seite, nur in diesem Browser.': 'Saves the layout, filters, grouping and sorting of this page, in this browser only.',
+  'Keine Aufgaben hier.': 'No tasks here.', 'Keine Aufgaben mit Datum.': 'No tasks with a date.', 'Spalte aufklappen': 'Expand column',
+  'Spalte einklappen': 'Collapse column', 'Liste ausblenden': 'Hide list', 'Liste einblenden': 'Show list',
+  'Balken ziehen verschiebt den Zeitraum, der rechte Rand ändert das Fälligkeitsdatum.': 'Drag a bar to move it, drag its right edge to change the due date.',
+  'Woche': 'Week', 'Monat': 'Month', 'Quartal': 'Quarter', 'Tag': 'Day', 'Agenda': 'Agenda', 'Heatmap': 'Heatmap',
+  'Heute': 'Today', 'Morgen': 'Tomorrow', 'Gestern': 'Yesterday', 'Diese Woche': 'This week', 'In 1 Woche': 'In 1 week',
+  'Nächster Mo': 'Next Mon', 'Früher': 'Earlier', 'Später': 'Later', 'morgen': 'tomorrow', 'gerade eben': 'just now',
+
+  // calendar
+  'Meine Aufgaben ': 'My tasks ', 'Fällig ': 'Due ', 'Ungeplant': 'Unplanned', 'Alle offenen': 'All open', 'Nichts zu planen.': 'Nothing to plan.',
+  'Auf den Kalender ziehen, um einen Zeitblock zu planen.': 'Drag onto the calendar to plan a time block.',
+  'Auf die Zeitleiste ziehen, um zu planen': 'Drag onto the time line to plan', 'Aus dem Plan nehmen': 'Remove from plan',
+  '15 Min. kürzer': '15 min shorter', '15 Min. länger': '15 min longer', 'ganztägig': 'all day', 'Abwesenheiten': 'Absences',
+  'Termine': 'Events', 'Alle Personen': 'Everyone', 'Urlaub eintragen': 'Add vacation', 'Warnungen': 'Warnings',
+  'Niemand ist abwesend.': 'Nobody is away.', 'Keine in den nächsten 90 Tagen.': 'None in the next 90 days.',
+  'In diesem Zeitraum steht nichts an.': 'Nothing scheduled in this period.', '90 Tage': '90 days', 'Kein Arbeitstag': 'Not a workday',
+  'Neuer Termin': 'New event', 'Termin bearbeiten': 'Edit event', 'Termin oder Meilenstein': 'Event or milestone',
+  'z. B. Betriebsausflug': 'e.g. company outing', 'Von': 'From', 'Bis': 'To', 'Art': 'Type', 'Notiz': 'Note', 'Ende': 'End',
+  'Abwesenheit eintragen': 'Add absence', 'Abwesenheit bearbeiten': 'Edit absence', 'Abwesenheit gespeichert.': 'Absence saved.',
+  'Urlaub / Abwesenheit eintragen': 'Add vacation / absence', 'Meine Abwesenheiten': 'My absences',
+  'Keine geplanten Abwesenheiten.': 'No planned absences.', 'Ganzes Team': 'Whole team', 'Gut besetzt.': 'Well staffed.',
+  'Kapazität': 'Capacity', 'Stunden': 'Hours', 'Firmen-Feiertage': 'Company holidays', 'alle Länder': 'all countries',
+  'niemand': 'nobody', 'Mo': 'Mon', 'Di': 'Tue', 'Mi': 'Wed', 'Do': 'Thu', 'Fr': 'Fri', 'Sa': 'Sat', 'So': 'Sun',
+
+  // teams, projects, settings
+  'Team anlegen': 'Create team', 'Team bearbeiten': 'Edit team', 'Team löschen': 'Delete team', 'Projekt anlegen': 'Create project',
+  'Projekt bearbeiten': 'Edit project', 'Projekt löschen': 'Delete project', 'Projektmitglieder': 'Project members',
+  'Mitglieder': 'Members', 'Mitglied': 'Member', 'Lead': 'Lead', 'Admin': 'Admin', 'Name': 'Name', 'Farbe': 'Colour',
+  'Lege zuerst ein Team an.': 'Create a team first.', 'z. B. Produkt, Vertrieb, Design': 'e.g. Product, Sales, Design',
+  'Weitere E-Mails einladen (kommagetrennt)': 'Invite more e-mails (comma separated)', 'Profil speichern': 'Save profile',
+  'Profil gespeichert': 'Profile saved', 'Land': 'Country', 'Region': 'Region', 'Bundesland / Region': 'State / region',
+  'Wochenstunden': 'Hours per week', 'Arbeitstage': 'Workdays', 'Deaktivieren': 'Deactivate', 'Vertex AI ist aktiv': 'Vertex AI is on',
+  'Regelbasierter Modus.': 'Rule-based mode.', 'Projekteinstellungen → Skripteigenschaften': 'Project settings → Script properties',
+  'kein Arbeitstag (Teilzeit)': 'not a workday (part-time)', 'Land (für Feiertage)': 'Country (for holidays)', 'Keine.': 'None.',
+  'Notiz (nur für dich und Admins sichtbar)': 'Note (only visible to you and admins)', 'z. B. DE, AT': 'e.g. DE, AT', 'z. B. DE-BY, CH-ZH, US-CA': 'e.g. DE-BY, CH-ZH, US-CA', 'Sprache': 'Language',
+
+  // countries and German states
+  'Deutschland': 'Germany', 'Österreich': 'Austria', 'Schweiz': 'Switzerland', 'Vereinigtes Königreich': 'United Kingdom',
+  'Frankreich': 'France', 'Italien': 'Italy', 'Spanien': 'Spain', 'Niederlande': 'Netherlands', 'Belgien': 'Belgium',
+  'Luxemburg': 'Luxembourg', 'Dänemark': 'Denmark', 'Schweden': 'Sweden', 'Norwegen': 'Norway', 'Finnland': 'Finland',
+  'Polen': 'Poland', 'Tschechien': 'Czechia', 'Ungarn': 'Hungary', 'Rumänien': 'Romania', 'Kroatien': 'Croatia', 'Serbien': 'Serbia',
+  'Griechenland': 'Greece', 'Türkei': 'Turkey', 'Irland': 'Ireland', 'Kanada': 'Canada', 'Mexiko': 'Mexico', 'Brasilien': 'Brazil',
+  'Argentinien': 'Argentina', 'Australien': 'Australia', 'Neuseeland': 'New Zealand', 'Singapur': 'Singapore', 'Südkorea': 'South Korea',
+  'Südafrika': 'South Africa', 'Bayern': 'Bavaria', 'Hessen': 'Hesse', 'Niedersachsen': 'Lower Saxony', 'Sachsen': 'Saxony',
+  'Thüringen': 'Thuringia', 'Nordrhein-Westfalen': 'North Rhine-Westphalia', 'Rheinland-Pfalz': 'Rhineland-Palatinate',
+  'Sachsen-Anhalt': 'Saxony-Anhalt', 'Mecklenburg-Vorpommern': 'Mecklenburg-Western Pomerania', 'FIRMA': 'COMPANY',
+};
+
+/** Sentences with numbers or names in them. */
+const PATTERNS = [
+  [/^(\d+) erledigt in 12 Monaten$/, '$1 done in 12 months'],
+  [/^(\d+) von (\d+)$/, '$1 of $2'],
+  [/^vor (\d+) (min|h)$/, '$1 $2 ago'],
+  [/^\+ ?(\d+) weitere$/, '+$1 more'],
+  [/^(\d+) abwesend$/, '$1 away'],
+  [/^(\d+) erledigt$/, '$1 done'],
+  [/^(\d+)\/(\d+) erledigt$/, '$1/$2 done'],
+  [/^(\d+) offen$/, '$1 open'],
+  [/^(\d+) Tage?$/, (m, n) => n + (n === '1' ? ' day' : ' days')],
+  [/^(\d+) Personen$/, '$1 people'], [/^(\d+) Mitglieder$/, '$1 members'], [/^(\d+) Projekte$/, '$1 projects'],
+  [/^(\d+) Aufgaben$/, '$1 tasks'], [/^(\d+) weg$/, '$1 away'], [/^(\d+) Wo\.$/, '$1 wk'],
+  [/^KW (\d+)/, 'Week $1'],
+  [/^Fällig (.+)$/, (m, x) => 'Due ' + trText(x)], [/^Überfällig seit (.+)$/, (m, x) => 'Overdue since ' + trText(x)],
+  [/^Start (.+)$/, (m, x) => 'Start ' + trText(x)], [/^Priorität: (.+)$/, (m, x) => 'Priority: ' + trText(x)],
+  [/^Status: (.+)$/, (m, x) => 'Status: ' + trText(x)],
+  [/^(.+): (\d+) erledigt$/, '$1: $2 done'],
+  [/^(.+) · (\d+) Tage? weg$/, (m, x, n) => x + ' · ' + n + (n === '1' ? ' day' : ' days') + ' away'],
+  [/^(.+) \(([A-Z]{2})\)$/, (m, x, cc) => trText(x) + ' (' + cc + ')'],
+  [/^([\d,.]+) von ([\d,.]+) h$/, '$1 of $2 h'], [/^(\d+) % von (.+) geplant$/, '$1 % of $2 planned'],
+  [/^Alle \((\d+)\)$/, 'All ($1)'], [/^(\d+) heute fällig$/, '$1 due today'],
+  [/^in (.+) abwesend$/, 'away in $1'], [/^(\d+) bis (\d+) von (\d+) Aufgaben$/, '$1–$2 of $3 tasks'],
+  [/^(\d+) offene Aufgabe\(n\) ohne Fälligkeitsdatum sind hier nicht zu sehen\.$/, '$1 open task(s) without a due date are not shown here.'],
+  [/^(.*)(\d) Uhr$/, '$1$2:00'],
+];
+/** Distinctive pieces of longer, assembled sentences (never single common words). */
+const FRAGMENTS = [
+  [' % des Teams abwesend', ' % of the team away'], [' % Abwesenheit im Team gibt es eine Warnung.', ' % team absence there is a warning.'],
+  [' % des Teams sind dann weg.', ' % of the team will be away.'], [' % Abwesenheit', ' % absence'], [' % erledigt', ' % done'],
+  [' Bitte Urlaube abstimmen oder Vertretung klären.', ' Please coordinate vacations or arrange cover.'],
+  [' Im gewählten Zeitraum ist nie die Hälfte des Teams gleichzeitig weg.', ' Half the team is never away at the same time in this period.'],
+  ['Urlaub aus dem Teamkalender, Feiertage je Land und Bundesland eingerechnet. Ab ', 'Vacation from the team calendar, holidays per country and state included. From '],
+  [' in den nächsten 4 Wochen ', ' in the next 4 weeks '], [' Unteraufgaben angelegt', ' subtasks created'], [' und ihre Unteraufgaben', ' and its subtasks'],
+  [' Aufgaben erledigt', ' tasks done'], [' neu diese Woche', ' new this week'], [' bald fällig', ' due soon'], [' diese Woche', ' this week'],
+  [' offen im Projekt', ' open in project'], [' min nachgetragen', ' min logged'], [' h/Woche', ' h/week'], [' h frei', ' h free'],
+  [' · Auslastung ', ' · utilisation '], [' · Einstellungen', ' · Settings'], [' · erledigt ', ' · done '], [' · zuletzt geändert ', ' · last changed '],
+  [' – mindestens ', ' – at least '], ['· zusätzlich zu den gesetzlichen', '· in addition to public holidays'],
+  ['. Land, Region, Wochenstunden und Arbeitstage bestimmen deine Kapazität.', '. Country, region, weekly hours and workdays determine your capacity.'],
+  ['Nächste Wiederholung angelegt: ', 'Next occurrence created: '], ['Angemeldet über Google als ', 'Signed in with Google as '],
+  ['Für KI: im Apps-Script-Projekt unter ', 'For AI: in the Apps Script project under '], ['Freie Kapazität in KW ', 'Free capacity in week '],
+  ['Aufgabe anlegen: ', 'Create task: '], ['Erstellt von ', 'Created by '], ['Bestwert am ', 'Best on '], ['Läuft seit ', 'Running since '],
+  ['Aufgabe am ', 'Task on '], ['Angelegt: ', 'Created: '], ['Achtung: ', 'Note: '], ['Gruppe: ', 'Group: '], ['Zeilen ', 'Rows '],
+  [' Aufgaben', ' tasks'], ['Ansicht „', 'View “'], ['Projekt „', 'Project “'], ['Team „', 'Team “'], ['“ gespeichert', '” saved'],
+  ['“ hinzufügen', '” add'], ['“ löschen? Die Aufgaben bleiben erhalten.', '”? The tasks are kept.'],
+  ['“ löschen? Projekte werden entfernt, Aufgaben bleiben erhalten.', '”? Projects are removed, tasks are kept.'],
+  ['weniger ', 'less '], [' mehr', ' more'], [' bearbeiten', ' edit'],
+  ['Aufgaben mit Fälligkeit oder Zeitblock heute und früher', 'Tasks due or scheduled today or earlier'],
+  ['Alle smarten Funktionen laufen bereits mit Regeln (Quick-Add-Parser, Kapazitäts-Vorschläge, Briefing). ', 'All smart features already work with rules (quick-add parser, capacity suggestions, briefing). '],
+  ['gerade eben', 'just now'],
+].sort((a, b) => b[0].length - a[0].length);
+
+const LANG_DATES = {
+  de: {
+    MONTHS: ['Jan', 'Feb', 'März', 'Apr', 'Mai', 'Juni', 'Juli', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'],
+    MONTHS_LONG: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+    DOW: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+    DOW_LONG: ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'],
+  },
+  en: {
+    MONTHS: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    MONTHS_LONG: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+    DOW: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    DOW_LONG: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  },
+};
+
+function trText(s) {
+  const k = s.trim();
+  if (!k) return s;
+  const pre = s.slice(0, s.indexOf(k)), post = s.slice(s.indexOf(k) + k.length);
+  if (EN[k] !== undefined) return pre + EN[k] + post;
+  for (const p of PATTERNS) if (p[0].test(k)) return pre + k.replace(p[0], p[1]) + post;
+  let out = s;
+  FRAGMENTS.forEach(f => { if (out.indexOf(f[0]) >= 0) out = out.split(f[0]).join(f[1]); });
+  return out;
+}
+/** Translates inserted DOM in place: text nodes and a few attributes. What people type (textarea, input) stays as is. */
+const TR_SKIP = /^(TEXTAREA|INPUT|SCRIPT|STYLE)$/;
+const TR_ATTRS = ['title', 'placeholder', 'aria-label'];
+function trDom(node) {
+  if (node.nodeType === 3) {
+    const v = trText(node.nodeValue);
+    if (v !== node.nodeValue) node.nodeValue = v;
+    return;
+  }
+  if (node.nodeType !== 1 || node.isContentEditable) return;
+  TR_ATTRS.forEach(a => {
+    const v = node.getAttribute(a);
+    if (v) { const t = trText(v); if (t !== v) node.setAttribute(a, t); }
+  });
+  if (TR_SKIP.test(node.nodeName)) return; // attributes yes, content no
+  for (let c = node.firstChild; c; c = c.nextSibling) trDom(c);
+}
+// Runs before the browser paints, so German never flashes up.
+new MutationObserver(muts => {
+  if (LANG !== 'en') return;
+  muts.forEach(m => m.addedNodes.forEach(n => { if (!(n.parentNode && TR_SKIP.test(n.parentNode.nodeName))) trDom(n); }));
+}).observe(document.body, { childList: true, subtree: true });
+
+let LANG = 'de';
+function setLang(lang) {
+  LANG = lang === 'en' ? 'en' : 'de';
+  const d = LANG_DATES[LANG];
+  [[MONTHS, 'MONTHS'], [MONTHS_LONG, 'MONTHS_LONG'], [DOW, 'DOW'], [DOW_LONG, 'DOW_LONG']].forEach(x => x[0].splice(0, x[0].length, ...d[x[1]]));
+  document.documentElement.lang = LANG;
+  const peek = document.getElementById('peek');
+  if (peek) peek.setAttribute('aria-label', LANG === 'en' ? 'Task' : 'Aufgabe');
+  store.set('lang', LANG);
+}
+setLang(store.get('lang', (navigator.language || 'de').slice(0, 2) === 'en' ? 'en' : 'de'));
+A['lang'] = el => {
+  setLang(el.dataset.lang);
+  S.briefing = null; // the server writes it in the chosen language
+  // Rebuild everything: cached markup is German, the DOM may hold the other language.
+  ['#view', '#sidebar', '#topbar', '#peek'].forEach(s => { const n = $(s); if (n) n.__html = null; });
+  render();
+};
+</script>

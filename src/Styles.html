@@ -119,7 +119,12 @@ svg.i.lg { width: 18px; height: 18px; }
 .icon-btn { width: 30px; height: 30px; display: inline-grid; place-items: center; border-radius: 8px; color: var(--text-2); flex: none; }
 .icon-btn.sm { width: 24px; height: 24px; border-radius: 6px; }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
-.side-foot { border-top: 1px solid var(--border); padding: 10px 12px; }
+.side-foot { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: 6px; }
+.side-foot .me-row { flex: 1; min-width: 0; }
+.lang-sw { display: flex; flex: none; background: var(--bg-hover); border-radius: 8px; padding: 2px; }
+.lang-sw button { font-size: 11px; font-weight: 700; padding: 3px 6px; border-radius: 6px; color: var(--text-3); }
+.lang-sw button.on { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.sidebar.rail .side-foot { flex-direction: column; }
 .me-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border-radius: 10px; }
 .me-row:hover { background: var(--bg-hover); }
 .me-meta { line-height: 1.3; min-width: 0; font-size: 13px; }

@@ -149,7 +149,8 @@ const Ai = {
   },
 
   /** Short personal briefing for the home page. */
-  briefing() {
+  briefing(p) {
+    const en = !!(p && p.lang === 'en');
     const me = Auth.currentUser();
     const ctx = Access.context(me);
     const today = Util.today();
@@ -182,12 +183,28 @@ const Ai = {
       try {
         const res = Ai.generate_([
           'Du bist ein freundlicher Assistent in einem Team-Task-Manager. Schreibe für ' + me.name +
-            ' ein kurzes Tagesbriefing auf Deutsch (max. 3 Sätze, duzen, keine Aufzählung).',
+            (en ? ' a short daily briefing in English (max. 3 sentences, informal, no list).' : ' ein kurzes Tagesbriefing auf Deutsch (max. 3 Sätze, duzen, keine Aufzählung).'),
           'Heute: ' + today + '. Daten: ' + JSON.stringify(facts),
           'Antworte als JSON: {"text": string}',
         ].join('\n'), true);
         if (res && res.text) { text = String(res.text).slice(0, 800); source = 'ai'; }
       } catch (e) { /* fall back to rules */ }
+    }
+    if (!text && en) {
+      const parts = [];
+      if (overdue.length) parts.push(overdue.length + ' overdue task' + (overdue.length > 1 ? 's' : ''));
+      if (dueToday.length) parts.push(dueToday.length + ' due today');
+      if (thisWeek.length) parts.push(thisWeek.length + ' more this week');
+      text = parts.length ? 'You have ' + parts.join(', ') + '.' : 'No urgent deadlines – a good moment for deep work.';
+      if (week.available) {
+        text += ' Your workload this week is ' + week.utilization + ' % (' + week.planned + ' of ' + week.available + ' h).';
+        if (week.utilization > 100) text += ' Consider handing something off or moving it.';
+      }
+      if (facts.teamWarnings.length) {
+        const w = facts.teamWarnings[0];
+        text += ' Heads up: on ' + w.date + ', ' + w.absent + ' of ' + w.total + ' people in ' + w.teamName + ' are away.';
+      }
+      if (upcoming.length) text += ' Next holiday: ' + upcoming[0].name + ' on ' + upcoming[0].date + '.';
     }
     if (!text) {
       const parts = [];
