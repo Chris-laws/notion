@@ -118,6 +118,10 @@ const EN = {
   'Regelbasierter Modus.': 'Rule-based mode.', 'Projekteinstellungen → Skripteigenschaften': 'Project settings → Script properties',
   'kein Arbeitstag (Teilzeit)': 'not a workday (part-time)', 'Land (für Feiertage)': 'Country (for holidays)', 'Keine.': 'None.',
   'Notiz (nur für dich und Admins sichtbar)': 'Note (only visible to you and admins)', 'z. B. DE, AT': 'e.g. DE, AT', 'z. B. DE-BY, CH-ZH, US-CA': 'e.g. DE-BY, CH-ZH, US-CA', 'Sprache': 'Language',
+  'Für dieses Land gibt es keine regionalen Feiertage.': 'This country has no regional holidays.',
+  'Ganzes Land (nur landesweite Feiertage)': 'Whole country (national holidays only)', 'Kärnten': 'Carinthia',
+  'Niederösterreich': 'Lower Austria', 'Oberösterreich': 'Upper Austria', 'Steiermark': 'Styria', 'Tirol': 'Tyrol', 'Wien': 'Vienna',
+  'Nordirland': 'Northern Ireland', 'Schottland': 'Scotland', 'Tasmanien': 'Tasmania', 'Genf': 'Geneva', 'Tessin': 'Ticino',
   'Design: wie System': 'Theme: system', 'Design: Hell': 'Theme: light', 'Design: Dunkel': 'Theme: dark',
 
   // countries and German states
@@ -143,7 +147,7 @@ const PATTERNS = [
   [/^(\d+)\/(\d+) erledigt$/, '$1/$2 done'],
   [/^(\d+) offen$/, '$1 open'],
   [/^(\d+) Tage?$/, (m, n) => n + (n === '1' ? ' day' : ' days')],
-  [/^(\d+) Personen$/, '$1 people'], [/^(\d+) Mitglieder$/, '$1 members'], [/^(\d+) Projekte$/, '$1 projects'],
+  [/^(\d+) Personen$/, '$1 people'], [/^1 Person$/, '1 person'], [/^(\d+) Mitglieder$/, '$1 members'], [/^(\d+) Projekte$/, '$1 projects'],
   [/^(\d+) Aufgaben$/, '$1 tasks'], [/^(\d+) weg$/, '$1 away'], [/^(\d+) Wo\.$/, '$1 wk'],
   [/^KW (\d+)/, 'Week $1'],
   [/^Fällig (.+)$/, (m, x) => 'Due ' + trText(x)], [/^Überfällig seit (.+)$/, (m, x) => 'Overdue since ' + trText(x)],

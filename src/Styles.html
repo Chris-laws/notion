@@ -75,6 +75,13 @@
 }
 
 * { box-sizing: border-box; }
+/* slim, rounded scrollbars that only show up when you need them */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text-3) 45%, transparent) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-3) 35%, transparent); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--text-3) 65%, transparent); }
+::-webkit-scrollbar-corner, ::-webkit-scrollbar-button { display: none; background: transparent; }
 html, body { margin: 0; height: 100%; }
 body {
   font: 14px/1.45 var(--font); font-optical-sizing: auto; color: var(--text);
@@ -150,6 +157,7 @@ svg.i.lg { width: 18px; height: 18px; }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
 .side-foot { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: 6px; }
 .side-foot .me-row { flex: 1; min-width: 0; }
+.prefs { display: flex; align-items: center; gap: 6px; flex: none; margin-left: 4px; padding-left: 10px; border-left: 1px solid var(--border); }
 .theme-btn { flex: none; width: 30px; height: 30px; }
 .lang-sw { display: flex; flex: none; background: var(--bg-hover); border-radius: 8px; padding: 2px; }
 .lang-sw button { font-size: 11px; font-weight: 700; padding: 3px 6px; border-radius: 6px; color: var(--text-3); }
@@ -421,6 +429,21 @@ table.db tr:hover .title-cell .open { opacity: 1; }
 
 /* calendar page fills the window; only its boxes scroll */
 #view:has(.cal-fit) { overflow: hidden; }
+/* App layout on desktop: pages never scroll as a whole. Heads, tabs and tool bars stay, the .fit-body box scrolls. */
+@media (min-width: 861px) {
+  #view { overflow: hidden; }
+  #view > .page { height: 100%; display: flex; flex-direction: column; padding-bottom: 16px; }
+  #view > .page > * { flex: none; }
+  #view > .page > .cal-body { flex: 1 1 auto; min-height: 0; }
+  #view > .page > .fit-body { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 -6px; padding: 0 6px 4px; }
+  /* a task database inside a tab: its tool bar stays, its rows scroll */
+  .fit-body:has(> .db-body) { display: flex; flex-direction: column; overflow: hidden !important; }
+  .fit-body > .dbh { flex: none; }
+  .fit-body > .db-body { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 -6px; padding: 0 6px 4px; }
+  .db-body .board { min-height: 100%; }
+  /* dashboard cards with long lists scroll inside themselves */
+  .dash-grid .card-w { max-height: 560px; overflow: auto; }
+}
 @media (min-width: 861px) {
   .app.no-topbar .topbar { display: none; }
   .app.no-topbar .page { padding-top: 16px; }
@@ -539,13 +562,13 @@ table.db tr:hover .title-cell .open { opacity: 1; }
 table.av { border-collapse: separate; border-spacing: 0; font-size: 12px; width: 100%; }
 table.av th, table.av td { padding: 0; border-bottom: 1px solid var(--border); }
 table.av thead th { height: 54px; vertical-align: top; padding-top: 8px; font-weight: 600; color: var(--text-3); text-align: center; min-width: 26px; }
-table.av thead th.wk { border-left: 1px solid var(--border-strong); }
+table.av thead th.wkb { border-left: 1px solid var(--border-strong); }
 table.av thead th small { display: block; font-size: 10px; font-weight: 500; }
 table.av thead th.today { color: #3b3000; background: var(--yellow); }
 table.av .who { position: sticky; left: 0; z-index: 1; background: var(--bg); min-width: 210px; width: 210px; padding: 0 12px 0 16px; height: 48px; border-right: 1px solid var(--border); text-align: left; }
 table.av thead .who { background: var(--bg); font-size: 12px; color: var(--text-3); font-weight: 600; }
 table.av td.c { text-align: center; height: 48px; padding: 9px 0; }
-table.av td.c.wk { border-left: 1px solid var(--border-strong); }
+table.av td.c.wkb { border-left: 1px solid var(--border-strong); }
 table.av td.c.we { background: var(--bg-subtle); }
 .blk { width: 100%; height: 30px; margin: 0; border-radius: 0; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; }
 .blk.vacation { background: var(--vacation); } .blk.sick { background: var(--sick); } .blk.training { background: var(--training); }
@@ -636,13 +659,14 @@ table.av tfoot .who { font-weight: 700; background: var(--bg-subtle); }
 .pop-sep { height: 1px; background: var(--border); margin: 5px 0; }
 .pop-label { font-size: 11px; color: var(--text-3); font-weight: 700; padding: 8px 10px 4px; letter-spacing: .04em; text-transform: uppercase; }
 .pop-quick { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; }
-.modal-bg { position: fixed; inset: 0; background: rgba(14, 26, 52, .45); backdrop-filter: blur(2px); z-index: 50; display: grid; place-items: start center; padding: 10vh 16px; overflow: auto; animation: fade .12s; }
+.modal-bg { position: fixed; inset: 0; background: rgba(14, 26, 52, .45); backdrop-filter: blur(2px); z-index: 50; display: grid; place-items: center; padding: 4vh 16px; overflow: hidden; animation: fade .12s; }
 @keyframes fade { from { opacity: 0; } }
-.modal { width: 100%; max-width: 500px; background: var(--bg-elevated); border-radius: 20px; box-shadow: var(--shadow-pop); animation: popin .14s; }
-.modal-head { display: flex; align-items: center; padding: 20px 24px 4px; font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+/* dialogs: fixed frame, head and buttons stay, only the body scrolls */
+.modal { width: 100%; max-width: 500px; max-height: 92vh; display: flex; flex-direction: column; background: var(--bg-elevated); border-radius: 20px; box-shadow: var(--shadow-pop); animation: popin .14s; overflow: hidden; }
+.modal-head { flex: none; display: flex; align-items: center; padding: 20px 24px 10px; font-weight: 700; font-size: 18px; letter-spacing: -0.02em; border-bottom: 1px solid var(--border); }
 .modal-head .icon-btn { margin-left: auto; }
-.modal-body { padding: 12px 24px 0; }
-.modal-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 8px 24px 22px; }
+.modal-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 24px 8px; }
+.modal-foot { flex: none; display: flex; gap: 8px; justify-content: flex-end; padding: 12px 24px 18px; border-top: 1px solid var(--border); }
 .modal-foot .left { margin-right: auto; }
 .picker { border: 1px solid var(--border-strong); border-radius: 10px; max-height: 180px; overflow: auto; padding: 4px; }
 .picker label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }

@@ -281,7 +281,7 @@ function formValues(form) {
 const COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
 function colorField(value) {
   return '<input type="hidden" name="color" value="' + esc(value || 'blue') + '"><div class="color-row">' +
-    COLORS.map(c => '<button type="button" class="' + (c === (value || 'blue') ? 'on' : '') + '" style="background:var(--dot-' + c + ')" data-action="pick-color" data-v="' + c + '" title="' + c + '"></button>').join('') + '</div>';
+    COLORS.map(c => '<button type="button" class="' + (c === (value || 'blue') ? 'on' : '') + '" style="background:var(--c-' + c + ')" data-action="pick-color" data-v="' + c + '" title="' + c + '"></button>').join('') + '</div>';
 }
 A['pick-color'] = el => {
   const row = el.parentNode;

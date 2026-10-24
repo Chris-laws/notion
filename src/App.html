@@ -517,11 +517,14 @@ function renderSidebar() {
     '</div>' +
     '<div class="side-foot"><button class="me-row" data-action="nav" data-view="settings">' + avatar(S.me.email, 'lg') +
     '<div class="me-meta"><div style="font-weight:500">' + esc(S.me.name) + '</div><div class="faint">' +
-    esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button>' +
-    themeButton() +
-    '<div class="lang-sw" role="group" aria-label="Sprache">' + ['de', 'en'].map(l =>
-      '<button class="' + (LANG === l ? 'on' : '') + '" data-action="lang" data-lang="' + l + '">' + l.toUpperCase() + '</button>').join('') + '</div></div>');
+    esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button></div>');
   syncDot();
+}
+/** Theme and language: always top right (top bar, or the header card on calendar and availability). */
+function prefControls() {
+  return '<div class="prefs">' + themeButton() +
+    '<div class="lang-sw" role="group" aria-label="Sprache">' + ['de', 'en'].map(l =>
+      '<button class="' + (LANG === l ? 'on' : '') + '" data-action="lang" data-lang="' + l + '">' + l.toUpperCase() + '</button>').join('') + '</div></div>';
 }
 const THEMES = [['system', 'monitor', 'Design: wie System'], ['light', 'sun', 'Design: Hell'], ['dark', 'moon', 'Design: Dunkel']];
 function themeButton() {
@@ -531,7 +534,7 @@ function themeButton() {
 A.theme = () => {
   const i = THEMES.findIndex(x => x[0] === THEME);
   const mode = setTheme(THEMES[(i + 1) % THEMES.length][0]);
-  renderSidebar();
+  render({ peek: false });
   toast(THEMES.find(x => x[0] === mode)[2]);
 };
 A['rail-toggle'] =() => { S.rail = !S.rail; store.set('rail', S.rail); renderSidebar(); };
@@ -560,7 +563,7 @@ function renderTopbar() {
     (cal ? '' : '<button class="top-search" data-action="palette">' + icon('search', 'sm') + '<span>Aufgaben und Projekte suchen</span><span class="kbd">⌘K</span></button>') +
     '<div class="spacer"></div>' +
     (S.ai.enabled && !cal ? '<span class="chip accent">' + icon('sparkle', 'sm') + 'KI aktiv</span>' : '') +
-    (['home', 'all', 'dash', 'calendar', 'capacity'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : ''));
+    (['home', 'all', 'dash', 'calendar', 'capacity'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : '') + prefControls());
 }
 
 /* ---------------- global events ---------------- */
