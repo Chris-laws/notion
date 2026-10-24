@@ -45,6 +45,9 @@ function SharedFactory() {
     { key: 'paused', label: 'Pausiert', color: 'yellow' },
     { key: 'done', label: 'Abgeschlossen', color: 'green' },
   ];
+  /** Eight team colours: everyone is in at most 8 teams, and teams that share people never share a colour. */
+  const TEAM_COLORS = ['blue', 'orange', 'green', 'purple', 'pink', 'red', 'yellow', 'teal'];
+  const MAX_TEAMS = 8;
 
   // ---------------------------------------------------------------- dates
   function isDate(s) {
@@ -284,7 +287,7 @@ function SharedFactory() {
   }
 
   return {
-    STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES,
+    STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,
     endOfMonth, nextOccurrence, parse, norm,
   };

@@ -69,6 +69,7 @@ function api(method, payload) {
 const App = {
   bootstrap() {
     const me = Auth.currentUser();
+    Teams.fixColors_();
     const ctx = Access.context(me);
     return {
       appName: Config.get('APP_NAME'),

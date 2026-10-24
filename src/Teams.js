@@ -11,12 +11,26 @@ const Teams = {
     const data = {
       name: name,
       icon: String(p.icon || '').slice(0, 8),
-      color: String(p.color || 'blue').slice(0, 12),
+      color: String(p.color || ''),
       description: String(p.description || '').slice(0, 2000),
       lead: lead,
       members: members,
     };
     return Db.tx(() => {
+      // at most 8 teams per person
+      const others = Db.all('Teams').filter(t => t.id !== p.id);
+      members.forEach(e => {
+        const n = others.filter(t => Teams.people_(t).indexOf(e) >= 0).length;
+        if (n >= Shared.MAX_TEAMS) {
+          const u = Db.get('Users', e);
+          throw new Error((u && u.name ? u.name : e) + ' ist schon in ' + Shared.MAX_TEAMS + ' Teams. Mehr geht nicht: bitte erst aus einem anderen Team entfernen.');
+        }
+      });
+      // teams that share people never share a colour
+      const taken = Teams.takenColors_(members, p.id);
+      if (!data.color) data.color = Shared.TEAM_COLORS.find(c => !taken[c]) || 'blue';
+      if (Shared.TEAM_COLORS.indexOf(data.color) < 0) throw new Error('Unbekannte Teamfarbe.');
+      if (taken[data.color]) throw new Error('Diese Farbe hat schon das Team „' + taken[data.color] + '“. Bitte eine andere wählen.');
       Users.ensure(members);
       if (p.id) {
         const team = Db.get('Teams', p.id);
@@ -28,6 +42,44 @@ const Teams = {
         id: Util.uid('tm_'), createdBy: me.email, createdAt: new Date().toISOString(),
       }));
     });
+  },
+
+  people_(t) {
+    return [t.lead].concat(t.members || []).filter(Boolean);
+  },
+
+  /** Colour -> team name, for teams (other than teamId) that share at least one person with `people`. */
+  takenColors_(people, teamId) {
+    const taken = {};
+    Db.all('Teams').forEach(t => {
+      if (t.id === teamId) return;
+      if (Teams.people_(t).some(e => people.indexOf(e) >= 0)) taken[t.color] = t.name;
+    });
+    return taken;
+  },
+
+  /**
+   * One-off clean-up for teams from before the colour rule: oldest team keeps its colour,
+   * later teams that clash with an overlapping team (or use a retired colour) get the first free one.
+   */
+  fixColors_() {
+    const teams = Db.all('Teams').slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    const bad = teams.some((t, i) => Shared.TEAM_COLORS.indexOf(t.color) < 0 ||
+      teams.slice(0, i).some(o => o.color === t.color && Teams.people_(o).some(e => Teams.people_(t).indexOf(e) >= 0)));
+    if (!bad) return false;
+    Db.tx(() => {
+      const done = [];
+      teams.forEach(t => {
+        const clash = c => done.some(o => o.color === c && Teams.people_(o).some(e => Teams.people_(t).indexOf(e) >= 0));
+        if (Shared.TEAM_COLORS.indexOf(t.color) < 0 || clash(t.color)) {
+          const c = Shared.TEAM_COLORS.find(x => !clash(x)) || 'blue';
+          Db.update('Teams', t.id, { color: c });
+          t.color = c;
+        }
+        done.push(t);
+      });
+    });
+    return true;
   },
 
   remove(id) {

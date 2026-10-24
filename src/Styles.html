@@ -33,11 +33,11 @@
   --side-w: 240px;
   --peek-w: 520px;
   --vacation: #0050aa; --sick: #e60a14; --training: #6b3fb5; --other: #8d98b0; --holiday: #ffe500;
-  --c-gray: #7d8aa3; --c-brown: #8a6a4b; --c-orange: #ee7a1c; --c-yellow: #e8b500; --c-green: #12935b;
+  --c-teal: #0e9aa7; --c-gray: #7d8aa3; --c-brown: #8a6a4b; --c-orange: #ee7a1c; --c-yellow: #e8b500; --c-green: #12935b;
   --c-blue: #0050aa; --c-purple: #7a4fd0; --c-pink: #d6409f; --c-red: #e60a14; --c-default: #7d8aa3;
   /* soft light in the page background: Lidl blue from the left, a hint of yellow top right */
   --glow-blue: rgba(0, 80, 170, .07);
-  --glow-yellow: rgba(255, 229, 0, .10);
+  --glow-yellow: transparent;
   color-scheme: light;
 }
 /* Dark: same tokens, Lidl blue for buttons and a faint blue/yellow glow. Picked by data-theme, or by the OS when set to "system". */
@@ -53,7 +53,7 @@
   --shadow-pop: 0 0 0 1px rgba(255, 255, 255, .08), 0 14px 36px -8px rgba(0, 0, 0, .6);
   --training: #a98aef; --other: #5c6f92; --vacation: #2f7fe0;
   --glow-blue: rgba(0, 80, 170, .22);
-  --glow-yellow: rgba(255, 229, 0, .05);
+  --glow-yellow: transparent;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -69,7 +69,7 @@
     --shadow-pop: 0 0 0 1px rgba(255, 255, 255, .08), 0 14px 36px -8px rgba(0, 0, 0, .6);
     --training: #a98aef; --other: #5c6f92; --vacation: #2f7fe0;
     --glow-blue: rgba(0, 80, 170, .22);
-    --glow-yellow: rgba(255, 229, 0, .05);
+    --glow-yellow: transparent;
     color-scheme: dark;
   }
 }
@@ -112,13 +112,14 @@ svg.i.lg { width: 18px; height: 18px; }
 
 /* ---------- sidebar ---------- */
 .sidebar { width: var(--side-w); flex: none; background: var(--bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-.side-head { display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 14px 0 16px; border-bottom: 1px solid var(--border); }
+.side-head { display: flex; align-items: center; gap: 8px; height: 72px; padding: 0 14px 0 16px; border-bottom: 1px solid var(--border); }
 /* brand: own logo mark + word mark */
 .brand { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; padding: 6px 4px; border-radius: 12px; }
 .brand:hover { background: var(--bg-hover); }
-.brand .logo { width: 34px; height: 34px; flex: none; filter: drop-shadow(0 3px 6px rgba(0, 59, 133, .28)); }
+.brand .logo { width: 38px; height: 38px; flex: none; filter: drop-shadow(0 4px 10px rgba(11, 91, 211, .35)); }
+.ws-name b i { font-style: normal; color: var(--accent-text); }
 .ws-name { display: grid; min-width: 0; line-height: 1.15; }
-.ws-name b { font-size: 16.5px; font-weight: 800; letter-spacing: -0.035em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-name b { font-size: 18px; font-weight: 800; letter-spacing: -0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-name small { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .sync-dot { width: 7px; height: 7px; border-radius: 50%; visibility: hidden; }
 .sync-dot.busy { visibility: visible; background: var(--accent); animation: pulse 1s infinite; }
@@ -150,18 +151,15 @@ svg.i.lg { width: 18px; height: 18px; }
 .team-projects { margin-left: 21px; padding-left: 4px; border-left: 2px solid color-mix(in srgb, var(--tc) 70%, transparent); }
 .team-projects .nav-sub { padding-left: 4px; }
 .sidebar.rail .team-projects { margin-left: 0; border-left: 0; }
-/* project chips: team mark + team name + project */
 .sidebar.rail .brand { flex: none; justify-content: center; padding: 4px; }
-.jpill .jt { opacity: .78; font-weight: 500; margin-right: 4px; }
-.ptabs .pteam { color: var(--text-3); font-weight: 500; margin-right: -3px; }
-.ptabs button.on .pteam { color: inherit; opacity: .75; }
-.pb-team { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; opacity: .92; margin-bottom: 6px;
-  padding: 3px 10px 3px 4px; border-radius: 999px; background: rgba(255, 255, 255, .16); }
-.pb-team .mark { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .6); }
-.pc-team { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-2); }
-.pc-team .mark { width: 16px; height: 16px; font-size: 9px; border-radius: 5px; }
-.pchip .mark, .ptabs .mark { width: 18px; height: 18px; font-size: 10px; border-radius: 5px; }
-.pchip .pteam { color: var(--text-3); font-weight: 500; margin-right: -2px; }
+/* project icon in its team's colour: light fill, coloured ring */
+.mark.proj { background: color-mix(in srgb, var(--mc) 18%, var(--bg)); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--mc); }
+/* team icon behind, project icon in front */
+.mstack { display: inline-flex; align-items: center; flex: none; }
+.mstack > .mark:first-child { box-shadow: 0 0 0 2px var(--bg); }
+.mstack > .mark + .mark { margin-left: -4px; box-shadow: inset 0 0 0 1.5px var(--mc), 0 0 0 2px var(--bg); }
+.mstack.md > .mark + .mark { margin-left: -6px; }
+.pbanner .mstack > .mark:first-child { box-shadow: 0 0 0 2px rgba(255, 255, 255, .7); }
 .nav-sub .nav-item { height: 32px; font-size: 13px; }
 .side-section { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 4px; padding: 0 12px; height: 22px; font-size: 12px; font-weight: 600; color: var(--text-3); letter-spacing: .02em; }
 .team-row { display: flex; align-items: center; }
@@ -308,7 +306,8 @@ svg.i.lg { width: 18px; height: 18px; }
   .add-p { opacity: 1; width: 32px; height: 32px; }
 }
 /* AI assistant */
-.side-ai { color: var(--accent-text); font-weight: 600; background: linear-gradient(90deg, var(--accent-soft), color-mix(in srgb, var(--yellow) 18%, var(--accent-soft))); }
+.side-ai { color: var(--accent-text); font-weight: 600; background: var(--accent-soft); margin-top: 18px; }
+.side-ai:hover { background: color-mix(in srgb, var(--accent) 20%, var(--accent-soft)); }
 .side-ai svg { color: var(--accent); }
 .ai-in { width: 100%; min-height: 96px; }
 .ai-bar { display: flex; align-items: center; gap: 10px; margin: 8px 0 12px; }
@@ -782,6 +781,12 @@ table.av tfoot .who { font-weight: 700; background: var(--bg-subtle); }
 .color-row { display: flex; gap: 8px; }
 .color-row button { width: 24px; height: 24px; border-radius: 50%; }
 .color-row button.on { box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--text-2); }
+/* colour already used by an overlapping team: crossed out with a red X */
+.color-row button.taken { position: relative; cursor: not-allowed; box-shadow: inset 0 0 0 12px color-mix(in srgb, var(--bg-elevated) 55%, transparent); }
+.color-row button.taken::before, .color-row button.taken::after { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2.5px; margin-left: -1.25px;
+  border-radius: 2px; background: var(--danger); opacity: 1; }
+.color-row button.taken::before { transform: rotate(45deg); }
+.color-row button.taken::after { transform: rotate(-45deg); }
 .palette-bg { position: fixed; inset: 0; z-index: 70; background: rgba(14, 26, 52, .4); backdrop-filter: blur(2px); display: flex; justify-content: center; padding-top: 14vh; animation: fade .1s; }
 .palette { width: min(640px, calc(100vw - 32px)); background: var(--bg-elevated); border-radius: 20px; box-shadow: var(--shadow-pop); overflow: hidden; align-self: flex-start; }
 .palette-in { display: flex; align-items: center; gap: 10px; padding: 0 20px; height: 58px; border-bottom: 1px solid var(--border); }

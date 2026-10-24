@@ -288,9 +288,22 @@ function formValues(form) {
   return out;
 }
 const COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
-function colorField(value) {
-  return '<input type="hidden" name="color" value="' + esc(value || 'blue') + '"><div class="color-row">' +
-    COLORS.map(c => '<button type="button" class="' + (c === (value || 'blue') ? 'on' : '') + '" style="background:var(--c-' + c + ')" data-action="pick-color" data-v="' + c + '" title="' + c + '"></button>').join('') + '</div>';
+/** Colour row. opts.palette limits the choice, opts.taken = { colour: team name } shows those crossed out and not selectable. */
+function colorField(value, opts) {
+  opts = opts || {};
+  const palette = opts.palette || COLORS;
+  const taken = opts.taken || {};
+  value = value || palette.find(c => !taken[c]) || palette[0];
+  return '<input type="hidden" name="color" value="' + esc(value) + '"><div class="color-row">' +
+    palette.map(c => taken[c] && c !== value
+      ? '<button type="button" class="taken" style="background:var(--c-' + c + ')" disabled title="' + esc('Bereits vergeben an „' + taken[c] + '“') + '" aria-label="' + esc('Bereits vergeben an „' + taken[c] + '“') + '"></button>'
+      : '<button type="button" class="' + (c === value ? 'on' : '') + '" style="background:var(--c-' + c + ')" data-action="pick-color" data-v="' + c + '" title="Farbe wählen" aria-label="Farbe wählen"></button>').join('') + '</div>';
+}
+/** Colours of teams that share people with `people` (except the team itself): those cannot be used again. */
+function takenTeamColors(people, teamId) {
+  const taken = {};
+  S.teams.forEach(t => { if (t.id !== teamId && teamMembers(t).some(e => people.indexOf(e) >= 0)) taken[t.color] = t.name; });
+  return taken;
 }
 A['pick-color'] = el => {
   const row = el.parentNode;
@@ -323,11 +336,13 @@ function divField(label, inner) { return '<div class="field"><span>' + esc(label
 
 /* Team */
 function teamModal(t) {
-  t = t || { members: [S.me.email], lead: S.me.email, color: nextColor(S.teams) };
+  t = t || { members: [S.me.email], lead: S.me.email, color: '' };
+  const taken = takenTeamColors(t.id ? teamMembers(t) : [S.me.email], t.id);
   openModal({
     title: t.id ? 'Team bearbeiten' : 'Neues Team',
     body: field('Name', '<input class="input" name="name" required maxlength="80" value="' + esc(t.name || '') + '" placeholder="z. B. Produkt, Vertrieb, Design">') +
-      divField('Farbe', colorField(t.color)) +
+      divField('Farbe', colorField(t.color, { palette: Shared.TEAM_COLORS, taken: taken }) +
+        '<div class="hint" style="margin-top:6px">Jedes Team hat eine eigene Farbe. Durchgestrichene Farben gehören schon zu Teams mit denselben Personen (höchstens ' + Shared.MAX_TEAMS + ' Teams pro Person).</div>') +
       field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(t.description || '') + '</textarea>') +
       field('Team-Lead', selectField('lead', S.users.map(u => ({ key: u.email, label: u.name })), t.lead)) +
       divField('Mitglieder', peopleField('members', t.members)),

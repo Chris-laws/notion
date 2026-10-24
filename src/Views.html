@@ -961,9 +961,9 @@ function dashPage() {
     const counts = Shared.STATUSES.map(x => '<div class="sc"><b>' + ptasks.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
     const next = ptasks.filter(x => !isDone(x) && x.dueDate).sort((x, y) => x.dueDate.localeCompare(y.dueDate)).slice(0, 3);
     return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Projektübersicht<button class="btn white sm more2" data-action="proj-all">Alle Projekte</button></h3>' +
-      '<div class="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '" title="' + esc(projectPath(x)) + '">' + mark(team(x.teamId) || x) + '<span class="pteam">' + esc(team(x.teamId) ? team(x.teamId).name + ' ›' : '') + '</span>' + esc(x.name) + '</button>').join('') + '</div>' +
-      '<div class="pbanner" style="--pc:' + pc + '">' + (team(sp.teamId) ? '<div class="pb-team">' + mark(team(sp.teamId)) + esc(team(sp.teamId).name) + '</div>' : '') +
-      '<div class="pb-t">' + cdot('#fff') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
+      '<div class="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '" title="' + esc(projectPath(x)) + '">' + projectMark(x) + esc(x.name) + '</button>').join('') + '</div>' +
+      '<div class="pbanner" style="--pc:' + pc + '">' +
+      '<div class="pb-t" title="' + esc(projectPath(sp)) + '">' + projectMark(sp, 'md') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
       '<p>' + esc(sp.description || 'Keine Beschreibung.') + '</p></div>' +
       '<div class="pstats"><div class="pst"><div class="l">Fortschritt<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Ansehen</button></div><div class="v"><b>' + ppct + '%</b><span class="track"><i style="width:' + ppct + '%"></i></span></div></div>' +
       '<div class="pst"><div class="l">Aufgaben<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Öffnen</button></div><div class="v"><b>' + pdone + '/' + ptasks.length + '</b><small>' + ppct + ' % erledigt</small></div></div>' +
@@ -1323,9 +1323,7 @@ function projectCard(p) {
   const pct = tasks.length ? Math.round(done / tasks.length * 100) : 0;
   const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
   return '<button class="pcard" data-action="nav" data-view="project" data-id="' + esc(p.id) + '">' +
-    '<div class="t">' + mark(p, 'md') + esc(p.name) + '</div>' +
-    (team(p.teamId) ? '<div class="pc-team">' + mark(team(p.teamId)) + esc(team(p.teamId).name) + '</div>' : '') +
-    (p.description ? '<div class="d">' + esc(p.description) + '</div>' : '') +
+    '<div class="t">' + mark(p, 'md') + esc(p.name) + '</div>' +    (p.description ? '<div class="d">' + esc(p.description) + '</div>' : '') +
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="chip soft">' + esc(st.label) + '</span>' +
     (p.endDate ? '<span class="meta">' + icon('flag', 'sm') + esc(fmtDate(p.endDate, { absolute: true })) + '</span>' : '') + '</div>' +
     '<div class="progress"><i style="width:' + pct + '%"></i></div>' +

@@ -297,6 +297,31 @@ test('AI placeholder: rules mode works without key', () => {
   assert.ok(brief.text.length > 10);
 });
 
+test('team colours are unique per person, max 8 teams, old clashes get fixed', () => {
+  as(ME);
+  const mine = call('bootstrap').teams.filter(t => [t.lead].concat(t.members).indexOf(ME) >= 0);
+  const used = mine.map(t => t.color);
+  assert.strictEqual(new Set(used).size, used.length, 'my teams have different colours after bootstrap');
+  assert.ok(fails('teams.save', { name: 'Doppelt', color: used[0], members: [ME] }), 'a taken colour is refused');
+  const auto = call('teams.save', { name: 'Auto', members: [ME] });
+  assert.ok(used.indexOf(auto.color) < 0 && S.TEAM_COLORS.indexOf(auto.color) >= 0, 'new team gets a free colour');
+  const extra = [];
+  try {
+    while (call('bootstrap').teams.filter(t => [t.lead].concat(t.members).indexOf(ME) >= 0).length < S.MAX_TEAMS) {
+      extra.push(call('teams.save', { name: 'T' + extra.length, members: [ME] }).id);
+    }
+    assert.ok(fails('teams.save', { name: 'Neuntes', members: [ME] }), 'a 9th team is refused');
+  } finally {
+    extra.concat([auto.id]).forEach(id => call('teams.remove', { id: id }));
+  }
+  // a clash written directly into the sheet is repaired on the next load
+  const [a, b] = mine;
+  X.Db.update('Teams', b.id, { color: a.color });
+  X.Db.reset();
+  const fixed = call('bootstrap').teams;
+  assert.notStrictEqual(fixed.find(t => t.id === a.id).color, fixed.find(t => t.id === b.id).color);
+});
+
 test('AI assistant: dummy without key, validated items with key', () => {
   as(ME);
   const d = call('ai.assist', { text: 'Angebot prüfen morgen @anna 2h. Ich bin übermorgen im Urlaub' });
