@@ -323,7 +323,7 @@ function divField(label, inner) { return '<div class="field"><span>' + esc(label
 
 /* Team */
 function teamModal(t) {
-  t = t || { members: [S.me.email], lead: S.me.email, color: 'purple' };
+  t = t || { members: [S.me.email], lead: S.me.email, color: nextColor(S.teams) };
   openModal({
     title: t.id ? 'Team bearbeiten' : 'Neues Team',
     body: field('Name', '<input class="input" name="name" required maxlength="80" value="' + esc(t.name || '') + '" placeholder="z. B. Produkt, Vertrieb, Design">') +
@@ -361,7 +361,8 @@ A['team-edit'] = el => teamModal(team(el.dataset.id));
 
 /* Project */
 function projectModal(p, teamId) {
-  p = p || { teamId: teamId || (myTeams()[0] || S.teams[0] || {}).id, status: 'active', color: 'blue', members: [] };
+  const tid = teamId || (myTeams()[0] || S.teams[0] || {}).id;
+  p = p || { teamId: tid, status: 'active', color: nextColor(S.projects.filter(x => x.teamId === tid)), members: [] };
   if (!S.teams.length) { toast('Lege zuerst ein Team an.'); return teamModal(); }
   openModal({
     title: p.id ? 'Projekt bearbeiten' : 'Neues Projekt',

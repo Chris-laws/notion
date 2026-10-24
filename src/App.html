@@ -258,15 +258,43 @@ function dueTag(t) {
 function tagChip(name) {
   return '<span class="tpill t-' + tagColor(name) + '">' + esc(name) + '</span>';
 }
+const colorVar = e => (e && e.color && e.color !== 'default' ? 'var(--c-' + esc(e.color) + ')' : 'var(--c-gray)');
+/** "Team › Projekt" in words, for tooltips and places without room. */
+function projectPath(p) {
+  const t = p && team(p.teamId);
+  return p ? (t ? t.name + ' › ' : '') + p.name : '';
+}
+/** Project with its team: the team's mark comes first, so equal names in different teams stay apart. */
 function projectChip(p) {
   if (!p) return '';
-  return '<span class="person">' + mark(p) + '<span>' + esc(p.name) + '</span></span>';
+  const t = team(p.teamId);
+  return '<span class="person pchip" title="' + esc(projectPath(p)) + '">' + (t ? mark(t) : mark(p)) +
+    (t ? '<span class="pteam">' + esc(t.name) + ' ›</span>' : '') + '<span>' + esc(p.name) + '</span></span>';
+}
+/** First colour not used yet by the given teams or projects, so new ones look different. */
+function nextColor(list) {
+  const used = list.map(x => x.color);
+  return ['blue', 'orange', 'green', 'purple', 'pink', 'red', 'yellow', 'brown', 'gray'].find(c => used.indexOf(c) < 0) || 'blue';
+}
+/**
+ * Logo mark of the app (own design, not a company trademark). To use an official logo instead,
+ * replace the SVG below or return '<img src="...">' here.
+ */
+function logoMark() {
+  return '<svg class="logo" viewBox="0 0 32 32" aria-hidden="true">' +
+    '<defs><linearGradient id="lg-b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1a6fd6"/><stop offset="1" stop-color="#003b85"/></linearGradient></defs>' +
+    '<rect width="32" height="32" rx="9" fill="url(#lg-b)"/>' +
+    '<path d="M9 22.5V11.5a2.5 2.5 0 0 1 2.5-2.5h9a2.5 2.5 0 0 1 2.5 2.5v4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>' +
+    '<path d="M13 18.2l3 3 6.8-7" fill="none" stroke="#ffe500" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<path d="M9 22.5h5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>';
 }
 /** Solid coloured label for a project (table, board). */
 function projectPill(p) {
   if (!p) return '';
-  const c = p.color && p.color !== 'default' ? 'var(--c-' + esc(p.color) + ')' : 'var(--c-gray)';
-  return '<span class="jpill" style="background:' + c + '" title="' + esc(p.name) + '">' + esc(p.name) + '</span>';
+  // coloured by team, labelled "Team › Projekt", so the team is clear at a glance
+  const t = team(p.teamId);
+  return '<span class="jpill" style="background:' + colorVar(t || p) + '" title="' + esc(projectPath(p)) + '">' +
+    (t ? '<span class="jt">' + esc(t.name) + ' ›</span>' : '') + esc(p.name) + '</span>';
 }
 function teamChip(t) {
   if (!t) return '';
@@ -539,16 +567,18 @@ function renderSidebar() {
   const teamsHtml = S.teams.slice().sort((a, b) => a.name.localeCompare(b.name)).map(t => {
     const collapsed = S.collapsed[t.id];
     const projects = S.projects.filter(p => p.teamId === t.id && p.status !== 'done');
-    return '<div class="' + (collapsed ? 'collapsed' : '') + '"><div class="team-row">' +
+    // projects hang on a line in the team's colour, so it is clear which team they belong to
+    return '<div class="team-grp' + (collapsed ? ' collapsed' : '') + '" style="--tc:' + colorVar(t) + '"><div class="team-row">' +
       '<button class="chev-btn" data-action="toggle-team" data-id="' + esc(t.id) + '" aria-label="Ein-/ausklappen">' + icon('chevron', 'sm chev') + '</button>' +
       navItem('team', mark(t), esc(t.name), '', t.id) + '</div>' +
-      (collapsed ? '' : projects.map(p => '<div class="nav-sub">' + navItem('project', mark(p), esc(p.name), '', p.id) + '</div>').join('') +
-        '<div class="nav-sub"><button class="nav-item faint" data-action="project-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + '<span class="nav-label">Neues Projekt</span></button></div>') +
+      (collapsed ? '' : '<div class="team-projects">' + projects.map(p => '<div class="nav-sub">' + navItem('project', mark(p), esc(p.name), '', p.id) + '</div>').join('') +
+        '<div class="nav-sub"><button class="nav-item faint" data-action="project-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + '<span class="nav-label">Neues Projekt</span></button></div></div>') +
       '</div>';
   }).join('');
 
   setHtml($('#sidebar'),
-    '<div class="side-head"><div class="ws-mark">' + icon('check') + '</div><div class="ws-name">' + esc(S.appName) + '</div>' +
+    '<div class="side-head"><button class="brand" data-action="nav" data-view="dash" title="' + esc(S.appName) + '">' + logoMark() +
+    '<span class="ws-name"><b>' + esc(S.appName) + '</b><small>Team-Workspace</small></span></button>' +
     '<span id="sync" class="sync-dot" title="Wird gespeichert …"></span>' +
     '<button class="icon-btn rail-toggle" data-action="rail-toggle" title="Seitenleiste ein-/ausklappen">' + icon('menu') + '</button></div>' +
     '<div class="side-scroll">' +

@@ -621,7 +621,7 @@ function listRow(t, opts) {
     '<span class="check' + (isDone(t) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(t.id) + '" role="checkbox" aria-checked="' + isDone(t) + '" title="Erledigt"></span>' +
     '<div class="t"><span class="title' + (isDone(t) ? ' done' : '') + '">' + esc(t.title) + '</span>' +
     (t.parentId && task(t.parentId) ? '<span class="parent">↳ ' + esc(task(t.parentId).title) + '</span>' : '') + '</div>' +
-    '<div class="side">' + metaHtml(t, Object.assign({ withTags: true }, opts)) + (p ? '<span class="meta">' + mark(p) + esc(p.name) + '</span>' : '') +
+    '<div class="side">' + metaHtml(t, Object.assign({ withTags: true }, opts)) + (p ? '<span class="meta">' + projectChip(p) + '</span>' : '') +
     (t.assignees.length ? avatars(t.assignees) : '') +
     '<button class="add-p" data-action="prop" data-id="' + esc(t.id) + '" data-field="assignees" title="Person hinzufügen">' + icon('plus', 'sm') + '</button></div></div>';
 }
@@ -923,7 +923,10 @@ function dashPage() {
   const people = myPeopleList();
   const upcoming = calEnsure(t, Shared.addDays(t, 14), '');
   const util = b ? b.utilization : 0;
-  const projects = S.projects.filter(p => p.status !== 'done' && myTeams().some(x => x.id === p.teamId)).slice(0, 6);
+  // grouped by team so "Data › n" and "Forecast › m" stand together
+  const teamOrder = id => (team(id) ? team(id).name : '');
+  const projects = S.projects.filter(p => p.status !== 'done' && myTeams().some(x => x.id === p.teamId))
+    .sort((a, b) => teamOrder(a.teamId).localeCompare(teamOrder(b.teamId)) || a.name.localeCompare(b.name)).slice(0, 8);
   const absNext = upcoming ? upcoming.absences.filter(a => a.endDate >= t && people.indexOf(a.email) >= 0).sort((a, c) => a.startDate.localeCompare(c.startDate)).slice(0, 3) : [];
   const teamCard = '<div class="card-w w-5"><h3>' + icon('users', 'sm') + 'Team<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>' +
     (warns.length ? '<div class="hlist">' + warns.slice(0, 3).map(w => '<div class="hitem warnitem" data-action="warn-open" data-team="' + esc(w.teamId) + '" style="cursor:pointer">' + dayBox(w.date) +
@@ -958,8 +961,9 @@ function dashPage() {
     const counts = Shared.STATUSES.map(x => '<div class="sc"><b>' + ptasks.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
     const next = ptasks.filter(x => !isDone(x) && x.dueDate).sort((x, y) => x.dueDate.localeCompare(y.dueDate)).slice(0, 3);
     return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Projektübersicht<button class="btn white sm more2" data-action="proj-all">Alle Projekte</button></h3>' +
-      '<div class="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '">' + cdot(x.color && x.color !== 'default' ? 'var(--c-' + x.color + ')' : 'var(--c-gray)') + esc(x.name) + '</button>').join('') + '</div>' +
-      '<div class="pbanner" style="--pc:' + pc + '"><div class="pb-t">' + cdot('#fff') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
+      '<div class="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '" title="' + esc(projectPath(x)) + '">' + mark(team(x.teamId) || x) + '<span class="pteam">' + esc(team(x.teamId) ? team(x.teamId).name + ' ›' : '') + '</span>' + esc(x.name) + '</button>').join('') + '</div>' +
+      '<div class="pbanner" style="--pc:' + pc + '">' + (team(sp.teamId) ? '<div class="pb-team">' + mark(team(sp.teamId)) + esc(team(sp.teamId).name) + '</div>' : '') +
+      '<div class="pb-t">' + cdot('#fff') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
       '<p>' + esc(sp.description || 'Keine Beschreibung.') + '</p></div>' +
       '<div class="pstats"><div class="pst"><div class="l">Fortschritt<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Ansehen</button></div><div class="v"><b>' + ppct + '%</b><span class="track"><i style="width:' + ppct + '%"></i></span></div></div>' +
       '<div class="pst"><div class="l">Aufgaben<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Öffnen</button></div><div class="v"><b>' + pdone + '/' + ptasks.length + '</b><small>' + ppct + ' % erledigt</small></div></div>' +
@@ -1320,6 +1324,7 @@ function projectCard(p) {
   const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
   return '<button class="pcard" data-action="nav" data-view="project" data-id="' + esc(p.id) + '">' +
     '<div class="t">' + mark(p, 'md') + esc(p.name) + '</div>' +
+    (team(p.teamId) ? '<div class="pc-team">' + mark(team(p.teamId)) + esc(team(p.teamId).name) + '</div>' : '') +
     (p.description ? '<div class="d">' + esc(p.description) + '</div>' : '') +
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="chip soft">' + esc(st.label) + '</span>' +
     (p.endDate ? '<span class="meta">' + icon('flag', 'sm') + esc(fmtDate(p.endDate, { absolute: true })) + '</span>' : '') + '</div>' +
