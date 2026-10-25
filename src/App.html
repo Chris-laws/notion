@@ -323,8 +323,13 @@ function call(method, payload) {
   const READS = /^(bootstrap|tasks\.list|calendar\.range|availability|comments\.list|ai\.briefing|ai\.status)$/;
   if (!READS.test(method) && typeof BOOT_DONE !== 'undefined' && !BOOT_DONE) S.wroteDuringBoot = true;
   const attempt = n => runCall(method, payload).catch(err => {
-    const transient = /lock|timed? ?out|Zeitüberschreitung|too many|Rate Limit|NetworkError|network|Failed to fetch|503|500/i.test(err && err.message || '');
-    if (n < 2 && transient && READS.test(method)) return new Promise(r => setTimeout(r, 600 * Math.pow(3, n))).then(() => attempt(n + 1));
+    const msg = (err && err.message) || '';
+    // refused before it ran (too many at once): safe to repeat, also for writes
+    const refused = /simultaneous|gleichzeitig/i.test(msg);
+    const transient = refused || /lock|timed? ?out|Zeitüberschreitung|too many|Rate Limit|NetworkError|network|Failed to fetch|503|500/i.test(msg);
+    if (transient && (refused ? n < 3 : n < 2 && READS.test(method))) {
+      return new Promise(r => setTimeout(r, Shared.retryDelay(n, Math.random()))).then(() => attempt(n + 1));
+    }
     throw err;
   });
   return attempt(0);
@@ -783,9 +788,11 @@ function editing() {
   const a = document.activeElement;
   return (a && /INPUT|TEXTAREA/.test(a.tagName)) || $('#popover-root').children.length || $('#modal-root').children.length || dragState.id;
 }
+let pollFailures = 0;
 function refresh() {
   if (document.visibilityState !== 'visible' || editing() || S.busy) return;
   call('tasks.list', { ver: S.tasksVer || '' }).then(res => {
+    pollFailures = 0;
     if (res.same || editing() || S.busy) return;
     const list = res.tasks;
     const pending = S.tasks.filter(t => PENDING[t.id]);
@@ -796,9 +803,11 @@ function refresh() {
     S.tasksVer = res.ver;
     S.reportDirty = true;
     render();
-  }).catch(() => { /* next round */ });
+  }).catch(() => { pollFailures++; /* next round, a bit later */ });
 }
-setInterval(refresh, 90000);
+// polling: about every 2 minutes, spread per client, slower after failures (see Shared.pollDelay)
+function schedulePoll() { setTimeout(() => { refresh(); schedulePoll(); }, Shared.pollDelay(120, pollFailures, Math.random())); }
+schedulePoll();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
 
 /* ---------------- skeletons: placeholders shaped like the content that is on its way ---------------- */
@@ -848,11 +857,6 @@ function skPage(route) {
   const head = '<div class="sk-head">' + sk('220px', '24px') + sk('320px', '12px') + '</div>';
   const card = inner => '<div class="card-w">' + inner + '</div>';
   const tabs = (n, w) => '<div class="sk-tabs">' + skRep(n, () => sk(w, '26px', 'pill')) + '</div>';
-  if (v === 'dash' && store.get('dashLayout', 'classic') === 'new') {
-    // same shape as the new overview: situation bar, then plan (left) and today (right)
-    return '<div class="page wide sk-page">' + head + card(sk('100%', '10px', 'pill') + '<div class="sk-tabs" style="margin-top:10px">' + skRep(4, () => sk('90px', '12px')) + '</div>') +
-      '<div class="sk-2">' + card(skLines(4)) + card('<div class="sk-line">' + sk('40%', '13px') + '</div>' + skRows(5)) + '</div>' + card(skCalGrid(5, 2)) + '</div>';
-  }
   if (v === 'dash') {
     return '<div class="page wide sk-page">' + head + skTiles(4) + '<div class="sk-2">' + card('<div class="sk-line">' + sk('34%', '13px') + '</div>' + skRows(5)) +
       card('<div class="sk-line">' + sk('40%', '13px') + '</div>' + skLines(4)) + '</div>' + card(skCards(3)) + '</div>';
@@ -880,6 +884,8 @@ function skSidebar() {
  * once from that copy and swaps in the fresh data when it arrives.
  */
 const SNAP_MAX_AGE = 7 * 864e5;
+// var on purpose: call() reads it with typeof before this line has run
+// eslint-disable-next-line no-var
 var BOOT_DONE = false;
 const BOOT_REQ = call('bootstrap');
 BOOT_REQ.then(() => { BOOT_DONE = true; }, () => { BOOT_DONE = true; });
@@ -902,6 +908,7 @@ function applyBoot(d) {
 }
 function boot() {
   S.collapsed = store.get('collapsed', {});
+  try { localStorage.removeItem('tr:dashLayout'); } catch (e) { /* layout switch removed */ }
   let started = false;
   let params = {};
   const openLinkedTask = () => {

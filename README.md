@@ -91,6 +91,49 @@ Gespeicherte Ansichten (Filter/Sortierung) liegen im Browser der jeweiligen Pers
 
 Ohne `VERTEX_PROJECT_ID` wird der globale Endpunkt im Vertex-AI-Express-Modus genutzt. Der Schlüssel wird im Header `x-goog-api-key` gesendet, nicht in der URL.
 
+## Codeguard
+
+`npm run guard` führt alle Prüfungen nacheinander aus, zeigt eine Übersicht und endet mit Exit-Code 1, sobald eine fehlschlägt. Dieselbe Prüfung läuft als GitHub Action (`.github/workflows/guard.yml`) bei jedem Push und Pull Request.
+
+| Prüfung | Befehl | Was sie sicherstellt |
+|---|---|---|
+| Lint + Clean-Code-Regeln | `npm run lint` | ESLint mit `eslint-plugin-sonarjs`. Fehler bei Bugs und unsicherem Code (z. B. `eqeqeq`, `no-eval`, doppelte Schlüssel, ungenutzte Variablen). Clean-Code-Metriken als Warnungen: Funktionslänge > 80 Zeilen, Komplexität > 15, kognitive Komplexität > 20, doppelte Strings, identische Funktionen. **Ratsche:** höchstens 80 Warnungen (Stand heute), es darf nur weniger werden. |
+| Unit- und Integrationstests + Coverage | `npm run unit`, `npm run coverage` | `test/*.test.js` (node:test): jeder Test mit eigener, frischer App, Arrange-Act-Assert, ein Verhalten pro Test. Externe Dienste (Nager.Date, Vertex/Gemini) über Test-Doubles: Fehler, Timeout, kaputtes JSON. Dazu die Integrationssuite `dev/test.js`. Coverage über `src/` mit Schwellen: Zeilen und Funktionen ≥ 90 %, Zweige ≥ 75 %. |
+| Apps-Script-Prüfung | `npm run check` | Syntax und Routen der Server-Dateien wie in Apps Script. |
+| Englisch vollständig | `npm run i18n` | Rendert jede Seite, jeden Dialog und jede Fehlermeldung im englischen Modus (jsdom) und schlägt bei deutschen Resten fehl. |
+| Secret-Scan | `npm run secrets` | Keine API-Schlüssel, privaten Schlüssel oder Tokens im Repository. Schlüssel gehören in die Skripteigenschaften. |
+| Lasttest (Kurzprofil) | `npm run load:quick` | Lastbudget für 200 gleichzeitig aktive Personen (≤ 1 % abgelehnt, p95 ≤ 3 s) und Konsistenz (keine verlorenen Updates, keine doppelten IDs). |
+
+### Lastsimulation
+
+`npm run load` simuliert bis zu 10 000 Personen, **ohne die Live-App zu belasten**:
+
+1. **Profil:** Jeder Request-Typ läuft einmal durch den echten Servercode in Node (Apps-Script-Shims). Ein Zähler erfasst, was er kostet: Tabellen-Lesezugriffe und Zeilen, Schreibzugriffe, Cache-Aufrufe, Komprimierung, Lock.
+2. **Latenzmodell** pro Apps-Script-Operation (Annahmen in `dev/load-sim.js`, z. B. Sheet-Lesen 120 ms + 0,004 ms pro Zelle, Cache 15 ms, 250 ms Overhead pro Aufruf).
+3. **Ereignissimulation** über 15 Minuten Spitzenlast: Login-Welle, Polling, Schreiben etwa alle 10 Minuten pro Person (60 % Ändern, 25 % Anlegen, 15 % Kommentar). Dabei gelten die echten Grenzen: höchstens **30 gleichzeitige Ausführungen** (die App läuft als bereitstellendes Konto, alle teilen sich dieses Kontingent), darüber wird sofort abgelehnt. Alle Schreibvorgänge laufen über **ein Script-Lock** (nach 20 s Abbruch).
+4. **Erlang B** (Verlustsystem mit 30 Plätzen) als theoretischer Abgleich.
+5. **Konsistenz:** über 1000 Schreibvorgänge auf dem echten Code, zwischendurch werden Zeilen von Hand vertauscht.
+
+Ergebnis (3 Aufgaben pro Person, vorher → nachher):
+
+| Gleichzeitig aktiv | p95 | abgelehnt | Lock-Wartezeit p95 |
+|---|---|---|---|
+| 250 | 1,4 s → 0,8 s | 0 % → 0 % | 0,8 s → 0,2 s |
+| 500 | 2,3 s → 0,9 s | 0 % → 0 % | 5,2 s → 0,4 s |
+| 1 000 | 18,2 s → 1,1 s | 25 % → 0 % | 20,6 s → 1,7 s |
+| 2 500 | 9,9 s → 15,9 s | 76 % → 74 % | Grenze erreicht |
+| 10 000 | – | 95 % → 92 % | Grenze erreicht |
+
+Behobene Engpässe:
+- **Komprimierter Tabellen-Cache:** Ab etwa 6000 Aufgaben passte die Tabelle nicht mehr in den Cache (2,4 MB JSON). Jeder Poll las dann das ganze Sheet. Jetzt gzip + Base64: 6000 Aufgaben sind etwa 120 KB, 30 000 etwa 580 KB.
+- **Write-through im Lock:** Schreibvorgänge lesen nicht mehr die ganze Tabelle unter dem Lock. Sie nutzen die versionsgeprüfte Cache-Kopie, prüfen vor dem Schreiben eine Zelle (richtige Zeile, auch wenn jemand das Sheet sortiert hat) und legen den neuen Stand direkt wieder in den Cache.
+- **Retry und Polling:** Abgelehnte Aufrufe („zu viele gleichzeitig“) werden mit gestreuter, wachsender Wartezeit wiederholt. Das ist auch für Schreibvorgänge sicher, denn sie liefen nie. Polling alle 120 s ± 25 %, nach Fehlern länger. Clients pollen so nicht mehr im Gleichschritt.
+
+Grenzen der Architektur, mit Zahlen aus der Simulation:
+- **Etwa 1000 gleichzeitig aktive Personen** schafft die App gut. Darüber begrenzen die 30 parallelen Ausführungen des bereitstellenden Kontos.
+- **Ausführung als jeweilige Person** (`executeAs: USER_ACCESSING`) hebt diese Grenze auf: 10 000 Personen ergeben dann 0 % abgelehnt und p95 1,6 s. Dafür braucht jede Person Zugriff auf die Tabelle, das Rechtemodell ändert sich.
+- **Das globale Schreib-Lock** schafft bei 30 000 Aufgaben nur etwa 0,6 Schreibvorgänge/s. Für 10 000 aktive Personen bräuchte es eine Aufteilung der Aufgaben (z. B. je Team eine Tabelle) oder eine echte Datenbank (Cloud SQL / Firestore).
+
 ## Entwicklung
 
 ```bash

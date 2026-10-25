@@ -51,7 +51,11 @@ function SharedFactory() {
 
   // ---------------------------------------------------------------- dates
   function isDate(s) {
-    return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    // a real calendar day: 2026-02-30 is not one
+    const p = s.split('-').map(Number);
+    const d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    return d.getUTCMonth() === p[1] - 1 && d.getUTCDate() === p[2];
   }
   function parseDate(s) {
     const p = s.split('-').map(Number);
@@ -331,8 +335,25 @@ function SharedFactory() {
     return { list, counts, quick, hidesDone: doneRule(quick) === 'open' };
   }
 
+  /** Order for "today" lists: earlier due date first (no date last), then higher priority. */
+  function focusOrder(a, b) {
+    const da = a.dueDate || '9999-12-31', db = b.dueDate || '9999-12-31';
+    if (da !== db) return da < db ? -1 : 1;
+    const rank = k => (PRIORITIES.find(p => p.key === k) || { rank: 9 }).rank;
+    return rank(a.priority) - rank(b.priority);
+  }
+
+  /** Wait before retry n (0, 1, …): doubles each time, ±50 % random spread, at most 8 s. */
+  function retryDelay(attempt, rand) {
+    return Math.min(8000, Math.floor(500 * Math.pow(2, attempt) * (0.5 + rand)));
+  }
+  /** Next poll in ms: base ±25 % so clients drift apart, doubled per failed poll (up to 8x). */
+  function pollDelay(baseSec, failures, rand) {
+    return Math.floor(baseSec * 1000 * (0.75 + 0.5 * rand) * Math.pow(2, Math.min(failures, 3)));
+  }
+
   return {
-    QUICK_TABS, taskQuery,
+    QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,
     endOfMonth, nextOccurrence, parse, norm,

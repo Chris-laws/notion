@@ -90,7 +90,6 @@ function database(tasks, opts) {
   const res = queryTasks(tasks, p, opts);
   const sortable = p.layout === 'table' || p.layout === 'gantt';
   const cnt = n => (n ? '<span class="tn">' + n + '</span>' : '');
-  const views = savedViews();
   const sw = '<div class="vsw">' + LAYOUTS.map(l =>
     '<button class="' + (p.layout === l.key ? 'on' : '') + '" data-action="layout" data-v="' + l.key + '" title="' + l.label + '">' + icon(l.ic) + '</button>').join('') + '</div>';
   const titleRow = opts.title
@@ -482,7 +481,7 @@ function ganttHtml(tasks, p, opts) {
   const g = S.gantt, today = TODAY();
   const z = GZ[g.zoom] || GZ.month, px = z[0], n = z[1];
   if (!g.start) g.start = Shared.addDays(today, -14);
-  const start = g.start, end = Shared.addDays(start, n - 1);
+  const start = g.start;
   const key = p.sort && p.sort.key !== 'dueDate' ? p.sort : null;
   const dated = tasks.filter(t => t.startDate || t.dueDate)
     .sort((a, b) => key ? sortTasks([a, b], p)[0] === a ? -1 : 1 : (a.startDate || a.dueDate).localeCompare(b.startDate || b.dueDate) || bySort(a, b));
@@ -1019,88 +1018,13 @@ A['glance-day'] = (el, e) => {
   go('calendar');
 };
 
-/** Overview layout: "classic" (default) or "new"; kept per browser. */
-function dashLayout() { return store.get('dashLayout', 'classic') === 'new' ? 'new' : 'classic'; }
-function dashPage() { return dashLayout() === 'new' ? dashPageNew() : dashPageClassic(); }
-function dashSwitch() {
-  return '<div class="seg dash-sw" role="group" aria-label="Layout der Übersicht">' + [['classic', 'Klassisch'], ['new', 'Neu']].map(x =>
-    '<button class="' + (dashLayout() === x[0] ? 'on' : '') + '" data-action="dash-layout" data-v="' + x[0] + '">' + x[1] + '</button>').join('') + '</div>';
-}
-A['dash-layout'] = el => { store.set('dashLayout', el.dataset.v); render({ resetScroll: true }); };
-function dashPageNew() {
-  const h = new Date().getHours();
-  const hello = h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
-  const t = TODAY();
-  const first = esc(S.me.name.split(' ')[0]);
-  const open = S.tasks.filter(x => isMine(x) && !isDone(x));
-  const people = myPeopleList();
-  const soon = Shared.addDays(t, 3);
-  // where my open tasks stand: one stacked bar instead of number tiles
-  const parts = [
-    ['over', L('Überfällig', 'Overdue'), open.filter(x => x.dueDate && x.dueDate < t)],
-    ['soon', L('Bis ', 'Until ') + DOW[Shared.weekday(soon)], open.filter(x => x.dueDate && x.dueDate >= t && x.dueDate <= soon)],
-    ['later', L('Später', 'Later'), open.filter(x => x.dueDate && x.dueDate > soon)],
-    ['none', L('Ohne Datum', 'No date'), open.filter(x => !x.dueDate)],
-  ];
-  const lage = '<div class="lage" aria-label="Aufgabenlage">' +
-    '<div class="lage-bar">' + (open.length ? parts.filter(p => p[2].length).map(p =>
-      '<i class="' + p[0] + '" style="flex:' + p[2].length + '" title="' + esc(p[1]) + ': ' + p[2].length + '"></i>').join('') : '<i class="empty"></i>') + '</div>' +
-    '<div class="lage-legend">' + parts.map(p => '<button class="lg ' + p[0] + '" data-action="dash-quick" data-k="' + { over: 'overdue', soon: 'upcoming', later: 'open', none: 'nodate' }[p[0]] + '">' +
-      '<span class="dot"></span><span>' + esc(p[1]) + '</span><b>' + p[2].length + '</b></button>').join('') +
-      '<span class="lage-sum"><b>' + open.length + '</b> <span>offen</span></span></div></div>';
-  // today: overdue first, then due today, then planned for today
-  const focus = open.filter(x => (x.dueDate && x.dueDate <= t) || x.planDate === t)
-    .sort((a, c) => ((a.dueDate || t) < (c.dueDate || t) ? -1 : (a.dueDate || t) > (c.dueDate || t) ? 1 : rankPrio(a) - rankPrio(c)));
-  const due = focus.filter(x => x.dueDate && x.dueDate <= t).length;
-  const lead = due ? L(first + ', heute ' + (due === 1 ? 'steht 1 Aufgabe' : 'stehen ' + due + ' Aufgaben') + ' an.', first + ', ' + due + (due === 1 ? ' task is' : ' tasks are') + ' due today.')
-    : L(first + ', heute ist nichts fällig.', first + ', nothing is due today.');
-  const frow = x => {
-    const over = x.dueDate && x.dueDate < t;
-    return '<div class="frow' + (over ? ' over' : '') + '" data-action="open-task" data-id="' + esc(x.id) + '">' +
-      '<span class="check" data-action="toggle-done" data-id="' + esc(x.id) + '" role="checkbox" aria-checked="false" title="Als erledigt markieren"></span>' +
-      '<span class="tt">' + esc(x.title) + '</span>' + prioTag(x.priority, true) +
-      (over ? '<span class="fr-late">' + esc(fmtDate(x.dueDate, { absolute: true })) + '</span>' : x.planDate === t && x.planStart != null && x.planStart !== '' ? '<span class="fr-time">' + fmtClock(x.planStart) + '</span>' : '') + '</div>';
-  };
-  const focusCard = '<div class="card-w today-card"><h3>' + icon('bolt', 'sm') + 'Heute im Fokus<a class="more" data-action="nav" data-view="home">' + L('Alle', 'All') + ' (' + focus.length + ')</a></h3>' +
-    '<p class="hint">Überfälliges zuerst, dann was heute fällig oder eingeplant ist.</p>' +
-    (focus.length ? '<div class="frows">' + focus.slice(0, 7).map(frow).join('') + '</div>' + (focus.length > 7 ? '<div class="ag2-more">+ ' + (focus.length - 7) + ' weitere</div>' : '')
-      : '<div class="empty-w">' + icon('check', 'sm') + '<span>Für heute ist alles erledigt.</span></div>') + '</div>';
-  // projects of my teams: a plain list, sorted by what needs attention
-  const projects = S.projects.filter(p => p.status !== 'done' && myTeams().some(x => x.id === p.teamId)).map(p => {
-    const pt = S.tasks.filter(x => x.projectId === p.id && !x.parentId);
-    const done = pt.filter(isDone).length;
-    const next = pt.filter(x => !isDone(x) && x.dueDate).sort((a, c) => a.dueDate.localeCompare(c.dueDate))[0];
-    return { p: p, total: pt.length, done: done, over: pt.filter(x => !isDone(x) && x.dueDate && x.dueDate < t).length, next: next };
-  }).sort((a, c) => c.over - a.over || (a.next ? a.next.dueDate : '9').localeCompare(c.next ? c.next.dueDate : '9'));
-  const projList = '<div class="card-w proj-list"><h3>' + icon('folder', 'sm') + 'Projekte<a class="more" data-action="proj-all">' + L('Alle Projekte', 'All projects') + '</a></h3>' +
-    (projects.length ? '<div class="pl-rows">' + projects.slice(0, 8).map(r => {
-      const pct = r.total ? Math.round(r.done / r.total * 100) : 0;
-      return '<button class="pl-row" data-action="nav" data-view="project" data-id="' + esc(r.p.id) + '" title="' + esc(projectPath(r.p)) + '">' +
-        '<span class="pl-name">' + projectMark(r.p) + '<span>' + esc(r.p.name) + '</span><small>' + esc(team(r.p.teamId) ? team(r.p.teamId).name : '') + '</small></span>' +
-        '<span class="pl-prog"><span class="track"><i style="width:' + pct + '%"></i></span><small>' + pct + ' %</small></span>' +
-        '<span class="pl-open"><span>' + esc(L((r.total - r.done) + ' offen', (r.total - r.done) + ' open')) + '</span>' + (r.over ? '<span class="pl-over">' + esc(L(r.over + ' überfällig', r.over + ' overdue')) + '</span>' : '') + '</span>' +
-        '<span class="pl-next">' + (r.next ? '<span>' + esc(L('Nächste Fälligkeit', 'Next due')) + '</span><b>' + esc(fmtDate(r.next.dueDate, { absolute: true })) + '</b>' : '<span>' + esc(L('Nichts terminiert', 'Nothing scheduled')) + '</span>') + '</span>' +
-        avatars(projectMembers(r.p), 3) + '</button>';
-    }).join('') + '</div>' : '<div class="empty-w">Noch keine Projekte in deinen Teams.</div>') + '</div>';
-  return '<div class="page wide">' +
-    '<div class="day-head"><div class="dh-l"><div class="dh-over"><span>' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</span> · <span>' + hello + '</span></div>' +
-    '<h1>' + esc(lead) + '</h1></div>' +
-    dashSwitch() + '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div>' +
-    '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + lage +
-    '<div class="dash2"><div class="dcol">' + reportCard() + projList + '</div><div class="dcol">' + focusCard + '</div></div>' +
-    '<div class="dash-row">' + weekGlanceCard(t, people) + '</div>' +
-    '<div class="dash-pair">' + workloadCard(t) + doneWeeksCard(t) + '</div>' +
-    '</div></div>';
-}
-A['dash-quick'] = el => { go('home'); setPrefs({ quick: el.dataset.k, statuses: [] }); };
-function dashPageClassic() {
+function dashPage() {
   const h = new Date().getHours();
   const hello = h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
   const t = TODAY();
   const rep = reportData();
   const b = rep && !rep.failed ? { utilization: rep.kpis.utilization, available: true } : null;
   const open = S.tasks.filter(x => isMine(x) && !isDone(x));
-  const todayList = open.filter(x => x.dueDate && x.dueDate <= t).sort((a, c) => (a.dueDate < c.dueDate ? -1 : a.dueDate > c.dueDate ? 1 : rankPrio(a) - rankPrio(c)));
   const people = myPeopleList();
   const util = b ? b.utilization : 0;
   // grouped by team so "Data › n" and "Forecast › m" stand together
@@ -1112,9 +1036,6 @@ function dashPageClassic() {
   // header numbers
   const my = S.tasks.filter(isMine);
   const weekStart = Shared.mondayOf(t);
-  const doneToday = my.filter(x => isDone(x) && x.completedAt && x.completedAt.slice(0, 10) === t).length;
-  const dueNow = open.filter(x => x.dueDate && x.dueDate <= t).length;
-  const prog = doneToday + dueNow ? Math.round(doneToday / (doneToday + dueNow) * 100) : 0;
   const newWeek = my.filter(x => x.createdAt && x.createdAt.slice(0, 10) >= weekStart).length;
   const doneWeek = my.filter(x => isDone(x) && x.completedAt && x.completedAt.slice(0, 10) >= weekStart).length;
   const dueSoon = open.filter(x => x.dueDate && x.dueDate >= t && x.dueDate <= Shared.addDays(t, 3)).length;
@@ -1147,7 +1068,7 @@ function dashPageClassic() {
       '<div class="pbox"><div class="l">Als Nächstes fällig</div>' + (next.length ? next.map(x => '<div class="nx" data-action="open-task" data-id="' + esc(x.id) + '"><span class="tt">' + esc(x.title) + '</span>' + dueTag(x) + '</div>').join('') : '<div class="hint">Nichts Offenes mit Datum.</div>') + '</div></div></div>';
   })();
   // today's focus
-  const focus = open.filter(x => (x.dueDate && x.dueDate <= t) || x.planDate === t).sort((a, c) => (a.dueDate || '9') < (c.dueDate || '9') ? -1 : 1 || rankPrio(a) - rankPrio(c));
+  const focus = open.filter(x => (x.dueDate && x.dueDate <= t) || x.planDate === t).sort(Shared.focusOrder);
   const fcard = x => {
     const over = x.dueDate && x.dueDate < t;
     return '<div class="fcard" data-action="open-task" data-id="' + esc(x.id) + '"><span class="check" data-action="toggle-done" data-id="' + esc(x.id) + '" role="checkbox" aria-checked="false" title="Als erledigt markieren"></span>' +
@@ -1160,7 +1081,7 @@ function dashPageClassic() {
     (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Heute ist nichts fällig. Neue Aufgaben legst du oben über „Neue Aufgabe“ an.</div>') + '</div>';
   return '<div class="page wide">' +
     '<div class="card-w dash-top"><div class="du">' + avatar(S.me.email, 'xl') + '<div><h1><span>' + hello + '</span>, ' + esc(S.me.name.split(' ')[0]) + '!</h1><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div></div></div>' +
-    '<div class="dr">' + dashSwitch() + '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
+    '<div class="dr"><button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
     '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>' +
     '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + reportCard() +
     '<div class="stiles">' + stile('', 'checksq', newWeek ? newWeek + ' neu diese Woche' : 'Keine neuen diese Woche', 'Aufgaben gesamt', my.length, 'home') +

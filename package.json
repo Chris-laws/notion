@@ -4,14 +4,27 @@
   "private": true,
   "description": "Notion-artiges Team-Task-Management mit smartem Kalender als Google Apps Script Web-App",
   "scripts": {
-    "test": "node dev/test.js && node dev/i18n-audit.js",
+    "test": "node dev/test.js && node --test test/ && node dev/i18n-audit.js",
     "check": "node dev/check-gas.js",
     "preview": "node dev/build-preview.js",
     "push": "clasp push",
     "deploy": "clasp push && clasp deploy",
-    "i18n": "node dev/i18n-audit.js"
+    "i18n": "node dev/i18n-audit.js",
+    "unit": "node --test test/",
+    "coverage": "c8 --reporter=text --reporter=html --include \"src/**/*.js\" node --test test/ dev/test.js",
+    "lint": "eslint . --max-warnings 80",
+    "secrets": "node dev/secret-scan.js",
+    "load": "node dev/load-sim.js",
+    "load:quick": "node dev/load-sim.js --quick",
+    "guard": "node dev/guard.js"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "c8": "^10.1.3",
+    "eslint": "^9.39.5",
+    "eslint-plugin-html": "^8.2.1",
+    "eslint-plugin-sonarjs": "^1.0.4",
+    "globals": "^15.15.0",
     "jsdom": "^24.1.3"
   }
 }

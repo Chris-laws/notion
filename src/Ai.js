@@ -386,7 +386,8 @@ const Ai = {
     const props = PropertiesService.getScriptProperties();
     const keyCur = 'seen_cur_' + me.email, keyPrev = 'seen_prev_' + me.email;
     const now = new Date().toISOString();
-    let cur = props.getProperty(keyCur), prev = props.getProperty(keyPrev);
+    const cur = props.getProperty(keyCur);
+    let prev = props.getProperty(keyPrev);
     if (!cur || Date.now() - new Date(cur).getTime() > 30 * 60 * 1000) {
       prev = cur || new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       props.setProperty(keyPrev, prev);

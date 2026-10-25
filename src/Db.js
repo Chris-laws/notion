@@ -57,9 +57,15 @@ const Db = (function () {
   // Big tables are split into chunks (the cache takes up to 100 KB per value).
   const CACHED = { Users: 1, Teams: 1, Projects: 1, CompanyHolidays: 1, Tasks: 1, Events: 1, Absences: 1, Comments: 1 };
   const CACHE_TTL = 600;
-  // characters per chunk: at most 3 bytes each in UTF-8, so a chunk stays under the 100 KB limit
+  // characters per chunk: at most 3 bytes each in UTF-8, so a chunk stays under the 100 KB limit;
+  // compressed copies are base64 (1 byte per character) and use bigger chunks
   const CHUNK = 30000;
+  const ZCHUNK = 90000;
   const MAX_CHUNKS = 80;
+  // above this size a table is gzipped before it goes to the cache (JSON shrinks ~8-10x)
+  const ZIP_FROM = 2 * CHUNK;
+  const zip = raw => Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(raw)).getBytes());
+  const unzip = b64 => Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(b64))).getDataAsString();
   const newToken = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
   function scriptCache() {
@@ -86,8 +92,29 @@ const Db = (function () {
           raw += rest[keys[i]];
         }
       }
-      return { entries: JSON.parse(raw), ver: ver };
+      return { entries: JSON.parse(head.z ? unzip(raw) : raw), ver: ver };
     } catch (e) { return { entries: null, ver: null }; }
+  }
+  /** Cache entries (chunks + head) for a table under version ver; null when it is too big. */
+  function cacheEntries(table, entries, ver) {
+    const json = JSON.stringify(entries);
+    const z = json.length > ZIP_FROM;
+    const raw = z ? zip(json) : json;
+    const size = z ? ZCHUNK : CHUNK;
+    if (raw.length > size * MAX_CHUNKS) return null;
+    const k = 'tbl_' + table;
+    const out = {};
+    let n = 0;
+    for (let at = 0; at < raw.length || n === 0; n++) {
+      let end = Math.min(raw.length, at + size);
+      // never cut an emoji (surrogate pair) in half
+      const code = raw.charCodeAt(end - 1);
+      if (end < raw.length && code >= 0xD800 && code <= 0xDBFF) end--;
+      out[k + '_' + n] = raw.slice(at, end);
+      at = end;
+    }
+    out[k + '_h'] = JSON.stringify({ ver: ver, n: n, z: z });
+    return out;
   }
   function cachePut(table, entries, seen) {
     const c = CACHED[table] && scriptCache();
@@ -96,22 +123,9 @@ const Db = (function () {
       // someone wrote meanwhile: our copy may be old, leave it out (checked before the costly part)
       let ver = c.get('ver_' + table);
       if (ver !== seen) return;
-      const raw = JSON.stringify(entries);
-      if (raw.length > CHUNK * MAX_CHUNKS) return;
       if (!ver) { ver = newToken(); c.put('ver_' + table, ver, 21600); }
-      const k = 'tbl_' + table;
-      const out = {};
-      let n = 0;
-      for (let at = 0; at < raw.length || n === 0; n++) {
-        let end = Math.min(raw.length, at + CHUNK);
-        // never cut an emoji (surrogate pair) in half
-        const code = raw.charCodeAt(end - 1);
-        if (end < raw.length && code >= 0xD800 && code <= 0xDBFF) end--;
-        out[k + '_' + n] = raw.slice(at, end);
-        at = end;
-      }
-      out[k + '_h'] = JSON.stringify({ ver: ver, n: n });
-      c.putAll(out, CACHE_TTL);
+      const out = cacheEntries(table, entries, ver);
+      if (out) c.putAll(out, CACHE_TTL);
     } catch (e) { /* cache is optional */ }
   }
   /**
@@ -126,9 +140,14 @@ const Db = (function () {
     written = {};
     if (!c || !tables.length) return;
     try {
-      const out = {};
-      tables.forEach(t => { if (CACHED[t]) out['ver_' + t] = newToken(); });
-      c.putAll(out, 21600);
+      tables.filter(t => CACHED[t]).forEach(t => {
+        const ver = newToken();
+        // write-through: the rows of this request are exact (still under the lock), so the next
+        // reader and the next writer get them from the cache instead of reading the whole sheet
+        const out = (memo[t] && cacheEntries(t, memo[t], ver)) || {};
+        c.putAll(out, CACHE_TTL);
+        c.put('ver_' + t, ver, 21600);
+      });
     } catch (e) { /* optional */ }
   }
 
@@ -191,11 +210,15 @@ const Db = (function () {
     return d.cols.map(c => valueToCell(d, c, obj[c]));
   }
 
-  function load(table) {
-    if (memo[table]) return memo[table];
-    // writes (inside tx) always work on the sheet itself, so row numbers are exact
-    const hit = txDepth ? { entries: null, ver: null } : cacheGet(table);
-    if (hit.entries) { memo[table] = hit.entries; return hit.entries; }
+  // tables of this request that were read from the sheet itself (row numbers known to be exact)
+  let fromSheet = {};
+  function load(table, fresh) {
+    if (memo[table] && !fresh) return memo[table];
+    // inside a write the cached copy is fine too: its version proves no write happened since;
+    // locate() still checks the row before anything is written
+    // after a write in this request the cache is behind until the transaction ends
+    const hit = fresh || written[table] ? { entries: null, ver: null } : cacheGet(table);
+    if (hit.entries) { memo[table] = hit.entries; fromSheet[table] = false; return hit.entries; }
     const d = def(table);
     const sh = sheet(table);
     sheetReads++;
@@ -207,6 +230,7 @@ const Db = (function () {
       entries.push({ obj: toObj(d, r), row: i + 2 });
     });
     memo[table] = entries;
+    fromSheet[table] = true;
     if (!txDepth) cachePut(table, entries, hit.ver);
     return entries;
   }
@@ -216,12 +240,25 @@ const Db = (function () {
     return load(table).find(e => String(e.obj[def(table).cols[0]]) === k) || null;
   }
 
+  /**
+   * Entry plus its row, safe for writing: with a cached copy one cell is read to make sure
+   * the row still holds this key (someone may have sorted the sheet by hand). If not: read the sheet.
+   */
+  function locate(table, key) {
+    const e = find(table, key);
+    if (fromSheet[table]) return e;
+    if (e && String(sheet(table).getRange(e.row, 1).getValues()[0][0]) === String(key)) return e;
+    load(table, true);
+    return find(table, key);
+  }
+
   function tx(fn) {
     if (txDepth > 0) return fn();
     const lock = LockService.getScriptLock();
     lock.waitLock(20000);
     txDepth++;
     memo = {};
+    fromSheet = {};
     try {
       return fn();
     } finally {
@@ -278,7 +315,7 @@ const Db = (function () {
     update(table, key, patch) {
       return tx(() => {
         const d = def(table);
-        const e = find(table, key);
+        const e = locate(table, key);
         if (!e) throw new Error('Eintrag nicht gefunden.');
         cacheDrop(table);
         dirty = true;
@@ -292,7 +329,7 @@ const Db = (function () {
 
     remove(table, key) {
       return tx(() => {
-        const e = find(table, key);
+        const e = locate(table, key);
         if (!e) return false;
         cacheDrop(table);
         dirty = true;
@@ -321,6 +358,7 @@ const Db = (function () {
     reset() {
       spreadsheet = null;
       memo = {};
+      fromSheet = {};
       sheetReads = 0;
       if (typeof Config !== 'undefined' && Config.reset) Config.reset();
     },

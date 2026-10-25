@@ -8,6 +8,8 @@
   const cache = {};
   const spreadsheets = {};
   let uuid = 0;
+  // optional meter: tests and the load simulation count what one request costs
+  const meter = (k, n) => { const m = root.__GAS_METER__; if (m) m[k] = (m[k] || 0) + (n === undefined ? 1 : n); };
 
   function stripQuote(v) {
     return typeof v === 'string' && v.charAt(0) === "'" ? v.slice(1) : v;
@@ -15,6 +17,7 @@
 
   function Range(sheet, row, col, nRows, nCols) {
     this.getValues = () => {
+      meter('sheetRead'); meter('rowsRead', nRows);
       const out = [];
       for (let r = 0; r < nRows; r++) {
         const src = sheet.data[row - 1 + r] || [];
@@ -28,6 +31,7 @@
       return out;
     };
     this.setValues = values => {
+      meter('sheetWrite');
       values.forEach((line, r) => {
         const idx = row - 1 + r;
         while (sheet.data.length <= idx) sheet.data.push([]);
@@ -49,7 +53,7 @@
     };
     this.getMaxRows = () => Math.max(1000, this.data.length);
     this.getRange = (r, c, nr, nc) => new Range(this, r, c, nr || 1, nc || 1);
-    this.deleteRow = r => { this.data.splice(r - 1, 1); };
+    this.deleteRow = r => { meter('sheetWrite'); this.data.splice(r - 1, 1); };
     this.setFrozenRows = () => {};
   }
 
@@ -81,7 +85,7 @@
       if (!spreadsheets[id]) throw new Error('Spreadsheet not found');
       return spreadsheets[id];
     },
-    flush() {},
+    flush() { meter('flush'); },
   };
   root.PropertiesService = { getScriptProperties: () => propStore, getUserProperties: () => propStore };
   root.Session = {
@@ -89,18 +93,31 @@
     getEffectiveUser: () => ({ getEmail: () => root.__GAS_USER__ || '' }),
     getScriptTimeZone: () => 'Europe/Berlin',
   };
-  root.LockService = { getScriptLock: () => ({ waitLock() {}, tryLock: () => true, releaseLock() {} }) };
+  root.LockService = { getScriptLock: () => ({ waitLock() { meter('lock'); }, tryLock: () => { meter('lock'); return true; }, releaseLock() {} }) };
   root.CacheService = {
     getScriptCache: () => ({
-      get: k => (k in cache ? cache[k] : null),
-      put: (k, v) => { cache[k] = v; },
+      get: k => { meter('cacheCall'); return k in cache ? cache[k] : null; },
+      put: (k, v) => { meter('cacheCall'); cache[k] = v; },
       remove: k => { delete cache[k]; },
-      getAll: ks => { const o = {}; ks.forEach(k => { if (k in cache) o[k] = cache[k]; }); return o; },
-      putAll: o => { Object.keys(o).forEach(k => { cache[k] = o[k]; }); },
+      getAll: ks => { meter('cacheCall'); const o = {}; ks.forEach(k => { if (k in cache) o[k] = cache[k]; }); return o; },
+      putAll: o => { meter('cacheCall'); Object.keys(o).forEach(k => { cache[k] = o[k]; }); },
       removeAll: ks => { ks.forEach(k => { delete cache[k]; }); },
     }),
   };
+  // Blobs, gzip and base64 like Apps Script. Node gets real gzip (zlib from dev/load.js);
+  // the browser preview has no zlib, there gzip passes the bytes through unchanged.
+  const zlib = root.__zlib || null;
+  const toBytes = s => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'utf8') : new TextEncoder().encode(s));
+  function Blob(bytes) {
+    this.getBytes = () => bytes;
+    this.getDataAsString = () => (typeof Buffer !== 'undefined' ? Buffer.from(bytes).toString('utf8') : new TextDecoder().decode(bytes));
+  }
   root.Utilities = {
+    newBlob: data => new Blob(typeof data === 'string' ? toBytes(data) : data),
+    gzip: blob => { meter('zipKB', blob.getBytes().length / 1024); return new Blob(zlib ? zlib.gzipSync(Buffer.from(blob.getBytes())) : blob.getBytes()); },
+    ungzip: blob => { const out = new Blob(zlib ? zlib.gunzipSync(Buffer.from(blob.getBytes())) : blob.getBytes()); meter('zipKB', out.getBytes().length / 1024); return out; },
+    base64Encode: bytes => (typeof Buffer !== 'undefined' ? Buffer.from(bytes).toString('base64') : btoa(String.fromCharCode.apply(null, Array.from(bytes)))),
+    base64Decode: s => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'base64') : Uint8Array.from(atob(s), c => c.charCodeAt(0))),
     getUuid() {
       const hex = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0');
       return hex() + hex() + '-' + hex() + '-' + hex() + '-' + hex() + '-' + hex() + hex() + hex();
@@ -114,6 +131,7 @@
   root.Logger = { log: function () { if (!root.__GAS_QUIET__) console.log.apply(console, arguments); } };
   root.UrlFetchApp = {
     fetch(url, opts) {
+      meter('fetch');
       if (root.__GAS_FETCH__) return root.__GAS_FETCH__(url, opts);
       throw new Error('Kein Netzwerk in der Vorschau');
     },
