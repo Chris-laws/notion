@@ -1050,7 +1050,7 @@ function dashPage() {
     const ptasks = S.tasks.filter(x => x.projectId === sp.id && !x.parentId);
     const pdone = ptasks.filter(isDone).length;
     const ppct = ptasks.length ? Math.round(pdone / ptasks.length * 100) : 0;
-    const pc = sp.color && sp.color !== 'default' && sp.color !== 'gray' ? 'var(--c-' + sp.color + ')' : 'var(--accent)';
+    const pc = sp.color && sp.color !== 'default' && sp.color !== 'gray' ? 'var(--c-' + esc(sp.color) + ')' : 'var(--accent)';
     const st = Shared.PROJECT_STATUSES.find(x => x.key === sp.status) || Shared.PROJECT_STATUSES[1];
     const counts = Shared.STATUSES.map(x => '<div class="sc"><b>' + ptasks.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
     const next = ptasks.filter(x => !isDone(x) && x.dueDate).sort((x, y) => x.dueDate.localeCompare(y.dueDate)).slice(0, 3);
@@ -1518,7 +1518,7 @@ function projectPage(p) {
   const members = projectMembers(p);
   const today = TODAY();
   const tab = S.projTab || 'overview';
-  const pc = p.color && p.color !== 'default' && p.color !== 'gray' ? 'var(--c-' + p.color + ')' : 'var(--accent)';
+  const pc = p.color && p.color !== 'default' && p.color !== 'gray' ? 'var(--c-' + esc(p.color) + ')' : 'var(--accent)';
   const over = top.filter(x => !isDone(x) && x.dueDate && x.dueDate < today).length;
   const hoursAll = top.reduce((s2, x) => s2 + (x.estimate || 0), 0);
   const hoursDone = top.filter(isDone).reduce((s2, x) => s2 + (x.estimate || 0), 0);
@@ -1816,7 +1816,7 @@ const REGIONS = {
 function regionField(country, value) {
   const list = REGIONS[country];
   if (!list) return '<input type="hidden" name="region" value=""><div class="hint">Für dieses Land gibt es keine regionalen Feiertage.</div>';
-  return '<select class="select" name="region"><option value="">Ganzes Land (nur landesweite Feiertage)</option>' + list.map(r =>
+  return '<select class="select" name="region" aria-label="Region"><option value="">Ganzes Land (nur landesweite Feiertage)</option>' + list.map(r =>
     '<option value="' + r[0] + '"' + (r[0] === value ? ' selected' : '') + '>' + esc(r[1]) + '</option>').join('') + '</select>';
 }
 ON.change['country-region'] = el => {

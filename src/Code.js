@@ -60,6 +60,8 @@ function api(method, payload) {
     Db.reset();
     const route = ROUTES[method];
     if (!route) throw new Error('Unbekannte Aktion: ' + method);
+    // every route needs a signed-in person of the company domain, before anything else runs
+    Auth.currentUser();
     const data = route(payload ? JSON.parse(payload) : {});
     const ms = Date.now() - t0;
     console.log('api ' + method + ' ' + ms + ' ms, ' + Db.reads() + ' Tabellen gelesen');

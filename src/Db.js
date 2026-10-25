@@ -327,6 +327,24 @@ const Db = (function () {
       });
     },
 
+    /** Deletes many rows in one pass: rows from the sheet itself, deleted bottom-up so numbers stay right. */
+    removeMany(table, keys) {
+      if (!keys || !keys.length) return 0;
+      return tx(() => {
+        const d = def(table);
+        const wanted = {};
+        keys.forEach(k => { wanted[String(k)] = true; });
+        const rows = load(table, true).filter(e => wanted[String(e.obj[d.cols[0]])]).map(e => e.row).sort((a, b) => b - a);
+        if (!rows.length) return 0;
+        cacheDrop(table);
+        dirty = true;
+        const sh = sheet(table);
+        rows.forEach(r => sh.deleteRow(r));
+        delete memo[table];
+        return rows.length;
+      });
+    },
+
     remove(table, key) {
       return tx(() => {
         const e = locate(table, key);

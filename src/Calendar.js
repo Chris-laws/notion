@@ -13,13 +13,13 @@ const Calendar = {
       e.startDate <= to && (e.endDate || e.startDate) >= from && (!p.teamId || !e.teamId || e.teamId === p.teamId));
     const absences = Db.all('Absences')
       .filter(a => a.startDate <= to && a.endDate >= from && emails.indexOf(a.email) >= 0)
-      .map(a => (admin || a.email === me.email ? a : Object.assign({}, a, { note: '' })));
+      .map(a => (admin || a.email === me.email ? a : Object.assign({}, a, { note: '', type: Availability.visibleType(a.type, a.email, null) })));
     const holidays = Holidays.inRange(people.map(u => u.country), from, to).map(h =>
       Object.assign({}, h, { affects: people.filter(u => Holidays.appliesTo(h, u)).map(u => u.email) }));
     const teamIds = p.teamId ? [p.teamId] : null;
     return {
       from: from, to: to, events: events, absences: absences, holidays: holidays,
-      warnings: Availability.warnings(from, to, teamIds), threshold: Availability.threshold(),
+      warnings: Availability.warnings(from, to, teamIds, { email: me.email, admin: admin }), threshold: Availability.threshold(),
     };
   },
 
@@ -50,6 +50,7 @@ const Calendar = {
       if (p.id) {
         const ev = Db.get('Events', p.id);
         if (!ev) throw new Error('Termin nicht gefunden.');
+        if (ev.createdBy !== me.email && !Auth.isAdmin(me)) throw new Error('Nur die erstellende Person oder Admins können den Termin ändern.');
         return Db.update('Events', p.id, data);
       }
       return Db.insert('Events', Object.assign(data, {
@@ -93,7 +94,7 @@ const Calendar = {
       // Tell the person right away if their absence pushes a team to the warning level.
       const teamIds = Db.all('Teams').filter(t => t.lead === email || (t.members || []).indexOf(email) >= 0).map(t => t.id);
       const warnings = teamIds.length
-        ? Availability.warnings(saved.startDate, saved.endDate, teamIds).filter(w => w.people.some(x => x.email === email))
+        ? Availability.warnings(saved.startDate, saved.endDate, teamIds, { email: me.email, admin: Auth.isAdmin(me) }).filter(w => w.people.some(x => x.email === email))
         : [];
       return { absence: saved, warnings: warnings, threshold: Availability.threshold() };
     });

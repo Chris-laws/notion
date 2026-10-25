@@ -153,7 +153,7 @@ const Ai = {
     const me = Auth.currentUser();
     const L = (de, e) => (p && p.lang === 'en' ? e : de);
     const task = p.id ? Db.get('Tasks', p.id) : p;
-    if (!task) throw new Error('Aufgabe nicht gefunden.');
+    if (!task || (p.id && !Access.canSeeTask(task, Access.context(me)))) throw new Error('Aufgabe nicht gefunden.');
     let emails = [];
     const project = task.projectId && Db.get('Projects', task.projectId);
     if (project && project.members && project.members.length) emails = project.members.slice();
@@ -255,13 +255,13 @@ const Ai = {
     const planned = cap.reduce((s, w) => s + w.planned, 0), available = cap.reduce((s, w) => s + w.available, 0);
     const utilization = available ? Math.round(planned / available * 100) : 0;
     const teamIds = Object.keys(ctx.teamIds);
-    const warnings = Availability.warnings(from > today ? from : today, to < today ? today : to, teamIds)
+    const warnings = Availability.warnings(from > today ? from : today, to < today ? today : to, teamIds, { email: me.email, admin: false })
       .map(w => ({ teamId: w.teamId, teamName: w.teamName, date: w.date, absent: w.absent, total: w.total }));
     const people = {};
     teamIds.forEach(id => Calendar.people_(id).forEach(u => { people[u.email] = u; }));
     people[me.email] = me;
     const absences = Db.all('Absences').filter(a => people[a.email] && a.startDate <= to && a.endDate >= from)
-      .map(a => ({ name: people[a.email].name, from: a.startDate, to: a.endDate, type: a.type }));
+      .map(a => ({ name: people[a.email].name, from: a.startDate, to: a.endDate, type: Availability.visibleType(a.type, a.email, { email: me.email, admin: false }) }));
     const holidays = Holidays.inRange(Object.keys(people).map(e => people[e].country), from, to)
       .filter(h => Object.keys(people).some(e => Holidays.appliesTo(h, people[e])))
       .map(h => ({ date: h.date, name: Holidays.label(h, en ? 'en' : 'de'), country: h.country }));
@@ -449,7 +449,7 @@ const Ai = {
       utilization: week.utilization, available: week.available, planned: week.planned,
       holidays: upcoming.slice(0, 3).map(h => ({ date: h.date, name: Holidays.label(h, en ? 'en' : 'de') })),
       focus: focus.map(t => ({ id: t.id, title: t.title, dueDate: t.dueDate, priority: t.priority })),
-      teamWarnings: Availability.warnings(today, Shared.addDays(today, 27), Object.keys(ctx.teamIds))
+      teamWarnings: Availability.warnings(today, Shared.addDays(today, 27), Object.keys(ctx.teamIds), { email: me.email, admin: false })
         .map(w => ({ teamId: w.teamId, teamName: w.teamName, date: w.date, absent: w.absent, total: w.total })),
     };
 

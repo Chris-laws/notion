@@ -22,6 +22,13 @@ describe('dates', () => {
     assert.equal(S.isoWeek('2026-12-31'), 53);
     assert.equal(S.isoWeek('2027-01-04'), 1);
   });
+  test('endOfMonth knows short months', () => {
+    assert.equal(S.endOfMonth('2026-02-10'), '2026-02-28');
+    assert.equal(S.endOfMonth('2026-04-30'), '2026-04-30');
+  });
+  test('isDate rejects other types and formats', () => {
+    assert.deepEqual([S.isDate(20261023), S.isDate('2026-1-1'), S.isDate('')], [false, false, false]);
+  });
   test('isDate rejects impossible dates', () => {
     assert.equal(S.isDate('2026-02-30'), false);
     assert.equal(S.isDate('2026-02-28'), true);
@@ -54,6 +61,33 @@ describe('quick-add parser', () => {
     assert.deepEqual(r.assignees || [], []);
     assert.match(r.title, /niemand/);
   });
+  test('"ab" sets the start date, not the due date', () => {
+    const r = plain(S.parse('Workshop ab morgen', ctx));
+    assert.equal(r.startDate, '2026-10-24');
+    assert.equal(r.dueDate || '', '');
+  });
+  test('@ich assigns me', () => {
+    assert.deepEqual(plain(S.parse('Bericht @ich', ctx)).assignees, ['chris@firma.de']);
+  });
+  test('a team or tag given twice is taken once', () => {
+    const r = plain(S.parse('Plan +marketing +marketing #q4 #q4', ctx));
+    assert.deepEqual([r.teams, r.tags], [['tm1'], ['q4']]);
+  });
+  test('one bang is high, two bangs are urgent', () => {
+    assert.equal(S.parse('A !', ctx).priority, 'high');
+    assert.equal(S.parse('A !!', ctx).priority, 'urgent');
+  });
+  test('a weekday name means the next such day (from Friday to Monday)', () => {
+    assert.equal(S.parse('Call Montag', ctx).dueDate, '2026-10-26');
+  });
+  test('a date without year that has passed this year means next year', () => {
+    assert.equal(S.parse('Steuer 01.03.', ctx).dueDate, '2027-03-01');
+    assert.equal(S.parse('Steuer 23.10.', ctx).dueDate, '2026-10-23', 'today itself stays this year');
+  });
+  test('dates like 31.12. are taken, 32.12. is not a date', () => {
+    assert.equal(S.parse('Abschluss 31.12.', ctx).dueDate, '2026-12-31');
+    assert.equal(S.parse('Abschluss 32.12.', ctx).dueDate || '', '');
+  });
   test('falls back to the raw text when only tokens are given', () => {
     assert.equal(S.parse('morgen', ctx).title, 'morgen');
   });
@@ -73,6 +107,17 @@ describe('timing of retries and polling', () => {
   });
   test('poll delay backs off after failed polls, at most 8x', () => {
     assert.deepEqual([1, 2, 3, 9].map(f => S.pollDelay(120, f, 0.5)), [240000, 480000, 960000, 960000]);
+  });
+});
+
+describe('time tracking', () => {
+  const now = Date.parse('2026-10-25T10:30:00Z');
+  test('adding minutes while the timer runs counts the running time once and restarts it', () => {
+    const r = S.addTime(0, '2026-10-25T10:00:00Z', now, 10);
+    assert.deepEqual([r.spent, r.timerStart], [40, '2026-10-25T10:30:00.000Z']);
+  });
+  test('adding minutes without a timer just adds them', () => {
+    assert.deepEqual(plain(S.addTime(15, '', now, 10)), { spent: 25, timerStart: '' });
   });
 });
 
@@ -119,6 +164,19 @@ describe('task filter (taskQuery)', () => {
   test('sub-tasks are hidden outside "my tasks"', () => {
     const tasks = [mk('p', 'todo', ''), mk('s', 'todo', '', { parentId: 'p' })];
     assert.equal(ids(run(tasks, {}, { quickTabs: false, includeSub: false })), 'p');
+  });
+  test('"today" holds overdue, due today and planned for today, not tomorrow', () => {
+    const tasks = [mk('late', 'todo', '2026-10-20'), mk('due', 'todo', day), mk('plan', 'todo', '', { planDate: day }), mk('tomorrow', 'todo', '2026-10-24')];
+    assert.equal(ids(run(tasks, { quick: 'today' })), 'late,due,plan');
+  });
+  test('a status filter on "done" shows done tasks although done ones are hidden', () => {
+    const tasks = [mk('open', 'todo', ''), mk('closed', 'done', '')];
+    assert.equal(ids(run(tasks, { statuses: ['done'], showDone: false }, { quickTabs: false })), 'closed');
+  });
+  test('project and person filters also match the first entry of their list', () => {
+    const tasks = [mk('a', 'todo', '', { projectId: 'p1' }), mk('b', 'todo', '', { projectId: 'p2', assignees: ['x@firma.de'] })];
+    assert.equal(ids(run(tasks, { projects: ['p1', 'p9'] }, { quickTabs: false })), 'a');
+    assert.equal(ids(run(tasks, { people: ['x@firma.de'] }, { quickTabs: false })), 'b');
   });
   test('every tab count equals the length of its list', () => {
     const tasks = [mk('a', 'todo', '2026-10-20'), mk('b', 'done', ''), mk('c', 'doing', day), mk('d', 'todo', '')];

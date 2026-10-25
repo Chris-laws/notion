@@ -105,9 +105,11 @@ const Holidays = {
       if (res.getResponseCode() !== 200) return null;
       const data = JSON.parse(res.getContentText());
       if (!Array.isArray(data)) return null;
-      return data
+      // an empty answer is no answer: try the next source
+      const list = data
         .filter(h => !h.types || h.types.indexOf('Public') >= 0)
         .map(h => ({ date: h.date, name: h.localName || h.name, nameEn: h.name || h.localName, country: country, counties: h.counties || null, source: 'nager' }));
+      return list.length ? list : null;
     } catch (e) {
       return null;
     }

@@ -27,11 +27,13 @@ const Tasks = {
     const fields = Tasks.sanitize_(p);
     const now = new Date().toISOString();
     return Db.tx(() => {
-      Users.ensure(fields.assignees);
       if (p.id) {
         const prev = Db.get('Tasks', p.id);
         if (!prev) throw new Error('Aufgabe nicht gefunden – evtl. wurde sie gelöscht.');
         if (!Access.canSeeTask(prev, ctx)) throw new Error('Keine Berechtigung für diese Aufgabe.');
+        if (fields.parentId !== undefined) Tasks.checkParent_(fields.parentId, p.id);
+        // new people only once the change is allowed
+        Users.ensure(fields.assignees);
         fields.updatedAt = now;
         if (fields.assignees && !fields.assignees.length) fields.assignees = [prev.createdBy || me.email];
         if (fields.status && fields.status !== prev.status) {
@@ -44,7 +46,8 @@ const Tasks = {
         }
         return changed;
       }
-      if (fields.parentId && !Db.get('Tasks', fields.parentId)) throw new Error('Übergeordnete Aufgabe fehlt.');
+      Tasks.checkParent_(fields.parentId, null);
+      Users.ensure(fields.assignees);
       const task = Object.assign({
         id: Util.uid('t_'),
         title: 'Ohne Titel',
@@ -109,6 +112,17 @@ const Tasks = {
     return changed;
   },
 
+  /** The parent must exist and must not be the task itself or one of its sub-tasks (no cycles). */
+  checkParent_(parentId, taskId) {
+    if (!parentId) return;
+    let x = Db.get('Tasks', parentId);
+    if (!x) throw new Error('Übergeordnete Aufgabe fehlt.');
+    for (let depth = 0; x && depth < 100; depth++) {
+      if (x.id === taskId) throw new Error('Eine Aufgabe kann nicht ihre eigene Unteraufgabe sein.');
+      x = x.parentId ? Db.get('Tasks', x.parentId) : null;
+    }
+  },
+
   remove(id) {
     const me = Auth.currentUser();
     const ctx = Access.context(me);
@@ -116,15 +130,14 @@ const Tasks = {
       const t = Db.get('Tasks', id);
       if (!t) return [];
       if (!Access.canDeleteTask(t, ctx)) throw new Error('Löschen dürfen nur die erstellende Person, Team-Leads und Admins.');
-      const removed = [];
-      const drop = taskId => {
-        Db.all('Tasks').filter(c => c.parentId === taskId).forEach(c => drop(c.id));
-        Db.all('Comments').filter(c => c.taskId === taskId).forEach(c => Db.remove('Comments', c.id));
-        Db.remove('Tasks', taskId);
-        removed.push(taskId);
-      };
-      drop(id);
-      return removed;
+      // the task and all sub-tasks below it, then their comments: one pass per table
+      const all = Db.all('Tasks');
+      const ids = [id];
+      for (let i = 0; i < ids.length; i++) all.forEach(c => { if (c.parentId === ids[i] && ids.indexOf(c.id) < 0) ids.push(c.id); });
+      const comments = Db.all('Comments').filter(c => ids.indexOf(c.taskId) >= 0).map(c => c.id);
+      Db.removeMany('Comments', comments);
+      Db.removeMany('Tasks', ids);
+      return ids;
     });
   },
 

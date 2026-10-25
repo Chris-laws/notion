@@ -7,10 +7,8 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { JSDOM } = require('jsdom');
 
-require('./build-preview');
-const html = fs.readFileSync(path.join(__dirname, 'preview.html'), 'utf8');
+const { bootApp, walk } = require('./checks/dom');
 
 // German markers: umlauts/ß or frequent German words that never appear in the English UI
 const GERMAN = /[äöüÄÖÜß]|\b(und|oder|der|die|das|den|dem|des|nicht|kein|keine|keinen|noch|mit|für|von|bis|zu|zum|zur|ist|sind|wird|werden|ein|eine|einen|auf|aus|bei|nach|über|unter|alle|allen|heute|morgen|gestern|Woche|Wochen|Monat|Tag|Tage|Tagen|Aufgabe|Aufgaben|Projekt|Projekte|offen|offene|erledigt|fällig|Fällig|neue|neues|Neue|Neues|Termin|Termine|Urlaub|Krank|Feiertag|Feiertage|Abwesenheit|Abwesend|abwesend|Stunden|Std|Mitglied|Mitglieder|Einstellungen|Speichern|Abbrechen|Löschen|Bearbeiten|Hinzufügen|Suchen|Zurück|Weiter|Ansicht|Gruppe|Priorität|Zuständig|Fortschritt|Aufwand|Beschreibung|Kommentar|Kommentare|Hallo|Guten|Abend|Morgen|Uhr|Mo|Di|Mi|Fr|Sa|Mär|Mai|Okt|Dez)\b/;
@@ -21,26 +19,6 @@ const isGerman = s => GERMAN.test(s) || (!!process.env.I18N_STRICT && STRICT.tes
 const ALLOW = /^(LidlFlow|DE|EN|Gemini|Vertex AI|OK)$/;
 // proper names that stay as they are (German federal states, Austrian/Swiss regions)
 const PLACES = /Baden-Württemberg|Bayern|Berlin|Brandenburg|Bremen|Hamburg|Hessen|Mecklenburg-Vorpommern|Niedersachsen|Nordrhein-Westfalen|Rheinland-Pfalz|Saarland|Sachsen-Anhalt|Sachsen|Schleswig-Holstein|Thüringen|Kärnten|Niederösterreich|Oberösterreich|Salzburg|Steiermark|Tirol|Vorarlberg|Wien|Burgenland|Zürich|Graubünden|Genève|Neuchâtel|Bern|Luzern|Basel|Österreich|Deutschland|Schweiz/g;
-
-function boot() {
-  const dom = new JSDOM(html, {
-    url: 'http://localhost/?user=chris@firma.de',
-    runScripts: 'dangerously',
-    pretendToBeVisual: true,
-    beforeParse(w) {
-      w.localStorage.setItem('tr:lang', JSON.stringify('en'));
-      w.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} });
-      w.scrollTo = () => {};
-      w.Element.prototype.scrollIntoView = function () {};
-      w.Element.prototype.scrollTo = function () {};
-      w.ResizeObserver = w.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
-      w.console.error = () => {};
-      w.console.log = () => {};
-    },
-  });
-  return dom.window;
-}
-const wait = ms => new Promise(r => setTimeout(r, ms));
 
 /** Strings that are data, not UI: never reported. */
 function dataStrings(w) {
@@ -83,45 +61,9 @@ function scan(w, where, found) {
 }
 
 async function main() {
-  const w = boot();
-  for (let i = 0; i < 100 && !w.eval("typeof S !== 'undefined' && S.me && S.tasks && S.tasks.length"); i++) await wait(50);
-  if (!w.eval('S.me')) throw new Error('App did not start');
+  const w = await bootApp({ lang: 'en' });
   const found = {};
-  const run = async (where, js, ms) => {
-    try { w.eval(js); } catch (e) { found['error: ' + where + ' – ' + e.message] = where; }
-    await wait(ms || 250);
-    scan(w, where, found);
-  };
-  const S = w.eval('S');
-  const proj = S.projects[0], tm = S.teams[0], task = S.tasks.find(t => t.assignees.length && t.projectId) || S.tasks[0];
-  await run('dashboard', "go('dash')", 600);
-  for (const q of ['open', 'today', 'upcoming', 'overdue', 'nodate', 'done']) await run('my tasks/' + q, "go('home'); setPrefs({ quick: '" + q + "' })");
-  for (const l of ['list', 'table', 'board', 'gantt', 'calendar']) await run('all tasks/' + l, "go('tasks'); setPrefs({ layout: '" + l + "' })", 400);
-  for (const g of ['due', 'status', 'priority', 'project']) await run('list group ' + g, "go('tasks'); setPrefs({ layout: 'list', listGroup: '" + g + "' })");
-  for (const m of ['week', 'day', 'month', 'agenda', 'heatmap']) await run('calendar/' + m, "S.cal.mode = '" + m + "'; go('calendar')", 500);
-  await run('availability', "S.cap.teamId = '" + tm.id + "'; S.cap.data = null; go('capacity')", 600);
-  for (const tab of ['tasks', 'projects', 'members']) await run('team/' + tab, "S.teamTab = '" + tab + "'; go('team', '" + tm.id + "')");
-  for (const tab of ['overview', 'tasks', 'members']) await run('project/' + tab, "S.projTab = '" + tab + "'; go('project', '" + proj.id + "')");
-  await run('settings', "go('settings')", 400);
-  await run('admin', "go('admin')", 400);
-  await run('not found', "go('nope')");
-  await run('task peek', "go('home'); openPeek('" + task.id + "')", 500);
-  await run('new task dialog', "closePeek(); A['new-task']()");
-  await run('people manager', "A['pp-add'] || 0; document.querySelector('#modal-root [data-nt-add]').click()");
-  await run('people search', "const i = document.querySelector('#people-root input'); i.value = 'zz@neu.de'; i.dispatchEvent(new Event('input'))");
-  await run('team dialog', "closePeopleModal(); closeModal(); teamModal(S.teams[0])");
-  await run('project dialog', "closeModal(); projectModal(S.projects[0])");
-  await run('event dialog', "closeModal(); eventModal()");
-  await run('absence dialog', "closeModal(); absenceModal()");
-  await run('help', "closeModal(); A.help()");
-  await run('palette', "closeModal(); openPalette()");
-  await run('assistant', "closePalette(); A['ai-assistant'] ? A['ai-assistant']() : 0", 400);
-  await run('toast', "closeModal(); toast('Aufgabe gelöscht', { action: { label: 'Rückgängig', fn() {} } })");
-
-  await run('ai suggest', "closePeek(); openPeek('" + task.id + "'); A['ai-suggest'] && A['ai-suggest']()", 500);
-  await run('ai breakdown', "A['ai-breakdown'] && A['ai-breakdown']()", 500);
-  await run('empty list', "closePeek(); go('home'); setPrefs({ quick: 'done', search: 'zzzz-nichts' })");
-  await run('dashboard again', "setPrefs({ search: '', quick: 'open' }); S.report.data = {}; go('dash')", 700);
+  await walk(w, (win, where) => scan(win, where, found), (where, e) => { found['error: ' + where + ' – ' + e.message] = where; });
 
   // messages the server can send back (shown as toasts): each needs an English version
   const src = path.join(__dirname, '..', 'src');

@@ -1,13 +1,13 @@
-# Taskraum – Notion-artiges Teamtool in Google Apps Script
+# LidlFlow – Team-Tool für Aufgaben und Kalender in Google Apps Script
 
 Task-Management und Teamkalender für Unternehmen, die mit Google Workspace arbeiten.
-Anmeldung per Google SSO, Daten in einem Google Sheet, Oberfläche im Stil von Notion.
+Anmeldung per Google SSO, Daten in einem Google Sheet, ruhige Oberfläche mit Seiten, Listen, Board und Kalender.
 
 ## Funktionen
 
 **Aufgaben**
 - Aufgaben für sich selbst, eine Person, mehrere Personen oder ganze Teams
-- Teams (wie Notion-Teamspaces) mit Lead und Mitgliedern, darin Projekte
+- Teams (Teambereiche) mit Lead und Mitgliedern, darin Projekte
 - Projekte mit eigenem Mitgliederkreis: ganzes Team oder gemischt aus verschiedenen Teams
 - Ansichten: **Liste**, **Tabelle** (sortierbar, Inline-Bearbeitung, Fortschrittsbalken, Seitenzahl), **Board** (Drag & Drop, Gruppierung nach Status/Priorität/Person/Projekt, Spalten einklappbar), **Kalender** und **Gantt** (Balken ziehen verschiebt, rechter Rand ändert das Fälligkeitsdatum, Zoom Woche/Monat/Quartal); gespeicherte Ansichten pro Seite (im Browser)
 - Aufgabe als Seitenansicht oder Vollseite (Eigenschaftskarten, Fortschritt manuell oder automatisch, Zeiterfassung mit Timer, Unteraufgaben, Kommentare): Status, Zuweisung, Priorität, Start/Fällig, Projekt, Teams, Aufwand, Tags, Wiederholung, Beschreibung, Unteraufgaben, Kommentare
@@ -93,16 +93,7 @@ Ohne `VERTEX_PROJECT_ID` wird der globale Endpunkt im Vertex-AI-Express-Modus ge
 
 ## Codeguard
 
-`npm run guard` führt alle Prüfungen nacheinander aus, zeigt eine Übersicht und endet mit Exit-Code 1, sobald eine fehlschlägt. Dieselbe Prüfung läuft als GitHub Action (`.github/workflows/guard.yml`) bei jedem Push und Pull Request.
-
-| Prüfung | Befehl | Was sie sicherstellt |
-|---|---|---|
-| Lint + Clean-Code-Regeln | `npm run lint` | ESLint mit `eslint-plugin-sonarjs`. Fehler bei Bugs und unsicherem Code (z. B. `eqeqeq`, `no-eval`, doppelte Schlüssel, ungenutzte Variablen). Clean-Code-Metriken als Warnungen: Funktionslänge > 80 Zeilen, Komplexität > 15, kognitive Komplexität > 20, doppelte Strings, identische Funktionen. **Ratsche:** höchstens 80 Warnungen (Stand heute), es darf nur weniger werden. |
-| Unit- und Integrationstests + Coverage | `npm run unit`, `npm run coverage` | `test/*.test.js` (node:test): jeder Test mit eigener, frischer App, Arrange-Act-Assert, ein Verhalten pro Test. Externe Dienste (Nager.Date, Vertex/Gemini) über Test-Doubles: Fehler, Timeout, kaputtes JSON. Dazu die Integrationssuite `dev/test.js`. Coverage über `src/` mit Schwellen: Zeilen und Funktionen ≥ 90 %, Zweige ≥ 75 %. |
-| Apps-Script-Prüfung | `npm run check` | Syntax und Routen der Server-Dateien wie in Apps Script. |
-| Englisch vollständig | `npm run i18n` | Rendert jede Seite, jeden Dialog und jede Fehlermeldung im englischen Modus (jsdom) und schlägt bei deutschen Resten fehl. |
-| Secret-Scan | `npm run secrets` | Keine API-Schlüssel, privaten Schlüssel oder Tokens im Repository. Schlüssel gehören in die Skripteigenschaften. |
-| Lasttest (Kurzprofil) | `npm run load:quick` | Lastbudget für 200 gleichzeitig aktive Personen (≤ 1 % abgelehnt, p95 ≤ 3 s) und Konsistenz (keine verlorenen Updates, keine doppelten IDs). |
+`npm run guard` führt **14 Checks** aus: Lint und Clean Code, Tests mit Coverage, Mutationstest, Apps-Script-Bereitschaft, Rechte pro API-Methode, XSS, Secrets, Englisch, Kontrast, Barrierefreiheit, Daten-Konsistenz, Last, Performance-Budget sowie Lizenzen und Marken. Er endet mit Exit-Code 1, sobald einer fehlschlägt, und läuft auch als GitHub Action. Die Liste mit Zweck und Schwelle zeigt `npm run guard -- --list`. Einzelne Checks laufen mit `npm run guard -- --only lint,tests`. Wie die Checks mit den Arbeitsstufen und den superpowers-Skills zusammenhängen, steht in **[WORKFLOW.md](WORKFLOW.md)**.
 
 ### Lastsimulation
 
@@ -133,6 +124,15 @@ Grenzen der Architektur, mit Zahlen aus der Simulation:
 - **Etwa 1000 gleichzeitig aktive Personen** schafft die App gut. Darüber begrenzen die 30 parallelen Ausführungen des bereitstellenden Kontos.
 - **Ausführung als jeweilige Person** (`executeAs: USER_ACCESSING`) hebt diese Grenze auf: 10 000 Personen ergeben dann 0 % abgelehnt und p95 1,6 s. Dafür braucht jede Person Zugriff auf die Tabelle, das Rechtemodell ändert sich.
 - **Das globale Schreib-Lock** schafft bei 30 000 Aufgaben nur etwa 0,6 Schreibvorgänge/s. Für 10 000 aktive Personen bräuchte es eine Aufteilung der Aufgaben (z. B. je Team eine Tabelle) oder eine echte Datenbank (Cloud SQL / Firestore).
+
+## Lizenzen und Marken
+
+- **Code:** eigener Code, intern für das Unternehmen. Es wird keine Fremdbibliothek ausgeliefert. Auf Apps Script landet nur `src/`.
+- **Schrift:** Inter (Rasmus Andersson), über Google Fonts geladen, SIL Open Font License 1.1.
+- **Logo und Farben:** LidlFlow-Logo, Lidl-Blau und Lidl-Gelb sind für den internen Einsatz im Unternehmen gedacht. Für eine Nutzung außerhalb braucht es die Freigabe der Markeninhaberin oder einen neutralen Namen.
+- **Externe Dienste:** Feiertage von Nager.Date (date.nager.at, frei nutzbar), KI über Google Vertex AI (eigener Schlüssel in den Skripteigenschaften).
+- **Entwicklungswerkzeuge** (`devDependencies`, nicht ausgeliefert): freie Lizenzen, einzige Ausnahme `eslint-plugin-sonarjs` (LGPL-3.0, nur für den Lint).
+- Der Codeguard prüft das bei jedem Lauf (`dev/checks/license.js`): keine Produktnamen anderer Hersteller im Code und in den Docs, nur erlaubte externe Hosts, Lizenzen aller Pakete.
 
 ## Entwicklung
 

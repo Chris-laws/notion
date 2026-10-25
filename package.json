@@ -12,7 +12,7 @@
     "i18n": "node dev/i18n-audit.js",
     "unit": "node --test test/",
     "coverage": "c8 --reporter=text --reporter=html --include \"src/**/*.js\" node --test test/ dev/test.js",
-    "lint": "eslint . --max-warnings 80",
+    "lint": "eslint . --max-warnings 78",
     "secrets": "node dev/secret-scan.js",
     "load": "node dev/load-sim.js",
     "load:quick": "node dev/load-sim.js --quick",

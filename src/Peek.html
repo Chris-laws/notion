@@ -1,6 +1,6 @@
 <script>
 /* ==========================================================================
-   Task side peek (Notion-style page preview): properties, description,
+   Task side peek (page preview next to the list): properties, description,
    sub-tasks, comments and the smart helpers.
    ========================================================================== */
 
@@ -63,7 +63,7 @@ ON.keydown['time-add'] = (el, e) => {
   const min = Math.round(Number(String(el.value).replace(',', '.')) || 0);
   const t = task(S.peekId);
   if (!t || min <= 0) return;
-  patchTask(t.id, { spent: Math.round(spentSec(t) / 60) + min, timerStart: t.timerStart }, { keepPeek: true });
+  patchTask(t.id, Shared.addTime(t.spent, t.timerStart, Date.now(), min), { keepPeek: true });
   renderPeek();
   toast(min + ' min nachgetragen');
 };
@@ -122,7 +122,7 @@ function renderPeek() {
   if (S.suggest && S.suggest.taskId === t.id) {
     const d = S.suggest.data;
     smart += '<div class="suggest"><div class="sh"><span>Freie Kapazität in KW ' + Shared.isoWeek(d.week) + '</span>' +
-      '<button class="icon-btn" data-action="suggest-close">' + icon('x', 'sm') + '</button></div>' +
+      '<button class="icon-btn" data-action="suggest-close" aria-label="Vorschlag schließen" title="Schließen">' + icon('x', 'sm') + '</button></div>' +
       d.candidates.map(c => '<button class="opt" data-action="suggest-pick" data-email="' + esc(c.email) + '">' + avatar(c.email) +
         '<div style="flex:1;min-width:0"><b>' + esc(c.name) + '</b> <span class="faint">· ' + (c.free > 0 ? fmtNum(c.free) + ' h frei' : 'ausgelastet') + '</span>' +
         '<small>' + esc(c.reasons.join(' · ')) + '</small></div>' +
@@ -130,7 +130,7 @@ function renderPeek() {
   }
   if (S.breakdown && S.breakdown.taskId === t.id) {
     const b = S.breakdown.data;
-    smart += '<div class="suggest"><div class="sh"><span>Vorschlag für Teilaufgaben</span><button class="icon-btn" data-action="breakdown-close">' + icon('x', 'sm') + '</button></div>' +
+    smart += '<div class="suggest"><div class="sh"><span>Vorschlag für Teilaufgaben</span><button class="icon-btn" data-action="breakdown-close" aria-label="Vorschlag schließen" title="Schließen">' + icon('x', 'sm') + '</button></div>' +
       ((b.subtasks && b.subtasks.length) ? (b.hint ? '<div class="notice" style="margin:4px 4px 8px">' + esc(b.hint) + '</div>' : '') + '<form data-on-submit="breakdown">' + b.subtasks.map((s, i) =>
         '<label class="opt"><input type="checkbox" name="pick" value="' + i + '" checked><span style="flex:1">' + esc(s.title) + '</span><span class="faint">' + esc(fmtHours(s.estimate)) + '</span></label>').join('') +
         '<div style="padding:6px"><button class="btn sm primary" type="submit">Übernehmen</button></div></form>'

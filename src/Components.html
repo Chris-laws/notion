@@ -838,7 +838,7 @@ function openPalette(prefill) {
   closePop();
   palState = { hover: 0, items: [] };
   $('#palette-root').innerHTML =
-    '<div class="palette-bg" data-action="palette-bg"><div class="palette" role="dialog" aria-label="Suchen und erstellen">' +
+    '<div class="palette-bg" data-action="palette-bg"><div class="palette" role="dialog" aria-modal="true" aria-label="Suchen und erstellen">' +
     '<div class="palette-in">' + icon('bolt', 'lg') + '<div class="qa-wrap"><div class="qa-hl" id="pal-hl"></div>' +
     '<input id="pal-in" placeholder="Aufgabe eingeben oder suchen" autocomplete="off" spellcheck="false" value="' + esc(prefill || '') + '"></div></div>' +
     '<div class="palette-preview" id="pal-prev"></div><div class="palette-list" id="pal-list"></div>' +

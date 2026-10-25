@@ -259,7 +259,7 @@ function SharedFactory() {
         if (year < 100) year += 2000;
         let d = year + '-' + String(mon).padStart(2, '0') + '-' + String(day).padStart(2, '0');
         if (!m[3] && d < today) d = (year + 1) + d.slice(4);
-        return d;
+        return isDate(d) ? d : '';
       }],
       [/übermorgen|uebermorgen|day after tomorrow/, () => addDays(today, 2)],
       [/heute|today|tdy/, () => today],
@@ -352,8 +352,20 @@ function SharedFactory() {
     return Math.floor(baseSec * 1000 * (0.75 + 0.5 * rand) * Math.pow(2, Math.min(failures, 3)));
   }
 
+  /**
+   * Adds minutes by hand. A running timer is folded into spent and restarted now,
+   * so its time is never counted twice. Returns { spent (min), timerStart }.
+   */
+  function addTime(spentMin, timerStart, nowMs, addMin) {
+    const running = timerStart ? Math.max(0, nowMs - Date.parse(timerStart)) / 60000 : 0;
+    return { spent: Math.round((Number(spentMin) || 0) + running + addMin), timerStart: timerStart ? new Date(nowMs).toISOString() : '' };
+  }
+
+  /** Colours a project may have (anything else would end up in a style attribute). */
+  const PROJECT_COLORS = ['default', 'gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red', 'teal'];
+
   return {
-    QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay,
+    QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,
     endOfMonth, nextOccurrence, parse, norm,

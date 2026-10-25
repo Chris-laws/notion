@@ -328,7 +328,11 @@ function main() {
   return { rows, consistency: c, prof };
 }
 
-if (require.main === module) {
+if (require.main === module && process.argv.includes('--consistency')) {
+  const c = consistencyCheck(1500);
+  console.log('Daten-Konsistenz: ' + c.writes + ' Schreibvorgänge (Zeilen zwischendurch von Hand vertauscht), verlorene Updates ' + c.lostUpdates + ', doppelte IDs ' + c.duplicateIds);
+  process.exit(c.lostUpdates || c.duplicateIds ? 1 : 0);
+} else if (require.main === module) {
   const out = main();
   const worst = out.rows[0];
   // guard budget for the short profile: small team load must stay healthy

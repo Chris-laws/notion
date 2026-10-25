@@ -1,4 +1,4 @@
-/** Teams (like Notion teamspaces) and the projects inside them. */
+/** Teams (team spaces) and the projects inside them. */
 const Teams = {
   save(p) {
     const me = Auth.currentUser();
@@ -31,13 +31,16 @@ const Teams = {
       if (!data.color) data.color = Shared.TEAM_COLORS.find(c => !taken[c]) || 'blue';
       if (Shared.TEAM_COLORS.indexOf(data.color) < 0) throw new Error('Unbekannte Teamfarbe.');
       if (taken[data.color]) throw new Error('Diese Farbe hat schon das Team „' + taken[data.color] + '“. Bitte eine andere wählen.');
-      Users.ensure(members);
       if (p.id) {
         const team = Db.get('Teams', p.id);
         if (!team) throw new Error('Team nicht gefunden.');
         if (!Access.canManageTeam(team, ctx)) throw new Error('Nur Team-Lead oder Admins können das Team bearbeiten.');
+        // the dialog has no icon field: keep the icon unless one is sent
+        if (p.icon === undefined) delete data.icon;
+        Users.ensure(members);
         return Db.update('Teams', p.id, data);
       }
+      Users.ensure(members);
       return Db.insert('Teams', Object.assign(data, {
         id: Util.uid('tm_'), createdBy: me.email, createdAt: new Date().toISOString(),
       }));
@@ -111,7 +114,7 @@ const Projects = {
       teamId: team.id,
       name: name,
       icon: String(p.icon || '').slice(0, 8),
-      color: String(p.color || 'gray').slice(0, 12),
+      color: Shared.PROJECT_COLORS.indexOf(p.color) >= 0 ? p.color : 'gray',
       description: String(p.description || '').slice(0, 5000),
       status: Shared.PROJECT_STATUSES.some(s => s.key === p.status) ? p.status : 'active',
       // Empty list = the whole team works on the project.
@@ -120,14 +123,19 @@ const Projects = {
       endDate: Shared.isDate(p.endDate) ? p.endDate : '',
     };
     return Db.tx(() => {
-      Users.ensure(data.members);
+      const mayUseTeam = ctx.admin || ctx.teamIds[team.id];
       if (p.id) {
         const project = Db.get('Projects', p.id);
         if (!project) throw new Error('Projekt nicht gefunden.');
         if (!Access.canManageProject(project, ctx)) throw new Error('Keine Berechtigung für dieses Projekt.');
+        // moving it into another team needs membership there, like creating it there
+        if (project.teamId !== team.id && !mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
+        if (p.icon === undefined) delete data.icon;
+        Users.ensure(data.members);
         return Db.update('Projects', p.id, data);
       }
-      if (!ctx.admin && !ctx.teamIds[team.id]) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
+      if (!mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
+      Users.ensure(data.members);
       return Db.insert('Projects', Object.assign(data, {
         id: Util.uid('pr_'), createdBy: me.email, createdAt: new Date().toISOString(),
       }));
