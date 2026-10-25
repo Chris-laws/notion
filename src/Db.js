@@ -65,7 +65,7 @@ const Db = (function () {
   // above this size a table is gzipped before it goes to the cache (JSON shrinks ~8-10x)
   const ZIP_FROM = 2 * CHUNK;
   const zip = raw => Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(raw)).getBytes());
-  const unzip = b64 => Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(b64))).getDataAsString();
+  const unzip = b64 => Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(b64), 'application/x-gzip')).getDataAsString();
   const newToken = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
   function scriptCache() {
