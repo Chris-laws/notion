@@ -4,6 +4,8 @@ Jede Änderung an LidlFlow läuft durch dieselbe Pipeline. Jede Stufe hat einen 
 
 Alle genannten Skills stammen aus dem Plugin **superpowers** und standen in der Entwicklungssitzung zur Verfügung.
 
+Der ganze Ablauf ist zusätzlich als Claude-Code-Skill **`codeguard-engineering`** gespeichert (`.claude/skills/codeguard-engineering/SKILL.md`). Claude lädt ihn bei jeder Änderung und führt durch die Stufen, die passenden superpowers-Skills und den Guard.
+
 ```
 Anforderung ─▶ Plan ─▶ TDD ─▶ Implementierung ─▶ Verifikation ─▶ Code-Review ─▶ Branch-Abschluss/Deploy
                         ▲                              │
