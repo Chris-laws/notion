@@ -93,3 +93,27 @@ No access to Gmail, Drive files or contacts is requested, and nothing is written
 2. Open the web app with two or three colleagues and walk through [TESTPLAN.md](TESTPLAN.md).
 3. Check real response times with `?perf=1` on the web app URL.
 4. Start with a pilot group, then share the URL with everyone.
+
+## 9. Updates and data safety
+
+Code and data are separate: all data lives in the database spreadsheet, the code in the Apps Script project. A code update never touches the data, and users keep working on the deployed version until a new one is released.
+
+**Update without clasp (copy in the editor)**
+
+1. Each release lists the changed files. Open each one in the Apps Script editor, select all, paste the new content, save. Server files are `.gs`, interface files `.html`; names must match exactly.
+2. Test: **Deploy → Test deployments** opens the `/dev` URL, which always runs the newest saved code (for the editors only, on the real data).
+3. If the release adds columns or tables: run `setup()` once. It only adds what is missing and keeps all rows.
+4. Release: **Deploy → Manage deployments → edit (pencil) the existing deployment → Version: New version → Deploy.** Always edit the existing deployment; a new deployment gets a new URL.
+5. Rollback: same dialog, choose the previous version number. Data is not affected.
+
+With clasp the same flow starts with `clasp push --force` instead of step 1.
+
+**Backups.** Before bigger updates make a copy of the database spreadsheet (**File → Make a copy**). Google Sheets also keeps a version history (**File → Version history**). Never share the spreadsheet with users: the web app runs as the deploying account and checks every permission on the server; users only need the web app URL.
+
+**Transactions.** Every write runs in `Db.tx()`:
+
+- *Isolation*: one script-wide lock, so writes happen strictly one after another (waits up to 20 s, then the request is refused and the client retries).
+- *Consistency*: all rules are checked on the server before the first write.
+- *Atomicity*: before each write the transaction notes how to undo it. An error anywhere in the transaction undoes all its writes in reverse order (all or nothing).
+- *Recovery*: from the second write of a transaction on, the undo steps are written ahead to the `Journal` sheet and the script property `DB_JOURNAL` is set. If the script dies before it can undo (for example at the execution time limit), the next transaction replays that journal under the lock before it does anything else. The `Journal` sheet is empty whenever no transaction is in flight; do not edit it by hand.
+- *Durability*: every write goes straight to the spreadsheet and is flushed before the lock is released.

@@ -5,6 +5,13 @@
  * Reads are memoised for the duration of one server call; writes run inside
  * Db.tx(), which takes the script lock and re-reads the data so concurrent
  * users never write to a stale row number.
+ *
+ * Transactions are all or nothing. Before each write, Db.tx() notes how to undo it
+ * (insert -> delete, update -> old row, delete -> old rows); an error inside the
+ * transaction undoes all its writes in reverse order. From the second write of a
+ * transaction on, the undo steps are also written ahead to the Journal sheet and the
+ * script property DB_JOURNAL is set: if the script dies before it can undo (time limit),
+ * the next transaction replays the journal under the lock before doing anything else.
  */
 const SCHEMA = {
   Users: {
@@ -42,6 +49,10 @@ const SCHEMA = {
   },
   HolidayCache: {
     cols: ['key', 'json', 'fetchedAt'],
+  },
+  // write-ahead undo steps of the running transaction (empty when nothing is in flight)
+  Journal: {
+    cols: ['seq', 'tx', 'op', 'tbl', 'rowKey', 'before', 'createdAt'],
   },
 };
 
@@ -252,6 +263,96 @@ const Db = (function () {
     return find(table, key);
   }
 
+  /* ---- undo journal ---- */
+  // undo steps of the running transaction: { op: 'insert'|'update'|'remove', table, key, before }
+  let undo = null;
+  let walOpen = false;
+  let txId = '';
+  const props = () => PropertiesService.getScriptProperties();
+
+  /** Notes how to undo the next write; from the second write on it is also written ahead. */
+  function noteUndo(step) {
+    if (!undo) return;
+    undo.push(step);
+    const multi = step.op === 'remove' && step.before.length > 1;
+    if (!walOpen && (undo.length > 1 || multi)) {
+      walOpen = true;
+      walWrite(undo);
+      props().setProperty('DB_JOURNAL', txId);
+    } else if (walOpen) walWrite([step]);
+  }
+  function journalSheet() {
+    const ss = open();
+    let sh = ss.getSheetByName('Journal');
+    if (!sh) {
+      sh = ss.insertSheet('Journal');
+      sh.getRange(1, 1, 1, SCHEMA.Journal.cols.length).setValues([SCHEMA.Journal.cols]);
+    }
+    return sh;
+  }
+  function walWrite(list) {
+    // one row per deleted record: a sheet cell holds at most 50,000 characters
+    const steps = [];
+    list.forEach(s => (s.op === 'remove' ? s.before.forEach(o => steps.push({ op: 'remove', table: s.table, before: [o] })) : steps.push(s)));
+    const sh = journalSheet();
+    const at = sh.getLastRow() + 1;
+    const now = new Date().toISOString();
+    sh.getRange(at, 1, steps.length, SCHEMA.Journal.cols.length).setValues(steps.map((s, i) =>
+      [at + i, txId, s.op, s.table, String(s.key === undefined ? '' : s.key), JSON.stringify(s.before === undefined ? null : s.before), now]));
+  }
+  function walClear() {
+    const sh = journalSheet();
+    for (let r = sh.getLastRow(); r >= 2; r--) sh.deleteRow(r);
+    props().deleteProperty('DB_JOURNAL');
+  }
+  /** Writes one undo step back, straight on the sheet (row numbers read fresh). */
+  function applyUndo(s) {
+    const d = def(s.table);
+    const sh = sheet(s.table);
+    const rows = load(s.table, true);
+    const at = key => rows.find(e => String(e.obj[d.cols[0]]) === String(key));
+    cacheDrop(s.table);
+    dirty = true;
+    if (s.op === 'insert') {
+      const e = at(s.key);
+      if (e) sh.deleteRow(e.row);
+    } else if (s.op === 'update') {
+      const e = at(s.key);
+      const row = e ? e.row : sh.getLastRow() + 1;
+      sh.getRange(row, 1, 1, d.cols.length).setValues([toRow(d, s.before)]);
+    } else {
+      const missing = s.before.filter(o => !at(o[d.cols[0]]));
+      if (missing.length) sh.getRange(sh.getLastRow() + 1, 1, missing.length, d.cols.length).setValues(missing.map(o => toRow(d, o)));
+    }
+    delete memo[s.table];
+  }
+  /** Undoes the steps in reverse order. If that fails too, the written-ahead journal stays for recovery. */
+  function rollback(steps) {
+    memo = {};
+    fromSheet = {};
+    try {
+      steps.slice().reverse().forEach(applyUndo);
+      if (walOpen) walClear();
+    } catch (e) {
+      console.error('rollback failed, journal kept for recovery: ' + (e && e.message));
+    }
+    memo = {};
+  }
+  /** A transaction died without undoing its writes: replay its journal (under the lock). */
+  function recover() {
+    if (!props().getProperty('DB_JOURNAL')) return;
+    const sh = journalSheet();
+    const last = sh.getLastRow();
+    const rows = last < 2 ? [] : sh.getRange(2, 1, last - 1, SCHEMA.Journal.cols.length).getValues();
+    const steps = rows.filter(r => r[2]).map(r => ({ op: r[2], table: r[3], key: r[4], before: JSON.parse(r[5]) }));
+    console.warn('recovering ' + steps.length + ' journal steps of an interrupted transaction');
+    memo = {};
+    fromSheet = {};
+    steps.reverse().forEach(applyUndo);
+    walClear();
+    memo = {};
+  }
+
   function tx(fn) {
     if (txDepth > 0) return fn();
     const lock = LockService.getScriptLock();
@@ -259,9 +360,20 @@ const Db = (function () {
     txDepth++;
     memo = {};
     fromSheet = {};
+    undo = [];
+    walOpen = false;
+    txId = newToken();
     try {
-      return fn();
+      recover();
+      const result = fn();
+      if (walOpen) walClear();
+      return result;
+    } catch (e) {
+      if (undo.length) rollback(undo);
+      throw e;
     } finally {
+      undo = null;
+      walOpen = false;
       txDepth--;
       if (dirty) SpreadsheetApp.flush();
       dirty = false;
@@ -302,6 +414,7 @@ const Db = (function () {
         const d = def(table);
         if (find(table, obj[d.cols[0]])) throw new Error('Eintrag existiert bereits.');
         const sh = sheet(table);
+        noteUndo({ op: 'insert', table: table, key: obj[d.cols[0]] });
         cacheDrop(table);
         dirty = true;
         const row = sh.getLastRow() + 1;
@@ -317,6 +430,7 @@ const Db = (function () {
         const d = def(table);
         const e = locate(table, key);
         if (!e) throw new Error('Eintrag nicht gefunden.');
+        noteUndo({ op: 'update', table: table, key: key, before: Object.assign({}, e.obj) });
         cacheDrop(table);
         dirty = true;
         const merged = Object.assign({}, e.obj, patch);
@@ -334,8 +448,10 @@ const Db = (function () {
         const d = def(table);
         const wanted = {};
         keys.forEach(k => { wanted[String(k)] = true; });
-        const rows = load(table, true).filter(e => wanted[String(e.obj[d.cols[0]])]).map(e => e.row).sort((a, b) => b - a);
+        const hits = load(table, true).filter(e => wanted[String(e.obj[d.cols[0]])]);
+        const rows = hits.map(e => e.row).sort((a, b) => b - a);
         if (!rows.length) return 0;
+        noteUndo({ op: 'remove', table: table, before: hits.map(e => Object.assign({}, e.obj)) });
         cacheDrop(table);
         dirty = true;
         const sh = sheet(table);
@@ -349,6 +465,7 @@ const Db = (function () {
       return tx(() => {
         const e = locate(table, key);
         if (!e) return false;
+        noteUndo({ op: 'remove', table: table, before: [Object.assign({}, e.obj)] });
         cacheDrop(table);
         dirty = true;
         sheet(table).deleteRow(e.row);
