@@ -316,19 +316,21 @@ function teamChip(t) {
 /* ---------------- server ---------------- */
 /** Tasks that were created optimistically: temporary id -> promise of the real id. */
 const PENDING = {};
-function call(method, payload) {
+/** opts.quiet: background work (polling) that never shows the loading bar. */
+function call(method, payload, opts) {
   const keys = ['id', 'taskId', 'parentId'].filter(k => payload && payload[k] && PENDING[payload[k]]);
   if (keys.length) {
     return Promise.all(keys.map(k => PENDING[payload[k]])).then(ids => {
       const next = Object.assign({}, payload);
       keys.forEach((k, i) => { next[k] = ids[i]; });
-      return call(method, next);
+      return call(method, next, opts);
     });
   }
   // reading calls are retried twice (0.6 s, 1.8 s) when Google is busy or the connection hiccups
   const READS = /^(bootstrap|tasks\.list|calendar\.range|availability|comments\.list|ai\.briefing|ai\.status)$/;
   if (!READS.test(method) && typeof BOOT_DONE !== 'undefined' && !BOOT_DONE) S.wroteDuringBoot = true;
-  const attempt = n => runCall(method, payload).catch(err => {
+  const quiet = !!(opts && opts.quiet);
+  const attempt = n => runCall(method, payload, quiet).catch(err => {
     const msg = (err && err.message) || '';
     // refused before it ran (too many at once): safe to repeat, also for writes
     const refused = /simultaneous|gleichzeitig/i.test(msg);
@@ -343,8 +345,10 @@ function call(method, payload) {
 /** Timing of every server call (round trip and time on the server); shown with ?perf=1. */
 const PERF = [];
 const PERF_START = Date.now();
-function runCall(method, payload) {
+function runCall(method, payload, quiet) {
   S.busy++;
+  if (!quiet) S.busyLoud = (S.busyLoud || 0) + 1;
+  const done = () => { S.busy--; if (!quiet) S.busyLoud--; syncDot(); };
   syncDot();
   const t0 = Date.now();
   const log = (res, ok) => {
@@ -354,14 +358,14 @@ function runCall(method, payload) {
   return new Promise((resolve, reject) => {
     google.script.run
       .withSuccessHandler(raw => {
-        S.busy--; syncDot();
+        done();
         let res;
         try { res = JSON.parse(raw); } catch (e) { log(null, false); return reject(new Error('Ungültige Antwort vom Server')); }
         res.bytes = raw.length;
         log(res, res.ok);
         if (res.ok) resolve(res.data); else reject(new Error(res.error));
       })
-      .withFailureHandler(err => { S.busy--; syncDot(); log(null, false); reject(err instanceof Error ? err : new Error(String(err))); })
+      .withFailureHandler(err => { done(); log(null, false); reject(err instanceof Error ? err : new Error(String(err))); })
       .api(method, JSON.stringify(payload || {}));
   });
 }
@@ -382,8 +386,9 @@ function syncDot() {
   if (d) d.classList.toggle('busy', S.busy > 0);
   let bar = $('#busy-bar');
   if (!bar) { bar = document.createElement('div'); bar.id = 'busy-bar'; bar.setAttribute('aria-hidden', 'true'); document.body.appendChild(bar); }
+  // the bar only for what the user waits for, and only when it takes a moment
   clearTimeout(busyTimer);
-  if (S.busy > 0) busyTimer = setTimeout(() => bar.classList.add('on'), 150);
+  if (S.busyLoud > 0) busyTimer = setTimeout(() => bar.classList.toggle('on', S.busyLoud > 0), 500);
   else bar.classList.remove('on');
 }
 function fail(err) {
@@ -800,7 +805,7 @@ function editing() {
 let pollFailures = 0;
 function refresh() {
   if (document.visibilityState !== 'visible' || editing() || S.busy) return;
-  call('tasks.list', { ver: S.tasksVer || '' }).then(res => {
+  call('tasks.list', { ver: S.tasksVer || '' }, { quiet: true }).then(res => {
     pollFailures = 0;
     if (res.same || editing() || S.busy) return;
     const list = res.tasks;

@@ -44,6 +44,8 @@ const ATTEMPTS = w => ({
   'companyHolidays.remove': { id: w.hol.id },
   'ai.suggestAssignee': { id: w.task.id },
   'ai.breakdown': { id: w.task.id },
+  'backup.status': {},
+  'backup.run': {},
 });
 // read-only routes that answer the outsider with their OWN data only (checked below)
 const OWN_DATA = ['bootstrap', 'tasks.list', 'ai.status', 'ai.report', 'ai.briefing', 'ai.parse', 'ai.assist', 'calendar.range', 'capacity', 'availability'];

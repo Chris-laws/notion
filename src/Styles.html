@@ -407,9 +407,13 @@ input.ai-title { height: 32px; }
 .nf p { margin: 0; color: var(--text-2); }
 .nf-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
 /* thin loading bar at the very top while the server works */
-#busy-bar { position: fixed; left: 0; top: 0; height: 3px; width: 100%; z-index: 100; pointer-events: none; opacity: 0; transition: opacity .2s;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; }
-#busy-bar.on { opacity: 1; animation: busy 1.1s ease-in-out infinite; }
+/* loading bar: thin and pale, fades in and out; reduced motion: no sweep */
+#busy-bar { position: fixed; left: 0; top: 0; height: 2px; width: 100%; z-index: 100; pointer-events: none; opacity: 0; transition: opacity .4s ease;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 70%, transparent), transparent); background-size: 40% 100%; background-repeat: no-repeat; }
+#busy-bar.on { opacity: .55; animation: busy 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  #busy-bar.on { animation: none; background: color-mix(in srgb, var(--accent) 35%, transparent); }
+}
 @keyframes busy { from { background-position: -40% 0; } to { background-position: 140% 0; } }
 /* save buttons show that they work */
 .btn.loading { position: relative; color: transparent !important; }
@@ -784,6 +788,8 @@ table.db tr:hover .title-cell .open { opacity: 1; }
 .banner { display: flex; gap: 12px; align-items: flex-start; border-radius: var(--r-md); padding: 13px 16px; margin: 14px 0; font-size: 14px; }
 .banner.danger { background: var(--danger-soft); color: var(--text); }
 .banner.danger > svg { color: var(--danger-text); margin-top: 2px; }
+.banner.warn { background: var(--warning-soft); color: var(--text); }
+.banner.warn > svg { color: var(--warning-text); margin-top: 2px; }
 .banner.ok { background: var(--success-soft); }
 .banner.ok > svg { color: var(--success-text); margin-top: 2px; }
 .banner b { font-weight: 700; }
@@ -1529,6 +1535,14 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .pm-allbar small { display: block; font-size: 12px; margin-top: 2px; }
 .pm-foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 22px 18px; border-top: 1px solid var(--border); }
 .pm-count { margin-right: auto; font-size: 13px; color: var(--text-2); }
+.prog-ed { padding: 10px 12px; width: 250px; display: grid; gap: 10px; }
+.prog-ed .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--bg-subtle); border-radius: 8px; padding: 2px; }
+.prog-ed .seg-b { padding: 5px 8px; border-radius: 6px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.prog-ed .seg-b.on { background: var(--bg); color: var(--text); box-shadow: var(--shadow-card); }
+.prog-row { display: flex; align-items: center; gap: 10px; }
+.prog-row input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.prog-num { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-2); }
+.prog-num input { width: 58px; padding: 4px 6px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; text-align: right; }
 .pm-warn { display: inline-flex; align-items: center; gap: 6px; color: var(--warning-text); font-weight: 600; }
 /* unsaved changes in the task panel: a bar at the bottom with "Verwerfen" / "Übernehmen" */
 .peek-commit { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border);

@@ -39,6 +39,14 @@
       });
       return this;
     };
+    this.clearContent = () => {
+      meter('sheetWrite');
+      for (let r = 0; r < nRows; r++) {
+        const line = sheet.data[row - 1 + r];
+        if (line) for (let c = 0; c < nCols; c++) line[col - 1 + c] = '';
+      }
+      return this;
+    };
     ['setNumberFormat', 'setFontWeight', 'setBackground'].forEach(m => { this[m] = () => this; });
   }
 
@@ -55,6 +63,21 @@
     this.getRange = (r, c, nr, nc) => new Range(this, r, c, nr || 1, nc || 1);
     this.deleteRow = r => { meter('sheetWrite'); this.data.splice(r - 1, 1); };
     this.setFrozenRows = () => {};
+    // sheet protection: the owner can always edit; editors listed here could too
+    const protections = [];
+    this.getProtections = () => protections.slice();
+    this.protect = () => {
+      const p = { editors: ['someone@firma.de'], domainEdit: true, description: '' };
+      Object.assign(p, {
+        setDescription: d => { p.description = d; return p; },
+        getEditors: () => p.editors.slice(),
+        removeEditors: list => { p.editors = p.editors.filter(e => list.indexOf(e) < 0); return p; },
+        canDomainEdit: () => p.domainEdit,
+        setDomainEdit: v => { p.domainEdit = v; return p; },
+      });
+      protections.push(p);
+      return p;
+    };
   }
 
   function Spreadsheet(id, name) {
@@ -86,6 +109,7 @@
       return spreadsheets[id];
     },
     flush() { meter('flush'); },
+    ProtectionType: { SHEET: 'SHEET', RANGE: 'RANGE' },
   };
   root.PropertiesService = { getScriptProperties: () => propStore, getUserProperties: () => propStore };
   root.Session = {

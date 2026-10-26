@@ -385,6 +385,8 @@ const Db = (function () {
   return {
     tx: tx,
     reads() { return sheetReads; },
+    /** The table was changed outside Db (restore): drop cached copies at the end of the transaction. */
+    touch(table) { cacheDrop(table); delete memo[table]; dirty = true; },
 
     /** Version token over some tables: changes whenever one of them is written. */
     version(tables) {

@@ -10,6 +10,16 @@ function setup() {
   props.setProperty('SPREADSHEET_ID', ss.getId());
   Db.ensureSchema(ss);
 
+  // Only the owner may edit the tables by hand (the web app runs as the owner); protects again
+  // if someone shares the spreadsheet by mistake.
+  Object.keys(SCHEMA).forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh || sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) return;
+    const p = sh.protect().setDescription('LidlFlow: only change through the app');
+    p.removeEditors(p.getEditors());
+    if (p.canDomainEdit()) p.setDomainEdit(false);
+  });
+
   // Remove the empty default sheet of a freshly created spreadsheet.
   ss.getSheets().forEach(sh => {
     if (!SCHEMA[sh.getName()] && sh.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(sh);

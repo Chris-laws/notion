@@ -13,7 +13,7 @@ describe('calendar request fails', () => {
       runCall = (m, p) => (m === 'calendar.range' ? (window.__calls++, Promise.reject(new Error('internal'))) : window.__orig(m, p));
       S.cal.cache = {}; S.cal.cursor = '2027-02-01'; go('calendar')`);
     // "internal" is retried twice (0.6 s, 1.8 s, plus jitter) before the message shows
-    await wait(4000);
+    for (let end = Date.now() + 9000; !w.document.querySelector('.cal-error') && Date.now() < end;) await wait(50);
     const box = w.document.querySelector('.cal-error');
     assert.ok(box, 'error box shown');
     assert.match(box.textContent, /nicht geladen/);

@@ -52,6 +52,8 @@ const ROUTES = {
   'ai.suggestAssignee': p => Ai.suggestAssignee(p),
   'ai.breakdown': p => Ai.breakdown(p),
   'ai.briefing': p => Ai.briefing(p),
+  'backup.status': () => Backup.status(),
+  'backup.run': () => Backup.runNow(),
 };
 
 function api(method, payload) {

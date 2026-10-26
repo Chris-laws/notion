@@ -108,7 +108,14 @@ Code and data are separate: all data lives in the database spreadsheet, the code
 
 With clasp the same flow starts with `clasp push --force` instead of step 1.
 
-**Backups.** Before bigger updates make a copy of the database spreadsheet (**File → Make a copy**). Google Sheets also keeps a version history (**File → Version history**). Never share the spreadsheet with users: the web app runs as the deploying account and checks every permission on the server; users only need the web app URL.
+**Backups.** `backupDatabase()` (src/Backup.js) copies every table into a second spreadsheet, **LidlFlow – Backups** (created on the first run; id in the script property `BACKUP_SPREADSHEET_ID`), one sheet per table named `<date> <table>`, and lists each backup in its sheet `Backups`. The last 8 dates are kept. It needs no permission beyond the spreadsheets scope the app already has.
+
+- **Weekly:** in the Apps Script editor, **Triggers → Add trigger → function `backupDatabase` → event source Time-driven → Week timer** (e.g. Sunday, 2–3 am) → Save. A trigger created in the editor needs no extra OAuth scope.
+- **By hand:** admins find **Settings → Backups** with the last backup, a link to the backup spreadsheet and **Back up now**; the page reminds them to set up the trigger when the last backup is older than 8 days.
+- **Restore:** in the editor run `restoreBackup('YYYY-MM-DD')`. It first backs up the current state (under today's date), then writes the tables of that date back under the write lock; the app sees the restored data on the next load. To restore single rows instead, open the backup spreadsheet and copy them over by hand.
+- Before bigger updates an extra copy does not hurt (**File → Make a copy**); Google Sheets also keeps a version history (**File → Version history**).
+
+**Protection.** `setup()` protects every table sheet so that only the owner can edit it (the web app runs as the owner, so it is not affected). Never share the spreadsheet with users: the web app checks every permission on the server, users only need the web app URL. For long-term operation move the database and backup spreadsheets into a **shared drive** of the team (the ids stay the same), and give a second person edit rights on the Apps Script project, so the data does not depend on one account.
 
 **Transactions.** Every write runs in `Db.tx()`:
 

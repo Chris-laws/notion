@@ -374,17 +374,44 @@ const PROP_EDITORS = {
       onPick: (v, sel) => save({ tags: sel }),
     });
   },
+  /**
+   * Progress: "Automatisch" (from status and sub-tasks, stored as 0) or "Manuell" (1-100 %),
+   * set with a slider in 1 % steps (Shift + arrow: 10) or typed into the number field.
+   */
   progress(anchor, t, save) {
-    const v = progressOf(t);
+    const manual = t.progress > 0;
+    const v = Math.max(1, progressOf(t));
+    const seg = (mode, label, on) => '<button type="button" class="seg-b' + (on ? ' on' : '') + '" data-mode="' + mode + '" aria-pressed="' + on + '">' + label + '</button>';
     openPop(anchor,
-      '<div style="padding:8px 10px;width:220px"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px"><span class="muted">' + (t.progress > 0 ? 'Manuell' : 'Automatisch') + '</span><b class="pvv">' + v + ' %</b></div>' +
-      '<input type="range" min="1" max="100" step="5" value="' + v + '" style="width:100%">' +
-      '<div style="margin-top:8px"><button class="btn sm outline" data-auto>Auf automatisch zurücksetzen</button></div></div>',
+      '<div class="prog-ed"><div class="seg" role="group" aria-label="Fortschritt">' + seg('auto', 'Automatisch', !manual) + seg('manual', 'Manuell', manual) + '</div>' +
+      (manual
+        ? '<div class="prog-row"><input type="range" min="1" max="100" step="1" value="' + v + '" aria-label="Fortschritt in Prozent">' +
+          '<label class="prog-num"><input type="number" min="0" max="100" step="1" value="' + v + '" aria-label="Fortschritt in Prozent eingeben"><span>%</span></label></div>' +
+          '<div class="hint">0 % schaltet auf automatisch zurück.</div>'
+        : '<div class="hint">' + progressOf(t) + ' % – berechnet aus Status und Unteraufgaben.</div>') + '</div>',
       pop => {
-        const r = $('input', pop);
-        r.addEventListener('input', () => { $('.pvv', pop).textContent = r.value + ' %'; });
-        r.addEventListener('change', () => save({ progress: Number(r.value) }));
-        $('[data-auto]', pop).addEventListener('click', () => { closePop(); save({ progress: 0 }); });
+        const set = n => {
+          const p = Math.round(Number(n));
+          if (!isFinite(p)) return;
+          save({ progress: Math.min(100, Math.max(0, p)) });
+        };
+        $('[data-mode="auto"]', pop).addEventListener('click', () => { if (manual) { closePop(); save({ progress: 0 }); } });
+        $('[data-mode="manual"]', pop).addEventListener('click', () => { if (!manual) { closePop(); save({ progress: v }); } });
+        if (!manual) return;
+        const r = $('input[type=range]', pop);
+        const num = $('input[type=number]', pop);
+        r.addEventListener('input', () => { num.value = r.value; });
+        r.addEventListener('change', () => set(r.value));
+        r.addEventListener('keydown', e => {
+          if (!e.shiftKey || ['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'].indexOf(e.key) < 0) return;
+          e.preventDefault();
+          const next = Math.min(100, Math.max(1, Number(r.value) + (e.key === 'ArrowUp' || e.key === 'ArrowRight' ? 10 : -10)));
+          r.value = num.value = next;
+          set(next);
+        });
+        num.addEventListener('input', () => { if (num.value !== '') r.value = Math.min(100, Math.max(1, Number(num.value))); });
+        num.addEventListener('change', () => set(num.value));
+        num.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); set(num.value); } });
       });
   },
   dueDate(anchor, t, save) { dateEditor(anchor, t.dueDate, v => save({ dueDate: v })); },

@@ -1911,7 +1911,8 @@ function settingsPage() {
       (S.companyHolidays.slice().sort((a, b) => a.date.localeCompare(b.date)).map(h => '<div class="li"><span class="faint nowrap" style="width:110px">' + esc(fmtDate(h.date, { absolute: true })) + '</span>' +
         '<span class="grow">' + esc(h.name) + ' <span class="faint">' + esc(h.countries.length ? h.countries.join(', ') : 'alle Länder') + '</span></span>' +
         '<button class="btn sm danger" data-action="ch-remove" data-id="' + esc(h.id) + '">Entfernen</button></div>').join('') || '<div class="empty-li">Keine.</div>') +
-      '</div><button class="btn sm outline" data-action="ch-new" style="margin-top:8px">' + icon('plus', 'sm') + 'Firmen-Feiertag</button>';
+      '</div><button class="btn sm outline" data-action="ch-new" style="margin-top:8px">' + icon('plus', 'sm') + 'Firmen-Feiertag</button>' +
+      '<div class="h2">' + icon('lock') + 'Datensicherung</div>' + backupBox();
   }
   return '<div class="page">' + pageHead('Einstellungen', '') + '<div class="fit-body" data-keep-scroll="fit">' +
     '<p class="page-sub">Angemeldet über Google als <b>' + esc(me.email) + '</b>. Land, Region, Wochenstunden und Arbeitstage bestimmen deine Kapazität.</p>' +
@@ -1935,6 +1936,38 @@ function applyUser(u) {
   const i = S.users.findIndex(x => x.email === u.email);
   if (i >= 0) S.users[i] = u; else S.users.push(u);
 }
+/** Admins: last backup, "Jetzt sichern" and how to make it weekly (see Backup.js). */
+function backupBox() {
+  if (S.backup === undefined) {
+    S.backup = null;
+    call('backup.status').then(b => { S.backup = b; render(); }).catch(err => { S.backup = { error: friendlyError(err.message || String(err)) }; render(); });
+  }
+  const b = S.backup;
+  if (!b) return skLines(2);
+  if (b.error) return '<div class="notice">' + esc(b.error) + '</div>';
+  const age = b.last ? Shared.diffDays(b.last.date, TODAY()) : null;
+  const stale = age === null || age > 8;
+  return '<div class="list-plain"><div class="li"><span class="grow">' +
+    (b.last ? 'Letztes Backup: <b>' + esc(fmtDate(b.last.date, { absolute: true })) + '</b> <span class="faint">· ' + b.count + ' von ' + b.keep + ' Ständen</span>'
+      : 'Noch kein Backup.') + '</span>' +
+    (b.url ? '<a class="btn sm" href="' + esc(b.url) + '" target="_blank" rel="noopener">Backups öffnen</a>' : '') +
+    '<button class="btn sm primary" data-action="backup-run"' + (S.backupBusy ? ' disabled' : '') + '>' + (S.backupBusy ? 'Sichert …' : 'Jetzt sichern') + '</button></div></div>' +
+    (stale ? '<div class="banner warn" style="margin-top:8px">' + icon('alert') + '<div>' +
+      L('<b>Wöchentliches Backup einrichten:</b> im Apps-Script-Editor links <i>Trigger</i> → <i>Trigger hinzufügen</i> → Funktion <code>backupDatabase</code>, ' +
+        'Ereignisquelle <i>Zeitgesteuert</i>, <i>Wochen-Timer</i>, z. B. Sonntag 2–3 Uhr → Speichern.',
+      '<b>Set up the weekly backup:</b> in the Apps Script editor, <i>Triggers</i> → <i>Add trigger</i> → function <code>backupDatabase</code>, ' +
+        'event source <i>Time-driven</i>, <i>Week timer</i>, e.g. Sunday 2–3 am → Save.') + '</div></div>' : '');
+}
+A['backup-run'] = () => {
+  S.backupBusy = true;
+  render();
+  call('backup.run').then(r => {
+    S.backupBusy = false;
+    S.backup = undefined;
+    toast('Backup gespeichert: ' + fmtDate(r.date, { absolute: true }));
+    render();
+  }).catch(err => { S.backupBusy = false; render(); fail(err); });
+};
 A['user-role'] = el => {
   const u = user(el.dataset.email);
   const toAdmin = u.role !== 'admin';
