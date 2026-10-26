@@ -1609,7 +1609,7 @@ function calendarPage() {
     ctl.push('<div class="seg">' + Object.keys(AG_RANGES).map(k => '<button class="' + (range === k ? 'on' : '') + '" data-action="cal-range" data-k="' + k + '">' + AG_RANGES[k][1] + '</button>').join('') + '</div>');
     const over = tasks.filter(x => !isDone(x) && x.dueDate < t).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || rankPrio(a) - rankPrio(b));
     const overHtml = show.tasks && over.length
-      ? '<div class="card-w ag-over"><h3 style="color:var(--danger)">' + icon('alert', 'sm') + 'Überfällig <span class="n">' + over.length + '</span></h3>' +
+      ? '<div class="card-w ag-over"><h3 style="color: var(--danger-text)">' + icon('alert', 'sm') + 'Überfällig <span class="n">' + over.length + '</span></h3>' +
         over.slice(0, 12).map(x => '<div class="ag-item overdue" data-action="open-task" data-id="' + esc(x.id) + '">' + glyph(x.status) + '<span class="tt">' + esc(x.title) + '</span>' +
           metaHtml(x, { skipDue: true }) + '<span class="meta due">' + esc(fmtRange(x.startDate || x.dueDate, x.dueDate)) + '</span>' + (x.assignees.length ? avatars(x.assignees, 2) : '') + '</div>').join('') +
         (over.length > 12 ? '<div class="hint" style="padding-top:6px">+ ' + (over.length - 12) + ' weitere</div>' : '') + '</div>' : '';
@@ -1620,7 +1620,7 @@ function calendarPage() {
     const data = calEnsure(days[0], days[days.length - 1], teamId);
     main = calNav() + monthHtml({ cursor: calCursor(), tasks: tasks, data: data, show: show, people: people, teamId: teamId }) +
       '<div class="legend"><span><span class="sw" style="background:var(--danger-soft);border:1px solid var(--danger)"></span>≥ ' + ((data && data.threshold) || 50) + ' % des Teams abwesend</span>' +
-      '<span><span class="sw" style="background:var(--accent-soft)"></span>Termin</span><span style="color:var(--warning);font-weight:600">Feiertag</span></div>';
+      '<span><span class="sw" style="background:var(--accent-soft)"></span>Termin</span><span style="color: var(--warning-text);font-weight:600">Feiertag</span></div>';
     layoutSide = true;
   } else if (mode === 'week' || mode === 'day') {
     const f = focusDate();
@@ -1667,7 +1667,7 @@ function sidePanel(d, people, o) {
   const hl = Object.keys(hol).map(k => hol[k]).filter(h => h.date >= t).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 12);
   const abs = d.absences.filter(a => a.endDate >= t && inScope(a.email)).sort((a, b) => a.startDate.localeCompare(b.startDate)).slice(0, 6);
   const warns = o.noWarn ? [] : d.warnings.slice(0, 6);
-  return (warns.length ? '<div class="panel"><h3 style="color:var(--danger)">' + icon('alert', 'sm') + 'Warnungen</h3><div class="hlist">' + warns.map(w =>
+  return (warns.length ? '<div class="panel"><h3 style="color: var(--danger-text)">' + icon('alert', 'sm') + 'Warnungen</h3><div class="hlist">' + warns.map(w =>
     '<div class="hitem warnitem">' + dayBox(w.date) + '<div class="what"><div><b>' + w.absent + ' von ' + w.total + '</b> in ' + esc(w.teamName) + ' abwesend</div>' +
     '<div class="muted">' + esc(w.people.map(x => user(x.email).name.split(' ')[0] + ' (' + (x.kind === 'holiday' ? holName(x) : absenceType(x.kind).label) + ')').join(', ')) + '</div></div></div>').join('') + '</div></div>' : '') +
     '<div class="panel"><h3>' + icon('plane', 'sm') + 'Abwesenheiten</h3><div class="hlist">' + (abs.map(a =>

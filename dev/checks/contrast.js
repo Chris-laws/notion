@@ -17,10 +17,10 @@ const PAIRS = [
   ['--accent-text', '--accent-soft', 4.5, 'accent chips'],
   ['--accent-text', '--bg', 4.5, 'links'],
   ['#ffffff', '--accent', 4.5, 'primary buttons'],
-  ['--danger', '--danger-soft', 4.5, 'error/overdue chips'],
-  ['--danger', '--bg', 4.5, 'overdue text'],
-  ['--warning', '--warning-soft', 4.5, 'warning chips, holidays'],
-  ['--success', '--success-soft', 4.5, 'done chips'],
+  ['--danger-text', '--danger-soft', 4.5, 'error/overdue chips'],
+  ['--danger-text', '--bg', 4.5, 'overdue text'],
+  ['--warning-text', '--warning-soft', 4.5, 'warning chips, holidays'],
+  ['--success-text', '--success-soft', 4.5, 'done chips'],
   ['--on-warning', '--warning-strong', 4.5, 'warning toast'],
   ['--ai-text', '--ai-soft', 4.5, 'AI elements'],
   ['--yellow-ink', '--yellow-soft', 4.5, 'yellow hints'],
@@ -28,7 +28,7 @@ const PAIRS = [
   ['--st-review', '--bg', 3, 'status review (icon)'],
   ['--st-done', '--bg', 3, 'status done (icon)'],
   ['--prio-high', '--bg', 3, 'high priority (bars)'],
-  ['--prio-high', '--prio-high-soft', 4.5, 'high priority (pill)'],
+  ['--prio-high-text', '--prio-high-soft', 4.5, 'high priority (pill)'],
   ['--border-strong', '--bg', 1.5, 'input borders (visible)'],
 ];
 // letters on project/team tiles: dark ink on the colours App.html lists as light, white on the rest

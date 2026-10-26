@@ -2,11 +2,12 @@
 
 ## Deployed application (`src/`)
 
-The deployed Apps Script project contains only the company's own code. It loads no third-party libraries, no web fonts and no scripts from external hosts. It uses these external services:
+The deployed Apps Script project contains only the company's own code. It loads no third-party libraries or scripts from external hosts; the only external asset is the Inter web font. It uses these external services:
 
 | Service | Purpose | Data sent |
 |---|---|---|
 | Google Apps Script, Google Sheets | runtime and data storage in the company's Google Workspace | all app data stays in the company Workspace |
+| [Google Fonts](https://fonts.google.com) | the Inter font (SIL Open Font License 1.1), loaded asynchronously | the browser's request for the font files (IP address, user agent) |
 | [Nager.Date](https://date.nager.at) public holiday API | public holidays per country | country code and year only |
 | Google Vertex AI (optional) | AI summary, quick add, task breakdown | task titles/descriptions and names in the request; only when `VERTEX_API_KEY` is set |
 

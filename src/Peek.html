@@ -283,7 +283,7 @@ A['peek-more'] = el => {
   openMenu(el, [
     { value: 'dup', html: icon('layers', 'sm') + '<span>Duplizieren</span>', search: '' },
     { value: 'sub', html: icon('sub', 'sm') + '<span>Zu Unteraufgabe von…</span>', search: '' },
-    { value: 'del', html: '<span style="color:var(--danger);display:flex;gap:8px;align-items:center">' + icon('trash', 'sm') + 'Löschen</span>', search: '' },
+    { value: 'del', html: '<span style="color: var(--danger-text);display:flex;gap:8px;align-items:center">' + icon('trash', 'sm') + 'Löschen</span>', search: '' },
   ], {
     search: false,
     onPick: v => {

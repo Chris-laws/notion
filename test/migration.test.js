@@ -39,6 +39,11 @@ describe('migration check', () => {
     assert.deepEqual(probe('e.js', '// ' + rev('ietaD eid ruf ratnemmoK nie tsi saD') + '\n'), ['not English']);
     assert.deepEqual(probe('f.js', '// renders the card "Heute dran" for the overview\n'), []);
   });
+  test('accepts the own product name and branding', () => {
+    const NL = String.fromCharCode(10);
+    assert.deepEqual(probe('i.js', '// LidlFlow logo, Lidl blue and yellow' + NL + "const name = 'LidlFlow';" + NL), []);
+    assert.deepEqual(probe('j.md', '# LidlFlow' + NL + NL + 'Task management and team calendar in the Lidl design.' + NL), []);
+  });
   test('finds a script id in a clasp file, accepts the placeholder', () => {
     assert.deepEqual(probe('g.json', '{ "scriptId": "' + '1'.repeat(30) + '" }\n'), ['script id']);
     assert.deepEqual(probe('h.json', '{ "scriptId": "YOUR_SCRIPT_ID" }\n'), []);

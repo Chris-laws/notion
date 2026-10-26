@@ -70,7 +70,7 @@ No access to Gmail, Drive files, calendars or contacts is requested.
 
 - **Storage:** all data lives in the database spreadsheet in the company Workspace.
 - **External calls:** Nager.Date receives only country code and year. Vertex AI (optional) receives task texts and names for the AI functions; switch it on only after approval by data protection.
-- **No external web fonts or scripts:** the page uses the system font and contains all code inline.
+- **No external scripts:** all code is inline. The Inter font comes from Google Fonts (asynchronous, with the system font as fallback); if the company does not allow Google Fonts, remove the four font lines at the top of `src/Index.html`.
 - **Browser storage:** each browser keeps the last loaded state of the signed-in person (tasks and people they may see) in `localStorage` for at most 7 days to start quickly, plus view settings. It is bound to that person and replaced on the next start.
 - **Health data:** a sick leave is shown as "sick" only to the person and to admins; everyone else sees "away". Absence notes are visible to the person and admins only.
 - **Logs:** the Apps Script execution log contains route names and timings, no content.

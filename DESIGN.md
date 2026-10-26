@@ -8,7 +8,7 @@ A calm, light interface: soft canvas, white cards with generous rounding, few li
 
 - **Blue** (`--accent` `#012e90`) is the accent: selection, links, primary action, progress, events.
 - **Yellow** (`--yellow` `#fcc702`) only as a small marker: logo, active navigation bar, today.
-- **Red** (`--danger` `#d3191d`) means action needed: overdue, urgent, team below the staffing threshold, errors.
+- **Red** (`--danger` `#dc1a1e`) means action needed: overdue, urgent, team below the staffing threshold, errors.
 - Everything else is ink and cool grey on a light ground.
 
 ## Semantic colours
@@ -24,9 +24,13 @@ A calm, light interface: soft canvas, white cards with generous rounding, few li
 
 Status (`--st-*`): backlog grey (dashed circle), open slate (empty circle), in progress blue (half circle), review purple, done green (check). Priority (`--prio-*`): urgent red, high orange, medium amber, low grey. Dark mode uses the same tokens with their own values.
 
+Text on light surfaces uses `--danger-text`, `--warning-text`, `--success-text` and `--prio-high-text`: the same tones a shade darker so small text reaches 4.5:1. Dots, bars, icons and fills keep the brand tones.
+
+Projects show their own colour (`--c-*`) on tiles, pills and banners; without one they take their team's colour. The team appears as a small dot in the tile's corner. Letters on light colours (yellow, orange, teal, grey) are dark, on the others white.
+
 ## Typography
 
-The operating system's UI font (Segoe UI, San Francisco, Roboto …); no external web fonts. Hierarchy through size and weight, no all-caps labels except small section headings.
+Inter (Google Fonts, loaded asynchronously), falling back to the operating system's UI font (Segoe UI, San Francisco, Roboto …). Hierarchy through size and weight, no all-caps labels except small section headings.
 
 ## Shape
 

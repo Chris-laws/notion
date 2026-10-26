@@ -40,7 +40,7 @@ For moving the app into a company Workspace, see **[MIGRATION.md](MIGRATION.md)*
 - **Table cache:** every table is also kept in the script cache (large tables gzipped and split into chunks). Each table has a version token that every write renews after `flush`; a cached copy is only used while its token is current. Writes use the version-checked copy, check the target row before writing and put the new state straight back into the cache.
 - **Polling:** `tasks.list` gets the last seen version; while nothing changed the server only answers `{ same: true }`. Clients poll every 120 s ± 25 % and slow down after failures.
 - **Start:** the bootstrap call starts while the page loads. The last state is kept in the browser (`localStorage`, same person only, at most 7 days, under 2 MB), so the app shows at once and then refreshes; until then skeleton placeholders in the shape of the page are shown.
-- **Page size:** about 480 KB (140 KB gzipped); the logo is WebP; the app uses the system font, no external web fonts.
+- **Page size:** about 480 KB (140 KB gzipped); the logo is WebP; the Inter font loads asynchronously and never holds back the first paint.
 - `?perf=1` on the app URL shows duration and sheet reads per call.
 
 ## Setup
@@ -136,7 +136,7 @@ With Google Sheets as the database and the web app running as the deploying acco
 ## Licences and brands
 
 - **Code:** proprietary, for internal use in the company. No third-party library is shipped; only `src/` is uploaded to Apps Script. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- **Font:** the operating system's font; no web fonts are loaded from external hosts.
+- **Font:** Inter (Google Fonts, SIL Open Font License), with the operating system's font as fallback.
 - **Logo and colours:** the LidlFlow logo and the Lidl colours are for internal use in the company.
 - **External services:** holidays from Nager.Date (date.nager.at; only country and year are sent), AI via Google Vertex AI (company key in the script properties; task data is sent only when a key is set).
 - **Development tools** (`devDependencies`, not shipped): permissive licences; the one exception is `eslint-plugin-sonarjs` (LGPL-3.0, lint only).
