@@ -682,11 +682,16 @@ function calEnsure(from, to, teamId) {
       return (S.cal.cache[key] = sliceRange(wide, from, to));
     }
   }
-  if (!hit) {
+  // after a failure: wait for "try again" instead of asking the server on every render
+  if (!hit && !S.cal.errors[key]) {
     S.cal.cache[key] = 'loading';
     call('calendar.range', { from: from, to: to, teamId: teamId || '' })
       .then(d => { S.cal.cache[key] = d; render({ peek: false }); })
-      .catch(err => { delete S.cal.cache[key]; fail(err); });
+      .catch(err => {
+        delete S.cal.cache[key];
+        S.cal.errors[key] = friendlyError((err && err.message) || String(err));
+        render({ peek: false });
+      });
   }
   return null;
 }
@@ -704,7 +709,7 @@ function calPrefetch() {
   const t = TODAY();
   calEnsure(Shared.addDays(t, -35), Shared.addDays(t, 120), '');
 }
-function calReload() { S.cal.cache = {}; calPrefetch(); S.cap.data = null; S.briefing = null; render(); }
+function calReload() { S.cal.cache = {}; S.cal.errors = {}; calPrefetch(); S.cap.data = null; S.briefing = null; render(); }
 function calFind(kind, id) {
   let hit = null;
   Object.keys(S.cal.cache).forEach(k => {
@@ -819,13 +824,21 @@ function weekTitle(days) {
   const a = days[0], b = days[days.length - 1];
   return 'KW ' + Shared.isoWeek(a) + ' · ' + fmtRange(a, b);
 }
+/** Shown above the calendar when loading its data failed; "try again" asks the server once more. */
+function calErrorBox() {
+  const msgs = Object.keys(S.cal.errors).map(k => S.cal.errors[k]);
+  if (!msgs.length) return '';
+  return '<div class="banner danger cal-error" role="alert">' + icon('alert') + '<div><b>Die Kalenderdaten konnten nicht geladen werden.</b> ' + esc(msgs[0]) + '</div>' +
+    '<button type="button" class="btn sm" data-action="cal-retry">Erneut versuchen</button></div>';
+}
+A['cal-retry'] = () => { S.cal.errors = {}; render({ peek: false }); };
 function calNav(title, o) {
   const c = calCursor();
   o = o || {};
   return '<div class="cal-head"><div class="cal-title">' + (title || MONTHS_LONG[Number(c.slice(5, 7)) - 1] + ' ' + c.slice(0, 4)) + '</div>' +
     '<button class="icon-btn" data-action="cal-prev" aria-label="Zurück">' + icon('left') + '</button>' +
     '<button class="icon-btn" data-action="cal-next" aria-label="Weiter">' + icon('right') + '</button>' +
-    '<button class="btn outline sm" data-action="cal-today">Heute</button>' + (o.extra || '') + '</div>';
+    '<button class="btn outline sm" data-action="cal-today">Heute</button>' + (o.extra || '') + '</div>' + calErrorBox();
 }
 
 /* Drag across days to enter a vacation (team calendar only). */
@@ -1889,7 +1902,7 @@ ON.submit.profile = form => {
     form.removeAttribute('data-touched');
     Object.assign(S.me, u);
     applyUser(u);
-    S.cap.data = null; S.cal.cache = {}; calPrefetch(); S.briefing = null;
+    S.cap.data = null; S.cal.cache = {}; S.cal.errors = {}; calPrefetch(); S.briefing = null;
     toast('Profil gespeichert');
     render();
   }).catch(fail);

@@ -18,7 +18,7 @@ const S = {
   route: { view: 'dash' },
   peekId: null,
   peekFull: false,
-  cal: { cursor: null, mode: 'week', range: 'week', teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {} },
+  cal: { cursor: null, mode: 'week', range: 'week', teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {}, errors: {} },
   cap: { teamId: null, from: null, weeks: 6, data: null, loading: false },
   briefing: null,
   collapsed: {},
@@ -332,7 +332,7 @@ function call(method, payload) {
     const msg = (err && err.message) || '';
     // refused before it ran (too many at once): safe to repeat, also for writes
     const refused = /simultaneous|gleichzeitig/i.test(msg);
-    const transient = refused || /lock|timed? ?out|Zeitüberschreitung|too many|Rate Limit|NetworkError|network|Failed to fetch|503|500/i.test(msg);
+    const transient = refused || /\binternal\b|server error occurred|lock|timed? ?out|Zeitüberschreitung|too many|Rate Limit|NetworkError|network|Failed to fetch|503|500/i.test(msg);
     if (transient && (refused ? n < 3 : n < 2 && READS.test(method))) {
       return new Promise(r => setTimeout(r, Shared.retryDelay(n, Math.random()))).then(() => attempt(n + 1));
     }
@@ -393,6 +393,7 @@ function fail(err) {
 /** Technical errors from Google become a sentence that says what happened and what to do. */
 function friendlyError(msg) {
   if (!navigator.onLine || /NetworkError|Failed to fetch|network/i.test(msg)) return 'Keine Verbindung zum Server. Deine Änderung wurde nicht gespeichert – bitte Internet prüfen und erneut versuchen.';
+  if (/\binternal\b|server error occurred/i.test(msg)) return 'Bei Google ist gerade ein Serverfehler aufgetreten. Bitte gleich noch einmal versuchen.';
   if (/lock|timed? ?out|Zeitüberschreitung|Service invoked too many times|Rate Limit/i.test(msg)) return 'Der Server ist gerade ausgelastet. Bitte in ein paar Sekunden erneut versuchen.';
   if (/authoriz|permission|Berechtigung/i.test(msg) && !/Keine Berechtigung|nur/i.test(msg)) return 'Dafür fehlt die Berechtigung. Bitte die Seite neu laden oder eine Admin-Person fragen.';
   if (/ScriptError|Exception|undefined|null/i.test(msg)) return 'Da ist etwas schiefgelaufen. Bitte die Seite neu laden. Wenn es bleibt, melde es mit dieser Meldung: ' + msg;

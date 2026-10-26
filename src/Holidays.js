@@ -45,43 +45,66 @@ const Holidays = {
   forCountry(country, year) {
     country = String(country || '').toUpperCase();
     if (!/^[A-Z]{2}$/.test(country)) return [];
-    const key = country + '-' + year;
-    const cache = CacheService.getScriptCache();
-    // v2: entries carry nameEn as well
-    const hit = cache.get('hol2:' + key);
-    if (hit) return JSON.parse(hit);
+    return Holidays.load_([{ country: country, year: year }])[0];
+  },
 
-    let list = null;
-    const stored = Db.get('HolidayCache', key);
-    if (stored && stored.fetchedAt && Shared.diffDays(stored.fetchedAt.slice(0, 10), Util.today()) < Holidays.CACHE_DAYS) {
-      try { list = JSON.parse(stored.json); } catch (e) { list = null; }
-      if (list && list.length && list[0].nameEn === undefined) list = null; // stored before English names
-    }
-    if (!list) {
-      list = Holidays.fetchNager_(country, year)
-        || Holidays.fetchGoogle_(country, year)
-        || Holidays.builtin_(country, year);
-      if (list.length && list[0].source !== 'builtin') {
-        Db.tx(() => {
-          const row = { key: key, json: JSON.stringify(list), fetchedAt: new Date().toISOString() };
-          if (Db.get('HolidayCache', key)) Db.update('HolidayCache', key, row);
-          else Db.insert('HolidayCache', row);
-        });
-      }
-    }
-    cache.put('hol2:' + key, JSON.stringify(list), 21600);
-    return list;
+  /**
+   * Holidays for several country/year pairs at once. Never throws: every source and every cache
+   * is optional. Order: script cache -> HolidayCache sheet -> Nager.Date (all missing pairs in one
+   * parallel batch) -> Google holiday calendar -> built-in list.
+   */
+  load_(pairs) {
+    const keys = pairs.map(p => p.country + '-' + p.year);
+    // v2: entries carry nameEn as well
+    const hits = Holidays.safe_(() => CacheService.getScriptCache().getAll(keys.map(k => 'hol2:' + k)), {});
+    const lists = keys.map(k => (hits['hol2:' + k] ? Holidays.safe_(() => JSON.parse(hits['hol2:' + k]), null) : null));
+    keys.forEach((k, i) => { if (!lists[i]) lists[i] = Holidays.stored_(k); });
+    const missing = pairs.filter((p, i) => !lists[i]);
+    const nager = Holidays.fetchNagerAll_(missing);
+    const fresh = [];
+    pairs.forEach((p, i) => {
+      if (lists[i]) return;
+      lists[i] = nager[keys[i]] || Holidays.fetchGoogle_(p.country, p.year) || Holidays.builtin_(p.country, p.year);
+      if (lists[i].length && lists[i][0].source !== 'builtin') fresh.push(keys[i]);
+    });
+    if (fresh.length) Holidays.safe_(() => Holidays.store_(fresh.map(k => ({ key: k, list: lists[keys.indexOf(k)] }))));
+    const put = {};
+    keys.forEach((k, i) => { put['hol2:' + k] = JSON.stringify(lists[i]); });
+    Holidays.safe_(() => CacheService.getScriptCache().putAll(put, 21600));
+    return lists;
+  },
+
+  /** fn() or the fallback when a Google service fails (cache, sheet, lock: "Error code INTERNAL"). */
+  safe_(fn, fallback) {
+    try { return fn(); } catch (e) { console.warn('holidays: ' + (e && e.message)); return fallback; }
+  },
+
+  /** A list from the HolidayCache sheet that is still fresh, or null. */
+  stored_(key) {
+    const stored = Holidays.safe_(() => Db.get('HolidayCache', key), null);
+    if (!stored || !stored.fetchedAt || Shared.diffDays(stored.fetchedAt.slice(0, 10), Util.today()) >= Holidays.CACHE_DAYS) return null;
+    const list = Holidays.safe_(() => JSON.parse(stored.json), null);
+    return list && list.length && list[0].nameEn !== undefined ? list : null; // older entries lack English names
+  },
+
+  /** Writes fetched lists to the HolidayCache sheet in one transaction. */
+  store_(entries) {
+    Db.tx(() => entries.forEach(e => {
+      const row = { key: e.key, json: JSON.stringify(e.list), fetchedAt: new Date().toISOString() };
+      if (Db.get('HolidayCache', e.key)) Db.update('HolidayCache', e.key, row);
+      else Db.insert('HolidayCache', row);
+    }));
   },
 
   /** All holidays (official + company) for the given countries between two dates. */
   inRange(countries, from, to) {
-    const years = [];
-    for (let y = Number(from.slice(0, 4)); y <= Number(to.slice(0, 4)); y++) years.push(y);
-    let out = [];
-    countries.filter((c, i, a) => c && a.indexOf(c) === i).forEach(c => {
-      years.forEach(y => { out = out.concat(Holidays.forCountry(c, y)); });
+    const pairs = [];
+    countries.filter((c, i, a) => c && a.indexOf(c) === i).map(c => String(c).toUpperCase()).filter(c => /^[A-Z]{2}$/.test(c)).forEach(c => {
+      for (let y = Number(from.slice(0, 4)); y <= Number(to.slice(0, 4)); y++) pairs.push({ country: c, year: y });
     });
-    Db.all('CompanyHolidays').forEach(h => {
+    let out = [];
+    Holidays.load_(pairs).forEach(list => { out = out.concat(list); });
+    Holidays.safe_(() => Db.all('CompanyHolidays'), []).forEach(h => {
       const cs = h.countries && h.countries.length ? h.countries : ['*'];
       cs.forEach(c => out.push({ date: h.date, name: h.name, country: c, counties: null, source: 'company', id: h.id }));
     });
@@ -97,11 +120,22 @@ const Holidays = {
     return !!user.region && h.counties.indexOf(user.region) >= 0;
   },
 
-  fetchNager_(country, year) {
+  /** Nager.Date for all pairs in one parallel batch: key -> list (missing when there is no usable answer). */
+  fetchNagerAll_(pairs) {
+    const out = {};
+    if (!pairs.length) return out;
+    const url = p => 'https://date.nager.at/api/v3/PublicHolidays/' + p.year + '/' + p.country;
+    const res = Holidays.safe_(() => UrlFetchApp.fetchAll(pairs.map(p => ({ url: url(p), muteHttpExceptions: true }))), []);
+    res.forEach((r, i) => {
+      const list = Holidays.parseNager_(r, pairs[i].country);
+      if (list) out[pairs[i].country + '-' + pairs[i].year] = list;
+    });
+    return out;
+  },
+
+  /** A Nager.Date response as a holiday list; null when it is not a usable answer. */
+  parseNager_(res, country) {
     try {
-      const res = UrlFetchApp.fetch('https://date.nager.at/api/v3/PublicHolidays/' + year + '/' + country, {
-        muteHttpExceptions: true,
-      });
       if (res.getResponseCode() !== 200) return null;
       const data = JSON.parse(res.getContentText());
       if (!Array.isArray(data)) return null;

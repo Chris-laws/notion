@@ -19,6 +19,54 @@ function googleCalendar(app, events) {
   return asked;
 }
 
+describe('holidays for a new year in the calendar (several countries)', () => {
+  const people = app => ['DE', 'AT', 'US'].forEach((c, i) => app.x.Db.insert('Users', { email: 'p' + i + '@firma.de', name: 'P' + i, country: c }));
+  const feb = app => app.call('calendar.range', { from: '2027-01-25', to: '2027-03-07' });
+  test('all countries are fetched in one parallel batch, not one after another', () => {
+    const app = freshApp();
+    people(app);
+    const calls = app.fakeFetch(url => ({ code: 200, body: [{ date: '2027-02-15', localName: 'X ' + url.slice(-2), name: 'X', counties: null, types: ['Public'] }] }));
+    const m = app.measure(() => feb(app));
+    assert.equal(m.fetchAll, 1);
+    assert.ok(!m.fetch, 'no serial fetches');
+    assert.ok(calls.length >= 3);
+  });
+  test('a failing batch (timeout) falls back to the built-in list and the calendar still loads', () => {
+    const app = freshApp();
+    people(app);
+    app.fakeFetch(() => { throw new Error('Timeout: https://date.nager.at'); });
+    const d = feb(app);
+    assert.ok(d.holidays.some(h => h.source === 'builtin'));
+  });
+  test('a Google service error ("Error code INTERNAL") in the holiday calendar never breaks the calendar', () => {
+    const app = freshApp();
+    people(app);
+    app.fakeFetch(() => ({ code: 503, body: 'down' }));
+    app.ctx.CalendarApp = { getCalendarById: () => { throw new Error('A server error occurred. Error code INTERNAL.'); } };
+    assert.ok(feb(app).holidays.length > 0);
+  });
+  test('a broken script cache or holiday sheet does not break the calendar either', () => {
+    const app = freshApp();
+    people(app);
+    app.fakeFetch(() => ({ code: 200, body: nagerOk }));
+    const cache = app.ctx.CacheService.getScriptCache();
+    const boom = () => { throw new Error('Error code INTERNAL'); };
+    const orig = { get: cache.get, put: cache.put, getAll: cache.getAll, putAll: cache.putAll };
+    Object.assign(cache, { put: boom, putAll: boom });
+    const tx = app.x.Db.tx;
+    app.x.Db.tx = boom;
+    try { assert.ok(feb(app)); } finally { Object.assign(cache, orig); app.x.Db.tx = tx; }
+  });
+  test('the holidays of a year are fetched once, later months come from the cache', () => {
+    const app = freshApp();
+    people(app);
+    app.fakeFetch(() => ({ code: 200, body: nagerOk }));
+    feb(app);
+    const m = app.measure(() => app.call('calendar.range', { from: '2027-04-26', to: '2027-06-06' }));
+    assert.ok(!m.fetchAll && !m.fetch);
+  });
+});
+
 describe('holidays (Google Calendar double)', () => {
   test('when Nager.Date is down, the Google holiday calendar of the country is used and cached', () => {
     const app = freshApp();

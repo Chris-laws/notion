@@ -777,7 +777,7 @@ function assistCreate() {
     return Promise.resolve(createTask(f)).then(t => { if (t) created.push(['tasks.remove', t.id]); });
   });
   return Promise.all(jobs).then(() => {
-    S.cal.cache = {}; calPrefetch(); S.cap.data = null; S.briefing = null;
+    S.cal.cache = {}; S.cal.errors = {}; calPrefetch(); S.cap.data = null; S.briefing = null;
     render();
     toast(created.length + (created.length === 1 ? ' Eintrag angelegt' : ' Einträge angelegt'), { duration: 8000, action: { label: 'Rückgängig', fn: () =>
       Promise.all(created.map(c => call(c[0], { id: c[1] }))).then(() => reloadAll()).then(() => toast('Rückgängig gemacht.')).catch(fail) } });
@@ -794,7 +794,7 @@ function confirmDelete(text, fn) {
 }
 
 function reloadAll() {
-  return call('bootstrap').then(d => { Object.assign(S, d); S.cap.data = null; S.cal.cache = {}; calPrefetch(); render(); });
+  return call('bootstrap').then(d => { Object.assign(S, d); S.cap.data = null; S.cal.cache = {}; S.cal.errors = {}; calPrefetch(); render(); });
 }
 
 /* ---------------- command palette ---------------- */

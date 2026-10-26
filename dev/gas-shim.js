@@ -135,6 +135,12 @@
       if (root.__GAS_FETCH__) return root.__GAS_FETCH__(url, opts);
       throw new Error('Kein Netzwerk in der Vorschau');
     },
+    // like Apps Script: all requests at once; one network failure fails the whole batch
+    fetchAll(requests) {
+      meter('fetchAll');
+      if (!root.__GAS_FETCH__) throw new Error('Kein Netzwerk in der Vorschau');
+      return requests.map(r => root.__GAS_FETCH__(r.url, r));
+    },
   };
   root.CalendarApp = { getCalendarById: () => null };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
