@@ -18,7 +18,7 @@ const S = {
   route: { view: 'dash' },
   peekId: null,
   peekFull: false,
-  cal: { cursor: null, mode: 'week', range: 'week', teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {}, errors: {} },
+  cal: { cursor: null, mode: 'week', range: 'week', teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {}, stale: {}, errors: {} },
   cap: { teamId: null, from: null, weeks: 6, data: null, loading: false },
   briefing: null,
   collapsed: {},
@@ -548,7 +548,9 @@ function render(opts) {
   opts = opts || {};
   if (!S.me) return;
   const view = $('#view');
-  const top = opts.resetScroll ? 0 : view.scrollTop;
+  // resetScroll: a new page (with fade-in); top: same page, new period or view (back to the top)
+  const fromTop = opts.resetScroll || opts.top;
+  const top = fromTop ? 0 : view.scrollTop;
   const board = $('.board', view);
   const left = board ? board.scrollLeft : 0;
   renderSidebar();
@@ -565,8 +567,8 @@ function render(opts) {
   if (swapped) {
     $$('[data-keep-scroll]', view).forEach(el => {
       const k = el.dataset.keepScroll;
-      if (inner[k] !== undefined && !opts.resetScroll) { el.scrollTop = inner[k]; el.scrollLeft = inner[k + ':x']; }
-      else if (k === 'wk') el.scrollTop = Math.max(0, (7 * 60 - PL.from) / 60 * PL.hh); // start the day at 07:00
+      if (inner[k] !== undefined && !fromTop) { el.scrollTop = inner[k]; el.scrollLeft = inner[k + ':x']; }
+      else el.scrollTop = 0;
     });
   }
   const nb = $('.board', view);

@@ -672,26 +672,40 @@ function calEnsure(from, to, teamId) {
   const key = calKey(from, to, teamId);
   const hit = S.cal.cache[key];
   if (hit && hit !== 'loading') return hit;
+  if (hit === 'loading') return calStale(from, to, teamId);
   // a wider range of the same scope (loaded at start) answers smaller ones without another server call
-  if (!hit) {
-    for (const k in S.cal.cache) {
-      const p = k.split('|');
-      if (p[2] !== (teamId || '') || p[0] > from || p[1] < to) continue;
-      const wide = S.cal.cache[k];
-      if (wide === 'loading') return null;
-      return (S.cal.cache[key] = sliceRange(wide, from, to));
-    }
+  for (const k in S.cal.cache) {
+    const p = k.split('|');
+    if (p[2] !== (teamId || '') || p[0] > from || p[1] < to) continue;
+    const wide = S.cal.cache[k];
+    if (wide === 'loading') return calStale(from, to, teamId);
+    return (S.cal.cache[key] = sliceRange(wide, from, to));
   }
   // after a failure: wait for "try again" instead of asking the server on every render
-  if (!hit && !S.cal.errors[key]) {
+  if (!S.cal.errors[key]) {
     S.cal.cache[key] = 'loading';
     call('calendar.range', { from: from, to: to, teamId: teamId || '' })
-      .then(d => { S.cal.cache[key] = d; render({ peek: false }); })
+      .then(d => {
+        S.cal.cache[key] = d;
+        // old copies go once nothing is loading any more
+        if (!Object.keys(S.cal.cache).some(k => S.cal.cache[k] === 'loading')) S.cal.stale = {};
+        render({ peek: false });
+      })
       .catch(err => {
         delete S.cal.cache[key];
         S.cal.errors[key] = friendlyError((err && err.message) || String(err));
         render({ peek: false });
       });
+  }
+  return calStale(from, to, teamId);
+}
+/** The last copy from before a reload (same range or a wider one), shown until fresh data arrives; null if none. */
+function calStale(from, to, teamId) {
+  const exact = S.cal.stale[calKey(from, to, teamId)];
+  if (exact) return exact;
+  for (const k in S.cal.stale) {
+    const p = k.split('|');
+    if (p[2] === (teamId || '') && p[0] <= from && p[1] >= to) return sliceRange(S.cal.stale[k], from, to);
   }
   return null;
 }
@@ -709,7 +723,17 @@ function calPrefetch() {
   const t = TODAY();
   calEnsure(Shared.addDays(t, -35), Shared.addDays(t, 120), '');
 }
-function calReload() { S.cal.cache = {}; S.cal.errors = {}; calPrefetch(); S.cap.data = null; S.briefing = null; render(); }
+/**
+ * After a change: fetch the calendar data again, but keep showing the last copy until the fresh
+ * one is in (no placeholders flashing up while the server answers).
+ */
+function calInvalidate() {
+  Object.keys(S.cal.cache).forEach(k => { if (S.cal.cache[k] !== 'loading') S.cal.stale[k] = S.cal.cache[k]; });
+  S.cal.cache = {};
+  S.cal.errors = {};
+  calPrefetch();
+}
+function calReload() { calInvalidate(); S.cap.data = null; S.briefing = null; render(); }
 function calFind(kind, id) {
   let hit = null;
   Object.keys(S.cal.cache).forEach(k => {
@@ -814,11 +838,11 @@ function calStep(dir) {
   if (m === 'month') S.cal.cursor = Shared.addMonths(calCursor(), dir);
   else if (m === 'week') S.plan.date = Shared.addDays(focusDate(), dir * 7);
   else if (m === 'day' || m === 'planner') S.plan.date = Shared.addDays(focusDate(), dir);
-  render();
+  render({ top: true });
 }
 A['cal-prev'] = () => calStep(-1);
 A['cal-next'] = () => calStep(1);
-A['cal-today'] = () => { S.cal.cursor = TODAY().slice(0, 8) + '01'; focusDate(); S.plan.date = TODAY(); render(); };
+A['cal-today'] = () => { S.cal.cursor = TODAY().slice(0, 8) + '01'; focusDate(); S.plan.date = TODAY(); render({ top: true }); };
 window.addEventListener('resize', debounce(() => { if (S.route && S.route.view === 'calendar') render({ peek: false }); }, 150));
 function weekTitle(days) {
   const a = days[0], b = days[days.length - 1];
@@ -1661,9 +1685,9 @@ function calendarPage() {
 A['cal-mode'] = el => {
   S.cal.mode = el.dataset.v;
   if (S.cal.mode === 'month') S.cal.cursor = focusDate().slice(0, 8) + '01';
-  render();
+  render({ top: true });
 };
-A['cal-range'] = el => { S.cal.range = el.dataset.k; render(); };
+A['cal-range'] = el => { S.cal.range = el.dataset.k; render({ top: true }); };
 function sidePanel(d, people, o) {
   o = o || {};
   const t = o.from && o.from > TODAY() ? o.from : TODAY();
@@ -1902,7 +1926,7 @@ ON.submit.profile = form => {
     form.removeAttribute('data-touched');
     Object.assign(S.me, u);
     applyUser(u);
-    S.cap.data = null; S.cal.cache = {}; S.cal.errors = {}; calPrefetch(); S.briefing = null;
+    S.cap.data = null; calInvalidate(); S.briefing = null;
     toast('Profil gespeichert');
     render();
   }).catch(fail);
@@ -1913,7 +1937,14 @@ function applyUser(u) {
 }
 A['user-role'] = el => {
   const u = user(el.dataset.email);
-  call('users.save', { email: u.email, role: u.role === 'admin' ? 'member' : 'admin' }).then(x => { applyUser(x); render(); }).catch(fail);
+  const toAdmin = u.role !== 'admin';
+  openModal({
+    title: toAdmin ? 'Zum Admin machen?' : 'Admin-Rechte entziehen?',
+    body: '<p style="margin:0">' + esc(u.name + ' (' + u.email + ')') + '</p><p class="hint">' +
+      (toAdmin ? 'Admins sehen alles, verwalten alle Teams und Firmen-Feiertage.' : 'Die Person bleibt Mitglied und behält ihre Teams und Aufgaben.') + '</p>',
+    submitLabel: 'Übernehmen',
+    onSubmit: () => call('users.save', { email: u.email, role: toAdmin ? 'admin' : 'member' }).then(x => { applyUser(x); render(); toast('Änderungen übernommen'); }),
+  });
 };
 function userModal(u) {
   const isNew = !u;
@@ -1940,6 +1971,9 @@ A['ch-new'] = () => openModal({
   onSubmit: v => call('companyHolidays.save', { date: v.date, name: v.name, countries: v.countries.split(/[,\s]+/).filter(Boolean) })
     .then(h => { S.companyHolidays.push(h); calReload(); }),
 });
-A['ch-remove'] = el => call('companyHolidays.remove', { id: el.dataset.id })
-  .then(() => { S.companyHolidays = S.companyHolidays.filter(h => h.id !== el.dataset.id); calReload(); }).catch(fail);
+A['ch-remove'] = el => {
+  const h = S.companyHolidays.find(x => x.id === el.dataset.id);
+  if (h) confirmDelete('Firmen-Feiertag „' + h.name + '“ entfernen?', () => call('companyHolidays.remove', { id: h.id })
+    .then(() => { S.companyHolidays = S.companyHolidays.filter(x => x.id !== h.id); calReload(); }));
+};
 </script>

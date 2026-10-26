@@ -31,3 +31,44 @@ describe('calendar request fails', () => {
     assert.match(w.eval("friendlyError('Error code INTERNAL')"), /Server/);
   });
 });
+
+describe('calendar scroll position', () => {
+  const grid = () => w.document.querySelector('[data-keep-scroll="wk"]');
+  test('opening, changing the date and switching the view always start at the top', async () => {
+    w.eval("S.cal.mode = 'week'; go('calendar')");
+    await wait(300);
+    assert.ok(grid(), 'time grid');
+    assert.equal(grid().scrollTop, 0, 'on open');
+    grid().scrollTop = 300;
+    w.document.querySelector('#view').scrollTop = 200;
+    w.eval("A['cal-next']()");
+    await wait(100);
+    assert.equal(grid().scrollTop, 0, 'after next week');
+    assert.equal(w.document.querySelector('#view').scrollTop, 0);
+    grid().scrollTop = 300;
+    w.eval("A['cal-mode']({ dataset: { v: 'day' } })");
+    await wait(100);
+    assert.equal(grid().scrollTop, 0, 'after switching to the day view');
+  });
+  test('data arriving in the background keeps the position the user scrolled to', async () => {
+    grid().scrollTop = 120;
+    w.eval('render()');
+    await wait(50);
+    assert.equal(grid().scrollTop, 120);
+  });
+});
+
+describe('reloading after a change', () => {
+  test('the calendar keeps showing the last data while fresh data loads (no placeholders flashing)', async () => {
+    w.eval("S.cal.mode = 'month'; S.cal.cursor = null; go('calendar')");
+    await wait(400);
+    assert.equal(w.document.querySelectorAll('#view .sk-on, #view [aria-busy="true"]').length, 0, 'loaded');
+    w.eval(`window.__slow = runCall; runCall = (m, p) => (m === 'calendar.range' ? new Promise(r => setTimeout(() => window.__slow(m, p).then(r), 300)) : window.__slow(m, p))`);
+    w.eval('calReload()');
+    await wait(50);
+    assert.equal(w.document.querySelectorAll('#view .sk-on, #view [aria-busy="true"]').length, 0, 'old data stays visible meanwhile');
+    await wait(500);
+    w.eval('runCall = window.__slow');
+    assert.equal(w.eval('Object.keys(S.cal.stale).length'), 0, 'stale copies are dropped once fresh data is in');
+  });
+});

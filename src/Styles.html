@@ -1529,6 +1529,12 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .pm-allbar small { display: block; font-size: 12px; margin-top: 2px; }
 .pm-foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 22px 18px; border-top: 1px solid var(--border); }
 .pm-count { margin-right: auto; font-size: 13px; color: var(--text-2); }
+.pm-warn { display: inline-flex; align-items: center; gap: 6px; color: var(--warning-text); font-weight: 600; }
+/* unsaved changes in the task panel: a bar at the bottom with "Verwerfen" / "Übernehmen" */
+.peek-commit { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border);
+  background: var(--accent-soft); color: var(--accent-text); font-size: 13px; font-weight: 600; }
+.peek-commit .grow { flex: 1; min-width: 0; }
+.peek-commit.warn { background: var(--warning-soft); color: var(--warning-text); }
 @media (max-width: 600px) {
   .pm-bg { padding: 0; place-items: end stretch; }
   .pm { max-width: none; height: 92vh; border-radius: 20px 20px 0 0; }

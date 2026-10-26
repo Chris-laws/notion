@@ -141,7 +141,7 @@ function openMenu(anchor, items, opts) {
  * people below with avatar, name, e-mail, role and a remove button, hits with "Hinzufügen",
  * invite by e-mail. Opens above other dialogs (own layer), Esc closes it first.
  * o: {
- *   title, sub, selected: [emails], onChange(list) (called on every change),
+ *   title, sub, selected: [emails], onChange(list) (called once with the result on "Übernehmen"),
  *   single: pick exactly one (closes on pick), roles: email => label, keep: email that cannot be removed,
  *   prefer: [emails] suggested first, all: { label, people } (empty list = all of these),
  *   extra: [{ value, name, icon }] special entries (filters), min: 1 = at least one person,
@@ -151,7 +151,7 @@ function openMenu(anchor, items, opts) {
 let PM = null;
 function peopleModal(o) {
   closePop();
-  PM = { o: o, list: (o.selected || []).slice(), q: '', ret: document.activeElement, undo: null };
+  PM = { o: o, list: (o.selected || []).slice(), orig: (o.selected || []).slice(), q: '', ret: document.activeElement, undo: null, warned: false };
   const root = $('#people-root');
   root.innerHTML = '<div class="pm-bg" data-action="pm-bg"><div class="pm" role="dialog" aria-modal="true" aria-labelledby="pm-title">' +
     '<div class="pm-top"><div><div id="pm-title" class="pm-title">' + esc(o.title || 'Mitglieder verwalten') + '</div>' +
@@ -159,7 +159,7 @@ function peopleModal(o) {
     '<button type="button" class="icon-btn" data-action="pm-close" aria-label="Schließen" title="Schließen (Esc)">' + icon('x') + '</button></div>' +
     '<label class="pm-search">' + icon('search', 'sm') + '<input type="search" placeholder="' + esc(o.invite === false ? 'Name oder E-Mail suchen …' : 'Name oder E-Mail suchen – oder E-Mail einladen …') + '" autocomplete="off" aria-label="Person suchen"></label>' +
     '<div class="pm-body" role="list"></div>' +
-    '<div class="pm-foot"><span class="pm-count"></span><button type="button" class="btn primary" data-action="pm-close">Fertig</button></div></div></div>';
+    '<div class="pm-foot"></div></div></div>';
   const m = $('.pm', root);
   const input = $('input', m);
   input.addEventListener('input', () => { PM.q = input.value; pmDraw(); });
@@ -245,28 +245,45 @@ function pmDraw() {
   html += '<div class="pm-sec">' + (o.single ? 'Ausgewählt' : 'Aktuelle Mitglieder') + ' <span class="n">' + members.length + '</span></div>' +
     (members.length ? members.map(e => pmRow(e, 'member')).join('') : '<div class="pm-empty">' + esc(o.emptyText || 'Noch niemand. Suche oben nach Namen oder E-Mail.') + '</div>');
   $('.pm-body', m).innerHTML = html;
-  $('.pm-count', m).textContent = o.single ? '' : members.length === 1 ? '1 Person' : members.length + ' Personen';
+  $('.pm-foot', m).innerHTML = pmFoot(members.length);
 }
-function pmCommit(list, msg, undoList) {
-  const cb = PM.o.onChange;
+/** Changes against the list the dialog was opened with (added + removed people). */
+function pmChanges() {
+  const now = pmEffective();
+  const was = !PM.orig.length && PM.o.all ? PM.o.all.people : PM.orig;
+  const diff = now.filter(e => was.indexOf(e) < 0).length + was.filter(e => now.indexOf(e) < 0).length;
+  // "whole team" <-> the same people picked one by one is a change too
+  return diff || (!PM.list.length !== !PM.orig.length ? 1 : 0);
+}
+function pmFoot(count) {
+  if (PM.o.single) return '<button type="button" class="btn" data-action="pm-close">Schließen</button>';
+  const n = pmChanges();
+  const people = count === 1 ? '1 Person' : count + ' Personen';
+  const pending = n === 1 ? '1 Änderung' : n + ' Änderungen';
+  if (PM.warned && n) {
+    return '<span class="pm-count pm-warn" role="alert">' + icon('alert', 'sm') + 'Ungespeicherte Änderungen: übernehmen oder verwerfen?</span>' +
+      '<button type="button" class="btn" data-action="pm-discard">Verwerfen</button>' +
+      '<button type="button" class="btn primary" data-action="pm-apply">Übernehmen</button>';
+  }
+  return '<span class="pm-count"><span>' + people + '</span>' + (n ? ' · <b>' + pending + '</b>' : '') + '</span>' +
+    '<button type="button" class="btn" data-action="pm-discard">Abbrechen</button>' +
+    '<button type="button" class="btn primary" data-action="pm-apply"' + (n ? '' : ' disabled') + '>Übernehmen</button>';
+}
+/** Changes the list in the dialog only; saving happens with "Übernehmen". */
+function pmCommit(list) {
   PM.list = list;
+  PM.warned = false;
   pmDraw();
-  if (cb) cb(list.slice());
-  if (!msg) return;
-  toast(msg, { action: { label: 'Rückgängig', fn: () => {
-    if (PM) { PM.list = undoList.slice(); pmDraw(); }
-    if (cb) cb(undoList.slice());
-  } } });
 }
 A['pm-add'] = el => {
   const e = el.dataset.v;
   const o = PM.o;
   if (!S.users.some(u => u.email === e) && !(o.extra || []).some(x => x.value === e)) S.users.push(user(e));
-  if (o.single) { const cb = o.onChange; closePeopleModal(); if (cb) cb([e]); return; }
+  if (o.single) { const cb = o.onChange; closePeopleModal(true); if (cb) cb([e]); return; }
   const before = PM.list.slice();
   const base = pmEffective();
   if (base.indexOf(e) < 0) base.push(e);
-  pmCommit(base, null);
+  pmCommit(base);
   PM.undo = before;
   // ready for the next name
   const input = $('#people-root input');
@@ -279,13 +296,28 @@ A['pm-remove'] = el => {
   const before = PM.list.slice();
   const next = pmEffective().filter(x => x !== e);
   if (o.min && next.length < o.min) { toast('Mindestens eine Person muss übrig bleiben.', { warn: true }); return; }
-  pmCommit(next, pmName(e) + ' entfernt', before);
+  pmCommit(next);
+  PM.undo = before;
 };
-A['pm-all'] = () => { const before = PM.list.slice(); pmCommit([], 'Wieder ganzes Team', before); };
+A['pm-all'] = () => pmCommit([]);
+A['pm-apply'] = () => {
+  const cb = PM.o.onChange;
+  const list = PM.list.slice();
+  const changed = pmChanges();
+  closePeopleModal(true);
+  if (cb && changed) cb(list);
+};
+A['pm-discard'] = () => closePeopleModal(true);
 A['pm-close'] = () => closePeopleModal();
 A['pm-bg'] = (el, e) => { if (e.target === el) closePeopleModal(); };
-function closePeopleModal() {
+/** Closes the dialog; with unsaved changes the first attempt only warns (force: close anyway, changes dropped). */
+function closePeopleModal(force) {
   if (!PM) return false;
+  if (!force && !PM.o.single && pmChanges()) {
+    PM.warned = true;
+    pmDraw();
+    return true;
+  }
   const ret = PM.ret;
   const done = PM.o.onClose;
   PM = null;
@@ -393,9 +425,11 @@ function dateEditor(anchor, value, onSave) {
 /** data-action="prop" data-id data-field — used by peek, table and cards. */
 A.prop = (el, e) => {
   e.stopPropagation();
-  const t = task(el.dataset.id);
+  // in the task panel changes wait for "Übernehmen"; in tables and cards they save at once
+  const inPeek = el.closest('#peek') && S.peekId === el.dataset.id;
+  const t = inPeek ? peekTask() : task(el.dataset.id);
   if (!t) return;
-  PROP_EDITORS[el.dataset.field](el, t, patch => patchTask(t.id, patch, { keepPeek: false }));
+  PROP_EDITORS[el.dataset.field](el, t, patch => (inPeek ? stageTask(t.id, patch) : patchTask(t.id, patch, { keepPeek: false })));
 };
 
 /* ---------------- modals & forms ---------------- */
@@ -777,7 +811,7 @@ function assistCreate() {
     return Promise.resolve(createTask(f)).then(t => { if (t) created.push(['tasks.remove', t.id]); });
   });
   return Promise.all(jobs).then(() => {
-    S.cal.cache = {}; S.cal.errors = {}; calPrefetch(); S.cap.data = null; S.briefing = null;
+    calInvalidate(); S.cap.data = null; S.briefing = null;
     render();
     toast(created.length + (created.length === 1 ? ' Eintrag angelegt' : ' Einträge angelegt'), { duration: 8000, action: { label: 'Rückgängig', fn: () =>
       Promise.all(created.map(c => call(c[0], { id: c[1] }))).then(() => reloadAll()).then(() => toast('Rückgängig gemacht.')).catch(fail) } });
@@ -794,7 +828,7 @@ function confirmDelete(text, fn) {
 }
 
 function reloadAll() {
-  return call('bootstrap').then(d => { Object.assign(S, d); S.cap.data = null; S.cal.cache = {}; S.cal.errors = {}; calPrefetch(); render(); });
+  return call('bootstrap').then(d => { Object.assign(S, d); S.cap.data = null; calInvalidate(); render(); });
 }
 
 /* ---------------- command palette ---------------- */

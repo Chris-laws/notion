@@ -6,6 +6,8 @@
 
 function openPeek(id) {
   if (!task(id)) return;
+  if (S.peekId && S.peekId !== id && peekHoldsChanges()) return;
+  if (S.draft && S.draft.taskId !== id) S.draft = null;
   if (S.peekId && task(S.peekId) !== task(id)) discardIfBlank(S.peekId);
   S.peekId = id;
   const fresh = /^tmp_/.test(id);
@@ -22,7 +24,53 @@ function openPeek(id) {
     renderPeek();
   }).catch(() => { S.comments = { taskId: id, list: [] }; renderPeek(); });
 }
+/* ---- changed properties wait for "Übernehmen" ---- */
+/** The open task with its unsaved changes applied (what the panel shows). */
+function peekTask() {
+  const t = S.peekId && task(S.peekId);
+  const d = S.draft && S.draft.taskId === S.peekId ? S.draft.patch : null;
+  return t && d ? Object.assign({}, t, d) : t;
+}
+/** Collects a change of the open task; a value set back to the saved one is no change. */
+function stageTask(id, patch) {
+  const t = task(id);
+  if (!t) return;
+  if (!S.draft || S.draft.taskId !== id) S.draft = { taskId: id, patch: {}, warned: false };
+  Object.keys(patch).forEach(k => {
+    if (JSON.stringify(patch[k]) === JSON.stringify(t[k])) delete S.draft.patch[k];
+    else S.draft.patch[k] = patch[k];
+  });
+  S.draft.warned = false;
+  if (!Object.keys(S.draft.patch).length) S.draft = null;
+  renderPeek();
+}
+const draftCount = () => (S.draft && S.draft.taskId === S.peekId ? Object.keys(S.draft.patch).length : 0);
+/** True (and a warning in the panel) when the open task has unsaved changes and this is the first attempt to leave. */
+function peekHoldsChanges() {
+  if (!draftCount() || S.draft.warned) return false;
+  S.draft.warned = true;
+  renderPeek();
+  return true;
+}
+function peekBar() {
+  const n = draftCount();
+  if (!n) return '';
+  const warn = S.draft.warned;
+  return '<div class="peek-commit' + (warn ? ' warn' : '') + '" role="' + (warn ? 'alert' : 'status') + '">' + icon(warn ? 'alert' : 'edit', 'sm') +
+    '<span class="grow">' + (n === 1 ? '1 ungespeicherte Änderung' : n + ' ungespeicherte Änderungen') + (warn ? ' – erst übernehmen oder verwerfen' : '') + '</span>' +
+    '<button type="button" class="btn sm" data-action="peek-discard">Verwerfen</button>' +
+    '<button type="button" class="btn sm primary" data-action="peek-apply">Übernehmen</button></div>';
+}
+A['peek-apply'] = () => {
+  const d = S.draft;
+  S.draft = null;
+  if (d) patchTask(d.taskId, d.patch, { keepPeek: false }).then(() => toast('Änderungen übernommen'));
+};
+A['peek-discard'] = () => { S.draft = null; renderPeek(); };
+
 function closePeek() {
+  if (peekHoldsChanges()) return;
+  S.draft = null;
   discardIfBlank(S.peekId);
   S.peekId = null;
   S.peekFull = false;
@@ -90,7 +138,7 @@ function propRow(t, field, ic, label, value) {
 
 function renderPeek() {
   const el = $('#peek');
-  const t = S.peekId && task(S.peekId);
+  const t = peekTask();
   if (!t) { el.hidden = true; setHtml(el, ''); $('#app').classList.remove('peek-full'); return; }
   const active = document.activeElement;
   const keepFocus = active && el.contains(active) && active.dataset && active.dataset.keep;
@@ -186,7 +234,7 @@ function renderPeek() {
       '<div class="card-w"><h3>' + icon('layers', 'sm') + 'Details</h3><div class="props" style="margin:0;background:none;padding:0">' + props.split('<div class="prop">').filter(x => /Zugewiesen|Projekt|Teams|Aufwand|Tags|Wiederholung/.test(x)).map(x => '<div class="prop">' + x).join('') + '</div></div>' +
       '<div class="card-w"><h3>' + icon('sparkle', 'sm') + 'Smarte Hilfen</h3>' + smart + '</div>' +
       '<div class="card-w"><h3>' + icon('msg', 'sm') + 'Kommentare<span class="n">' + (comments ? comments.length : 0) + '</span></h3>' + commentsList + commentForm + '</div>' +
-      foot + '</div></div></div></div>');
+      foot + '</div></div></div></div>' + peekBar());
   } else {
   setHtml(el,
     '<div class="peek-top">' +
@@ -203,7 +251,7 @@ function renderPeek() {
     '<textarea class="desc" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
     '<div class="section-label">' + icon('sub', 'sm') + 'Unteraufgaben' + (subs.length ? ' <span class="faint">' + subs.filter(isDone).length + '/' + subs.length + '</span>' : '') + '</div>' + subsList +
     '<div class="section-label">' + icon('msg', 'sm') + 'Kommentare</div>' + commentsList + commentForm + foot +
-    '</div></div>');
+    '</div></div>' + peekBar());
   }
   tickTimer();
   $$('#peek textarea').forEach(autosize);
@@ -297,7 +345,7 @@ A['peek-more'] = el => {
       if (v === 'sub') {
         openMenu(el, [{ value: '', html: '<span class="faint">Keine (oberste Ebene)</span>', search: 'keine' }]
           .concat(S.tasks.filter(x => x.id !== t.id && x.parentId !== t.id && !x.parentId).map(x => ({ value: x.id, html: '<span>' + esc(x.title) + '</span>', search: x.title }))),
-        { selected: [t.parentId], onPick: p => patchTask(t.id, { parentId: p }) });
+        { selected: [t.parentId], onPick: p => stageTask(t.id, { parentId: p }) });
       }
       if (v === 'del') {
         deleteWithUndo(t);
@@ -315,7 +363,7 @@ A['suggest-close'] = () => { S.suggest = null; renderPeek(); };
 A['suggest-pick'] = el => {
   const t = task(S.peekId);
   if (t.assignees.indexOf(el.dataset.email) >= 0) return;
-  patchTask(t.id, { assignees: t.assignees.concat([el.dataset.email]) });
+  stageTask(t.id, { assignees: t.assignees.concat([el.dataset.email]) });
 };
 A['ai-breakdown'] = () => {
   const id = S.peekId;
