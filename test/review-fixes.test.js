@@ -53,7 +53,7 @@ describe('data', () => {
     const app = people(freshApp());
     const t = app.call('teams.save', { name: 'T', members: [ME] });
     const p = app.call('projects.save', { teamId: t.id, name: 'P', color: 'x)"tabindex=1', members: [] });
-    assert.equal(p.color, 'gray');
+    assert.equal(p.color, 'blue', 'the first free palette colour instead');
   });
   test('a task cannot become a sub-task of its own sub-task (no cycle)', () => {
     const app = people(freshApp());

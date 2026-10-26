@@ -230,7 +230,7 @@ function projectColorKey(p) {
 }
 const projectColor = p => 'var(--c-' + esc(projectColorKey(p)) + ')';
 // light colours carry a dark letter, the others a white one (contrast check: dev/checks/contrast.js)
-const LIGHT_COLORS = ['yellow', 'orange', 'teal', 'gray'];
+const LIGHT_COLORS = ['yellow', 'orange', 'teal', 'gray', 'lime'];
 const inkClass = key => (LIGHT_COLORS.indexOf(key) >= 0 ? 'ink-dark' : '');
 const GLYPHS = {
   backlog: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--text-3)" stroke-width="1.6" stroke-dasharray="2.4 2.2"/>',
@@ -291,11 +291,6 @@ function projectMark(p, cls) {
 function projectChip(p) {
   if (!p) return '';
   return '<span class="person pchip" title="' + esc(projectPath(p)) + '">' + projectMark(p) + '<span>' + esc(p.name) + '</span></span>';
-}
-/** First colour not used yet by the given projects, so new ones look different. */
-function nextColor(list) {
-  const used = list.map(x => x.color);
-  return ['blue', 'orange', 'green', 'purple', 'pink', 'red', 'yellow', 'teal', 'brown', 'gray'].find(c => used.indexOf(c) < 0) || 'blue';
 }
 /** Round logo mark (LogoAssets.html). Swap the data URIs there to change the logo. */
 function logoMark() {

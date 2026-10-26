@@ -34,7 +34,7 @@ const PAIRS = [
 // letters on project/team tiles: dark ink on the colours App.html lists as light, white on the rest
 const APP = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'App.html'), 'utf8');
 const LIGHT = JSON.parse((/LIGHT_COLORS = (\[[^\]]*\])/.exec(APP) || [0, '[]'])[1].replace(/'/g, '"'));
-['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red', 'teal'].forEach(c =>
+['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red', 'teal', 'indigo', 'lime', 'cyan'].forEach(c =>
   PAIRS.push([LIGHT.indexOf(c) >= 0 ? '#1d2433' : '#ffffff', '--c-' + c, 3, 'letter on a ' + c + ' tile']));
 
 function hex(c) {

@@ -76,6 +76,7 @@ const App = {
   bootstrap() {
     const me = Auth.currentUser();
     Teams.fixColors_();
+    Projects.fixColors_();
     const list = Tasks.list({ ver: '' });
     const ctx = Access.context(me);
     return {

@@ -361,11 +361,30 @@ function SharedFactory() {
     return { spent: Math.round((Number(spentMin) || 0) + running + addMin), timerStart: timerStart ? new Date(nowMs).toISOString() : '' };
   }
 
-  /** Colours a project may have (anything else would end up in a style attribute). */
-  const PROJECT_COLORS = ['default', 'gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red', 'teal'];
+  /** Colours offered for projects, in the order new projects get them. */
+  const PROJECT_PALETTE = ['blue', 'orange', 'green', 'purple', 'pink', 'red', 'yellow', 'teal', 'brown', 'indigo', 'lime', 'cyan'];
+  /** Colours a project may have (anything else would end up in a style attribute); gray/default = none chosen. */
+  const PROJECT_COLORS = ['default', 'gray'].concat(PROJECT_PALETTE);
+
+  /** Colour -> project name for the projects of a team (except one), so no colour is used twice in a team. */
+  function takenProjectColors(projects, teamId, exceptId) {
+    const taken = {};
+    projects.forEach(p => {
+      if (p.teamId === teamId && p.id !== exceptId && PROJECT_PALETTE.indexOf(p.color) >= 0 && !taken[p.color]) taken[p.color] = p.name;
+    });
+    return taken;
+  }
+  /** First palette colour no other project of the team uses; when all are used, the least used one. */
+  function freeProjectColor(projects, teamId, exceptId) {
+    const taken = takenProjectColors(projects, teamId, exceptId);
+    const free = PROJECT_PALETTE.find(c => !taken[c]);
+    if (free) return free;
+    const count = c => projects.filter(p => p.teamId === teamId && p.id !== exceptId && p.color === c).length;
+    return PROJECT_PALETTE.reduce((best, c) => (count(c) < count(best) ? c : best), PROJECT_PALETTE[0]);
+  }
 
   return {
-    QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, addTime,
+    QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,
     endOfMonth, nextOccurrence, parse, norm,

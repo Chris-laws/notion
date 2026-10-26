@@ -184,3 +184,27 @@ describe('task filter (taskQuery)', () => {
     S.QUICK_TABS.forEach(k => assert.equal(run(tasks, { quick: k }).list.length, counts[k], k));
   });
 });
+
+describe('project colours per team', () => {
+  const P = (id, teamId, color) => ({ id: id, teamId: teamId, color: color, name: 'Projekt ' + id });
+  test('taken colours: only the same team, not the project itself, only palette colours, first project wins', () => {
+    const list = [P('a', 't', 'yellow'), P('b', 't', 'yellow'), P('c', 'u', 'red'), P('d', 't', 'gray'), P('e', 't', 'blue')];
+    assert.deepEqual(plain(S.takenProjectColors(list, 't')), { yellow: 'Projekt a', blue: 'Projekt e' });
+    assert.deepEqual(plain(S.takenProjectColors(list, 't', 'e')), { yellow: 'Projekt a' });
+    assert.deepEqual(plain(S.takenProjectColors(list, 'x')), {});
+  });
+  test('the first free colour follows the palette order', () => {
+    assert.equal(S.freeProjectColor([], 't'), 'blue');
+    assert.equal(S.freeProjectColor([P('a', 't', 'blue')], 't'), 'orange');
+    assert.equal(S.freeProjectColor([P('a', 't', 'blue')], 't', 'a'), 'blue');
+    assert.equal(S.freeProjectColor([P('a', 'u', 'blue')], 't'), 'blue');
+  });
+  test('with the palette full, the least used colour comes next (ties: palette order)', () => {
+    const full = S.PROJECT_PALETTE.map((c, i) => P('p' + i, 't', c));
+    assert.equal(S.freeProjectColor(full, 't'), 'blue');
+    const more = full.concat([P('x', 't', 'blue'), P('y', 't', 'orange')]);
+    assert.equal(S.freeProjectColor(more, 't'), 'green');
+    assert.equal(S.freeProjectColor(more.concat([P('z', 'u', 'green')]), 't'), 'green');
+    assert.equal(S.freeProjectColor(full.concat([P('x', 't', 'blue')]), 't', 'x'), 'blue');
+  });
+});

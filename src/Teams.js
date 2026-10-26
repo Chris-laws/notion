@@ -114,7 +114,6 @@ const Projects = {
       teamId: team.id,
       name: name,
       icon: String(p.icon || '').slice(0, 8),
-      color: Shared.PROJECT_COLORS.indexOf(p.color) >= 0 ? p.color : 'gray',
       description: String(p.description || '').slice(0, 5000),
       status: Shared.PROJECT_STATUSES.some(s => s.key === p.status) ? p.status : 'active',
       // Empty list = the whole team works on the project.
@@ -131,15 +130,54 @@ const Projects = {
         // moving it into another team needs membership there, like creating it there
         if (project.teamId !== team.id && !mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
         if (p.icon === undefined) delete data.icon;
+        data.color = Projects.color_(p.color === undefined ? project.color : p.color, team.id, p.id);
         Users.ensure(data.members);
         return Db.update('Projects', p.id, data);
       }
       if (!mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
+      data.color = Projects.color_(p.color, team.id, '');
       Users.ensure(data.members);
       return Db.insert('Projects', Object.assign(data, {
         id: Util.uid('pr_'), createdBy: me.email, createdAt: new Date().toISOString(),
       }));
     });
+  },
+
+  /**
+   * The colour a project of team `teamId` may get (inside the lock): none chosen -> the first free one;
+   * a colour another project of the team has -> refused, unless the whole palette is in use.
+   */
+  color_(wanted, teamId, exceptId) {
+    const all = Db.all('Projects');
+    if (Shared.PROJECT_PALETTE.indexOf(wanted) < 0) return Shared.freeProjectColor(all, teamId, exceptId);
+    const taken = Shared.takenProjectColors(all, teamId, exceptId);
+    const full = Shared.PROJECT_PALETTE.every(c => taken[c]);
+    if (taken[wanted] && !full) throw new Error('Diese Farbe hat im Team schon das Projekt „' + taken[wanted] + '“. Bitte eine andere wählen.');
+    return wanted;
+  },
+
+  /**
+   * Clean-up for projects from before the colour rule: per team the oldest project keeps its colour,
+   * later ones with a colour already used (or none) get the next free one. Writes only when needed.
+   */
+  fixColors_() {
+    const sorted = Db.all('Projects').slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    const needsFix = (p, i) => Shared.PROJECT_PALETTE.indexOf(p.color) < 0 ||
+      sorted.slice(0, i).some(o => o.teamId === p.teamId && o.color === p.color);
+    if (!sorted.some(needsFix)) return false;
+    Db.tx(() => {
+      const done = [];
+      Db.all('Projects').slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).forEach(p => {
+        const clash = Shared.PROJECT_PALETTE.indexOf(p.color) < 0 || done.some(o => o.teamId === p.teamId && o.color === p.color);
+        if (clash) {
+          const c = Shared.freeProjectColor(done, p.teamId, p.id);
+          Db.update('Projects', p.id, { color: c });
+          p = Object.assign({}, p, { color: c });
+        }
+        done.push(p);
+      });
+    });
+    return true;
   },
 
   remove(id) {

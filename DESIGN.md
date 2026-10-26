@@ -26,7 +26,7 @@ Status (`--st-*`): backlog grey (dashed circle), open slate (empty circle), in p
 
 Text on light surfaces uses `--danger-text`, `--warning-text`, `--success-text` and `--prio-high-text`: the same tones a shade darker so small text reaches 4.5:1. Dots, bars, icons and fills keep the brand tones.
 
-Projects show their own colour (`--c-*`) on tiles, pills and banners; without one they take their team's colour. The team appears as a small dot in the tile's corner. Letters on light colours (yellow, orange, teal, grey) are dark, on the others white.
+Projects show their own colour (`--c-*`, 12 colours: `Shared.PROJECT_PALETTE`) on tiles, pills and banners. Within a team every project has a different colour: the picker crosses out colours of the team's other projects, new projects get the first free one, the server refuses duplicates, and older duplicates are re-coloured on the next start (the oldest project keeps its colour). Only when all 12 are used do colours repeat. The team appears as a small dot in the tile's corner. Letters on light colours (yellow, orange, teal, grey) are dark, on the others white.
 
 ## Typography
 

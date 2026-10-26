@@ -583,17 +583,25 @@ A['team-members'] = el => {
 A['team-edit'] = el => teamModal(team(el.dataset.id));
 
 /* Project */
+/** Colour row for a project of team `teamId`: colours of the team's other projects are crossed out (until all are used). */
+function projectColorField(p, teamId) {
+  const taken = Shared.takenProjectColors(S.projects, teamId, p.id);
+  const full = Shared.PROJECT_PALETTE.every(c => taken[c]);
+  const value = Shared.PROJECT_PALETTE.indexOf(p.color) >= 0 && (full || !taken[p.color]) ? p.color : Shared.freeProjectColor(S.projects, teamId, p.id);
+  return colorField(value, { palette: Shared.PROJECT_PALETTE, taken: full ? {} : taken }) +
+    (full ? '<div class="hint">Alle ' + Shared.PROJECT_PALETTE.length + ' Farben sind in diesem Team vergeben, ab jetzt wiederholen sie sich.</div>' : '');
+}
 const PROJECT_MEMBERS_HINT = 'Niemand gewählt = das ganze Team gehört dazu. Sobald du Personen wählst, gehören nur diese zum Projekt – auch aus anderen Teams oder per E-Mail eingeladen.';
 function projectModal(p, teamId) {
   const tid = teamId || (myTeams()[0] || S.teams[0] || {}).id;
-  p = p || { teamId: tid, status: 'active', color: nextColor(S.projects.filter(x => x.teamId === tid)), members: [] };
+  p = p || { teamId: tid, status: 'active', color: Shared.freeProjectColor(S.projects, tid), members: [] };
   if (!S.teams.length) { toast('Lege zuerst ein Team an.'); return teamModal(); }
   openModal({
     title: p.id ? 'Projekt bearbeiten' : 'Neues Projekt',
     body: field('Name', '<input class="input" name="name" required maxlength="120" value="' + esc(p.name || '') + '">') +
       '<div class="row">' + field('Team', selectField('teamId', S.teams.map(t => ({ key: t.id, label: (t.icon || '') + ' ' + t.name })), p.teamId)) +
       field('Status', selectField('status', Shared.PROJECT_STATUSES, p.status)) + '</div>' +
-      divField('Farbe', colorField(p.color)) +
+      divField('Farbe', '<div data-project-colors>' + projectColorField(p, p.teamId) + '</div>') +
       '<div class="row">' + field('Start', '<input class="input" type="date" name="startDate" value="' + esc(p.startDate || '') + '">') +
       field('Ende', '<input class="input" type="date" name="endDate" value="' + esc(p.endDate || '') + '">') + '</div>' +
       field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(p.description || '') + '</textarea>') +
@@ -602,6 +610,11 @@ function projectModal(p, teamId) {
     submitLabel: p.id ? 'Speichern' : 'Projekt anlegen',
     danger: p.id ? { label: 'Projekt löschen', onClick: () => confirmDelete('Projekt „' + p.name + '“ löschen? Die Aufgaben bleiben erhalten.', () =>
       call('projects.remove', { id: p.id }).then(() => reloadAll()).then(() => go('team', p.teamId))) } : null,
+    // another team: other colours are taken there; keep the chosen one if it is still free
+    mount: m => $('select[name=teamId]', m).addEventListener('change', e => {
+      const box = $('[data-project-colors]', m);
+      box.innerHTML = projectColorField(Object.assign({}, p, { color: $('input[name=color]', box).value }), e.target.value);
+    }),
     onSubmit: v => call('projects.save', Object.assign({ id: p.id }, v, { members: collectPeople(v, 'members') }))
       .then(saved => reloadAll().then(() => go('project', saved.id))),
   });
