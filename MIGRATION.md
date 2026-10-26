@@ -62,14 +62,17 @@ New version later: `npm run guard`, `clasp push`, run `setup()` again (adds new 
 |---|---|
 | `spreadsheets` | read and write the database spreadsheet |
 | `script.external_request` | public holidays from Nager.Date; Vertex AI when a key is set |
+| `calendar.readonly` | read Google's public holiday calendars (`en.<country>#holiday@group.v.calendar.google.com`) when Nager.Date does not answer; no personal calendars are read or written |
 | `userinfo.email` | identify the signed-in person (Google SSO) |
 
-No access to Gmail, Drive files, calendars or contacts is requested.
+No access to Gmail, Drive files or contacts is requested, and nothing is written to any calendar.
+
+**Approval:** if the Workspace admin restricts third-party or internal apps (Admin console → Security → Access and data control → API controls), they must mark the Apps Script project as trusted or allow these scopes for it. **When the scopes change** (for example after an update that adds one), the deploying account must authorise once more: open the Apps Script editor, run any function (e.g. `setup`) and confirm the consent screen; users of the web app see a new consent screen on their next visit.
 
 ## 6. Data protection and security notes
 
 - **Storage:** all data lives in the database spreadsheet in the company Workspace.
-- **External calls:** Nager.Date receives only country code and year. Vertex AI (optional) receives task texts and names for the AI functions; switch it on only after approval by data protection.
+- **External calls:** Nager.Date receives only country code and year. Google's public holiday calendars are only read, never written. Vertex AI (optional) receives task texts and names for the AI functions; switch it on only after approval by data protection.
 - **No external scripts:** all code is inline. The Inter font comes from Google Fonts (asynchronous, with the system font as fallback); if the company does not allow Google Fonts, remove the four font lines at the top of `src/Index.html`.
 - **Browser storage:** each browser keeps the last loaded state of the signed-in person (tasks and people they may see) in `localStorage` for at most 7 days to start quickly, plus view settings. It is bound to that person and replaced on the next start.
 - **Health data:** a sick leave is shown as "sick" only to the person and to admins; everyone else sees "away". Absence notes are visible to the person and admins only.

@@ -11,6 +11,45 @@ const nagerOk = [
   { date: '2031-12-24', localName: 'Réveillon', name: 'Christmas Eve', counties: null, types: ['Observance'] },
 ];
 
+/** Google's public holiday calendar as a double: all-day events in the requested year. */
+function googleCalendar(app, events) {
+  const asked = [];
+  app.ctx.CalendarApp = { getCalendarById: id => { asked.push(id); return events && { getEvents: () => events.map(([date, title]) => ({
+    getAllDayStartDate: () => new Date(date + 'T00:00:00Z'), getTitle: () => title })) }; } };
+  return asked;
+}
+
+describe('holidays (Google Calendar double)', () => {
+  test('when Nager.Date is down, the Google holiday calendar of the country is used and cached', () => {
+    const app = freshApp();
+    app.fakeFetch(() => ({ code: 503, body: 'down' }));
+    const asked = googleCalendar(app, [['2031-10-03', 'German Unity Day']]);
+    const list = app.x.Holidays.forCountry('DE', 2031);
+    assert.deepEqual(list.map(h => [h.date, h.nameEn, h.source]), [['2031-10-03', 'German Unity Day', 'google']]);
+    assert.match(asked[0], /^en\.de#holiday@group\.v\.calendar\.google\.com$/);
+    assert.ok(app.x.Db.get('HolidayCache', 'DE-2031'), 'stored like a Nager answer');
+  });
+  test('Nager.Date comes first: the calendar is not asked when the API answers', () => {
+    const app = freshApp();
+    app.fakeFetch(() => ({ code: 200, body: nagerOk }));
+    const asked = googleCalendar(app, [['2031-07-14', 'Bastille Day']]);
+    assert.equal(app.x.Holidays.forCountry('FR', 2031)[0].source, 'nager');
+    assert.equal(asked.length, 0);
+  });
+  test('no calendar, an empty one or an error: the built-in list takes over', () => {
+    [null, []].forEach(events => {
+      const app = freshApp();
+      app.fakeFetch(() => ({ code: 503, body: 'down' }));
+      googleCalendar(app, events);
+      assert.equal(app.x.Holidays.forCountry('DE', 2031)[0].source, 'builtin');
+    });
+    const app = freshApp();
+    app.fakeFetch(() => ({ code: 503, body: 'down' }));
+    app.ctx.CalendarApp = { getCalendarById: () => { throw new Error('no permission'); } };
+    assert.equal(app.x.Holidays.forCountry('DE', 2031)[0].source, 'builtin');
+  });
+});
+
 describe('holidays (Nager.Date double)', () => {
   test('public holidays are taken with their English name, observances are skipped', () => {
     const app = freshApp();

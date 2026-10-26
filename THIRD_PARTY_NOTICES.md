@@ -9,6 +9,7 @@ The deployed Apps Script project contains only the company's own code. It loads 
 | Google Apps Script, Google Sheets | runtime and data storage in the company's Google Workspace | all app data stays in the company Workspace |
 | [Google Fonts](https://fonts.google.com) | the Inter font (SIL Open Font License 1.1), loaded asynchronously | the browser's request for the font files (IP address, user agent) |
 | [Nager.Date](https://date.nager.at) public holiday API | public holidays per country | country code and year only |
+| Google Calendar (public holiday calendars) | fallback when Nager.Date does not answer; read only | none (calendar id with the country code) |
 | Google Vertex AI (optional) | AI summary, quick add, task breakdown | task titles/descriptions and names in the request; only when `VERTEX_API_KEY` is set |
 
 ## Development tools (`devDependencies`, not deployed)

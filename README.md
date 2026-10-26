@@ -138,7 +138,7 @@ With Google Sheets as the database and the web app running as the deploying acco
 - **Code:** proprietary, for internal use in the company. No third-party library is shipped; only `src/` is uploaded to Apps Script. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - **Font:** Inter (Google Fonts, SIL Open Font License), with the operating system's font as fallback.
 - **Logo and colours:** the LidlFlow logo and the Lidl colours are for internal use in the company.
-- **External services:** holidays from Nager.Date (date.nager.at; only country and year are sent), AI via Google Vertex AI (company key in the script properties; task data is sent only when a key is set).
+- **External services:** holidays from Nager.Date (date.nager.at; only country and year are sent) with Google's public holiday calendars as fallback (read only), AI via Google Vertex AI (company key in the script properties; task data is sent only when a key is set).
 - **Development tools** (`devDependencies`, not shipped): permissive licences; the one exception is `eslint-plugin-sonarjs` (LGPL-3.0, lint only).
 
 ## Design
