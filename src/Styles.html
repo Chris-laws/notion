@@ -163,14 +163,12 @@ svg.i.lg { width: 18px; height: 18px; }
 .team-projects .nav-sub { padding-left: 4px; }
 .sidebar.rail .team-projects { margin-left: 0; border-left: 0; }
 .sidebar.rail .brand { flex: none; justify-content: center; padding: 4px; }
-/* project icon in its team's colour: light fill, coloured ring */
-.mark.proj { background: color-mix(in srgb, var(--mc) 18%, var(--bg)); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--mc); }
-/* team icon behind, project icon in front */
-.mstack { display: inline-flex; align-items: center; flex: none; }
-.mstack > .mark:first-child { box-shadow: 0 0 0 2px var(--bg); }
-.mstack > .mark + .mark { margin-left: -4px; box-shadow: inset 0 0 0 1.5px var(--mc), 0 0 0 2px var(--bg); }
-.mstack.md > .mark + .mark { margin-left: -6px; }
-.pbanner .mstack > .mark:first-child { box-shadow: 0 0 0 2px rgba(255, 255, 255, .7); }
+/* project icon in the project colour; a small dot in the team colour sits in the corner */
+.mark.proj { background: var(--mc); position: relative; }
+.mark.in-team::after { content: ''; position: absolute; right: -3px; bottom: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--tc); box-shadow: 0 0 0 2px var(--bg); }
+.mark.md.in-team::after { width: 10px; height: 10px; }
+.mark.lg.in-team::after { width: 14px; height: 14px; right: -4px; bottom: -4px; }
+.mark.ink-dark, .jpill.ink-dark { color: #1d2433; }
 .nav-sub .nav-item { height: 32px; font-size: 13px; }
 .side-section { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 4px; padding: 0 12px; height: 22px; font-size: 12px; font-weight: 600; color: var(--text-3); letter-spacing: .02em; }
 .team-row { display: flex; align-items: center; }
@@ -1288,7 +1286,9 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
   background: repeating-linear-gradient(135deg, rgba(255, 255, 255, .06) 0 14px, transparent 14px 28px), linear-gradient(115deg, var(--pc), color-mix(in srgb, var(--pc) 55%, #001a44)); box-shadow: var(--shadow-card); }
 .pj-banner::after { content: ''; position: absolute; right: -40px; bottom: -60px; width: 200px; height: 200px; border-radius: 50%; background: var(--yellow); opacity: .9; pointer-events: none; }
 .pj-l { display: flex; gap: 16px; flex: 1; min-width: 0; position: relative; z-index: 1; }
-.pj-l .mark.lg { background: rgba(255, 255, 255, .2) !important; }
+.pj-l .mark.lg { background: rgba(255, 255, 255, .2) !important; color: inherit; }
+/* light project colours: dark text on the banner */
+.pbanner.ink-dark, .pj-banner.ink-dark, .pj-banner.ink-dark .pj-m > button, .pj-banner.ink-dark .pj-m > span { color: #1d2433; }
 .pj-t { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .pj-t h1 { margin: 0; font-size: 28px; letter-spacing: -0.03em; }
 .pj-l p { margin: 6px 0 12px; max-width: 70ch; opacity: .92; }
@@ -1413,7 +1413,6 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .dash-top { background: var(--bg); }
 .du .avatar.xl { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--border-strong); }
 /* project preview: the original lively banner in the project colour (base styles above) */
-.pbanner .mstack > .mark:first-child { box-shadow: 0 0 0 2px rgba(255, 255, 255, .6); }
 /* KPI tiles: softly tinted icons, red only when something is overdue */
 .stile .sic { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); color: var(--accent-text); }
 .stile.green .sic { background: color-mix(in srgb, var(--success) 12%, var(--bg)); color: var(--success); }

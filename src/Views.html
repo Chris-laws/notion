@@ -1050,7 +1050,7 @@ function dashPage() {
     const ptasks = S.tasks.filter(x => x.projectId === sp.id && !x.parentId);
     const pdone = ptasks.filter(isDone).length;
     const ppct = ptasks.length ? Math.round(pdone / ptasks.length * 100) : 0;
-    const pc = sp.color && sp.color !== 'default' && sp.color !== 'gray' ? 'var(--c-' + esc(sp.color) + ')' : 'var(--accent)';
+    const pc = projectColor(sp);
     const st = Shared.PROJECT_STATUSES.find(x => x.key === sp.status) || Shared.PROJECT_STATUSES[1];
     const counts = Shared.STATUSES.map(x => '<div class="sc"><b>' + ptasks.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
     const next = ptasks.filter(x => !isDone(x) && x.dueDate).sort((x, y) => x.dueDate.localeCompare(y.dueDate)).slice(0, 3);
@@ -1058,7 +1058,7 @@ function dashPage() {
       '<div class="ptabs-wrap"><button class="ptabs-arrow l" data-action="ptabs-scroll" data-d="-1" aria-label="Nach links" title="Nach links">' + icon('left', 'sm') + '</button>' +
       '<div class="ptabs" data-keep-scroll="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '" title="' + esc(projectPath(x)) + '">' + projectMark(x) + esc(x.name) + '</button>').join('') + '</div>' +
       '<button class="ptabs-arrow r" data-action="ptabs-scroll" data-d="1" aria-label="Nach rechts" title="Nach rechts">' + icon('right', 'sm') + '</button></div>' +
-      '<div class="pbanner" style="--pc:' + pc + '">' +
+      '<div class="pbanner ' + inkClass(projectColorKey(sp)) + '" style="--pc:' + pc + '">' +
       '<div class="pb-t" title="' + esc(projectPath(sp)) + '">' + projectMark(sp, 'md') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
       '<p>' + esc(sp.description || 'Keine Beschreibung.') + '</p></div>' +
       '<div class="pstats"><div class="pst"><div class="l">Stand<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Details</button></div><div class="v"><b>' + ppct + '%</b><span class="track"><i style="width:' + ppct + '%"></i></span></div></div>' +
@@ -1518,7 +1518,7 @@ function projectPage(p) {
   const members = projectMembers(p);
   const today = TODAY();
   const tab = S.projTab || 'overview';
-  const pc = p.color && p.color !== 'default' && p.color !== 'gray' ? 'var(--c-' + esc(p.color) + ')' : 'var(--accent)';
+  const pc = projectColor(p);
   const over = top.filter(x => !isDone(x) && x.dueDate && x.dueDate < today).length;
   const hoursAll = top.reduce((s2, x) => s2 + (x.estimate || 0), 0);
   const hoursDone = top.filter(isDone).reduce((s2, x) => s2 + (x.estimate || 0), 0);
@@ -1560,7 +1560,7 @@ function projectPage(p) {
           '<button class="icon-btn" data-action="project-unmember" data-id="' + esc(p.id) + '" data-v="' + esc(e) + '" title="Aus dem Projekt entfernen" aria-label="Aus dem Projekt entfernen">' + icon('x', 'sm') + '</button></div>';
       }).join('') : '<div class="empty-mini">Noch niemand im Projekt. Füge Personen hinzu.</div>') + '</div></div>';
   }
-  return '<div class="page wide"><div class="pj-banner" style="--pc:' + pc + '">' +
+  return '<div class="page wide"><div class="pj-banner ' + inkClass(projectColorKey(p)) + '" style="--pc:' + pc + '">' +
     '<div class="pj-l">' + mark(p, 'lg') + '<div><div class="pj-t"><h1>' + esc(p.name) + '</h1><span class="pb-chip">' + esc(st.label) + '</span></div>' +
     '<p>' + esc(p.description || 'Keine Beschreibung.') + '</p>' +
     '<div class="pj-m">' + (t ? '<button data-action="nav" data-view="team" data-id="' + esc(t.id) + '">' + mark(t) + esc(t.name) + '</button>' : '') +

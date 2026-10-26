@@ -213,12 +213,25 @@ function person(email) {
 function mark(entity, cls) {
   if (!entity) return '';
   const letter = esc((entity.name || '?').charAt(0).toUpperCase());
-  // projects wear their team's colour (light fill, coloured ring), so team membership shows everywhere
-  const t = entity.teamId !== undefined && team(entity.teamId);
-  if (t) return '<span class="mark proj ' + (cls || '') + '" style="--mc:' + colorVar(t) + '">' + letter + '</span>';
+  // projects wear their own colour; the team shows as a small dot in the corner
+  if (entity.teamId !== undefined) {
+    const t = team(entity.teamId);
+    return '<span class="mark proj ' + inkClass(projectColorKey(entity)) + (t ? ' in-team ' : ' ') + (cls || '') + '" style="--mc:' + projectColor(entity) +
+      (t ? ';--tc:' + colorVar(t) : '') + '">' + letter + '</span>';
+  }
   const color = entity.color && entity.color !== 'default' ? 'var(--c-' + esc(entity.color) + ')' : 'var(--c-gray)';
-  return '<span class="mark ' + (cls || '') + '" style="background:' + color + '">' + letter + '</span>';
+  return '<span class="mark ' + inkClass(entity.color) + ' ' + (cls || '') + '" style="background:' + color + '">' + letter + '</span>';
 }
+/** Colour key a project is shown in: its own choice, else its team's, else gray. */
+function projectColorKey(p) {
+  if (p && p.color && p.color !== 'default' && p.color !== 'gray') return p.color;
+  const t = p && team(p.teamId);
+  return t && t.color && t.color !== 'default' ? t.color : 'gray';
+}
+const projectColor = p => 'var(--c-' + esc(projectColorKey(p)) + ')';
+// light colours carry a dark letter, the others a white one (contrast check: dev/checks/contrast.js)
+const LIGHT_COLORS = ['yellow', 'orange', 'teal', 'gray'];
+const inkClass = key => (LIGHT_COLORS.indexOf(key) >= 0 ? 'ink-dark' : '');
 const GLYPHS = {
   backlog: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--text-3)" stroke-width="1.6" stroke-dasharray="2.4 2.2"/>',
   todo: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--text-3)" stroke-width="1.6"/>',
@@ -271,10 +284,9 @@ function projectPath(p) {
   const t = p && team(p.teamId);
   return p ? (t ? t.name + ' › ' : '') + p.name : '';
 }
-/** Team icon behind, project icon in front (overlapping): the team is recognised by its colour. */
+/** Project icon in the project colour; the team dot in its corner tells the team apart. */
 function projectMark(p, cls) {
-  const t = p && team(p.teamId);
-  return t ? '<span class="mstack ' + (cls || '') + '">' + mark(t, cls) + mark(p, cls) + '</span>' : mark(p, cls);
+  return mark(p, cls);
 }
 function projectChip(p) {
   if (!p) return '';
@@ -296,11 +308,10 @@ function logoFull() {
   return '<img class="logo-full on-light" src="' + LOGO_FULL_SRC + '" alt="' + esc(S.appName) + '">' +
     '<span class="logo-dark on-dark">' + logoMark() + '<span class="wm">' + (S.appName === 'LidlFlow' ? 'Lidl<b>Flow</b>' : esc(S.appName)) + '</span></span>';
 }
-/** Solid coloured label for a project (table, board): in the team's colour, the name only. */
+/** Solid coloured label for a project (table, board): in the project colour, the name only. */
 function projectPill(p) {
   if (!p) return '';
-  const t = team(p.teamId);
-  return '<span class="jpill" style="background:' + colorVar(t || p) + '" title="' + esc(projectPath(p)) + '">' + esc(p.name) + '</span>';
+  return '<span class="jpill ' + inkClass(projectColorKey(p)) + '" style="background:' + projectColor(p) + '" title="' + esc(projectPath(p)) + '">' + esc(p.name) + '</span>';
 }
 function teamChip(t) {
   if (!t) return '';
