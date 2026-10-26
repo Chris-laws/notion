@@ -968,7 +968,7 @@ function agendaHtml(data, from, n, o) {
 /**
  * "Woche im Blick": this and next week, Mon–Fri. Answers "can I plan with my team?":
  * events and milestones, who of my teams is away, holidays, understaffed days (red).
- * Tasks are only a small "n fällig" count – the list itself lives in "Heute im Fokus".
+ * Tasks are only a small "n fällig" count – the list itself lives in "Heute dran".
  */
 function weekGlanceCard(t, people) {
   // on the weekend this week is over: start with the next one
@@ -1046,7 +1046,7 @@ function dashPage() {
   if (!S.dashProj || !projects.some(x => x.id === S.dashProj)) S.dashProj = projects.length ? projects[0].id : '';
   const sp = project(S.dashProj);
   const projCard = (() => {
-    if (!sp) return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Projektübersicht</h3><div class="empty-w">Noch keine Projekte in deinen Teams.</div></div>';
+    if (!sp) return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Meine Projekte</h3><div class="empty-w">In deinen Teams gibt es noch keine Projekte.</div></div>';
     const ptasks = S.tasks.filter(x => x.projectId === sp.id && !x.parentId);
     const pdone = ptasks.filter(isDone).length;
     const ppct = ptasks.length ? Math.round(pdone / ptasks.length * 100) : 0;
@@ -1054,18 +1054,18 @@ function dashPage() {
     const st = Shared.PROJECT_STATUSES.find(x => x.key === sp.status) || Shared.PROJECT_STATUSES[1];
     const counts = Shared.STATUSES.map(x => '<div class="sc"><b>' + ptasks.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
     const next = ptasks.filter(x => !isDone(x) && x.dueDate).sort((x, y) => x.dueDate.localeCompare(y.dueDate)).slice(0, 3);
-    return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Projektübersicht<button class="btn white sm more2" data-action="proj-all">Alle Projekte</button></h3>' +
+    return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Meine Projekte<button class="btn white sm more2" data-action="proj-all">Alle Projekte</button></h3>' +
       '<div class="ptabs-wrap"><button class="ptabs-arrow l" data-action="ptabs-scroll" data-d="-1" aria-label="Nach links" title="Nach links">' + icon('left', 'sm') + '</button>' +
       '<div class="ptabs" data-keep-scroll="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '" title="' + esc(projectPath(x)) + '">' + projectMark(x) + esc(x.name) + '</button>').join('') + '</div>' +
       '<button class="ptabs-arrow r" data-action="ptabs-scroll" data-d="1" aria-label="Nach rechts" title="Nach rechts">' + icon('right', 'sm') + '</button></div>' +
       '<div class="pbanner" style="--pc:' + pc + '">' +
       '<div class="pb-t" title="' + esc(projectPath(sp)) + '">' + projectMark(sp, 'md') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
       '<p>' + esc(sp.description || 'Keine Beschreibung.') + '</p></div>' +
-      '<div class="pstats"><div class="pst"><div class="l">Fortschritt<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Ansehen</button></div><div class="v"><b>' + ppct + '%</b><span class="track"><i style="width:' + ppct + '%"></i></span></div></div>' +
-      '<div class="pst"><div class="l">Aufgaben<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Öffnen</button></div><div class="v"><b>' + pdone + '/' + ptasks.length + '</b><small>' + ppct + ' % erledigt</small></div></div>' +
-      '<div class="pst"><div class="l">Team<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Verwalten</button></div><div class="v">' + avatars(projectMembers(sp), 5) + '</div></div></div>' +
-      '<div class="pgrid"><div class="pbox"><div class="l">Aufgabenstatus</div><div class="scs">' + counts + '</div></div>' +
-      '<div class="pbox"><div class="l">Als Nächstes fällig</div>' + (next.length ? next.map(x => '<div class="nx" data-action="open-task" data-id="' + esc(x.id) + '"><span class="tt">' + esc(x.title) + '</span>' + dueTag(x) + '</div>').join('') : '<div class="hint">Nichts Offenes mit Datum.</div>') + '</div></div></div>';
+      '<div class="pstats"><div class="pst"><div class="l">Stand<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Details</button></div><div class="v"><b>' + ppct + '%</b><span class="track"><i style="width:' + ppct + '%"></i></span></div></div>' +
+      '<div class="pst"><div class="l">Abgeschlossen<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Liste</button></div><div class="v"><b>' + pdone + '/' + ptasks.length + '</b><small>' + ppct + ' % geschafft</small></div></div>' +
+      '<div class="pst"><div class="l">Beteiligte<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Personen</button></div><div class="v">' + avatars(projectMembers(sp), 5) + '</div></div></div>' +
+      '<div class="pgrid"><div class="pbox"><div class="l">Nach Status</div><div class="scs">' + counts + '</div></div>' +
+      '<div class="pbox"><div class="l">Nächste Fristen</div>' + (next.length ? next.map(x => '<div class="nx" data-action="open-task" data-id="' + esc(x.id) + '"><span class="tt">' + esc(x.title) + '</span>' + dueTag(x) + '</div>').join('') : '<div class="hint">Keine offenen Fristen.</div>') + '</div></div></div>';
   })();
   // today's focus
   const focus = open.filter(x => (x.dueDate && x.dueDate <= t) || x.planDate === t).sort(Shared.focusOrder);
@@ -1076,18 +1076,18 @@ function dashPage() {
       '<div class="fc-m">' + statusTag(x.status) + prioTag(x.priority) + (x.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(x.estimate)) + '</span>' : '') +
       (x.dueDate ? '<span class="fc-d">Fällig ' + esc(fmtDate(x.dueDate, { absolute: true })) + '</span>' : '') + '</div></div></div>';
   };
-  const focusCard = '<div class="card-w focus-card"><h3>' + icon('bolt', 'sm') + 'Heute im Fokus<button class="btn white sm more2" data-action="nav" data-view="home">Alle (' + focus.length + ')</button></h3>' +
-    '<p class="hint" style="margin:-6px 0 12px">Aufgaben mit Fälligkeit oder Zeitblock heute und früher' + (b && b.available ? ' · Auslastung ' + util + ' %' : '') + '</p>' +
-    (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Heute ist nichts fällig. Neue Aufgaben legst du oben über „Neue Aufgabe“ an.</div>') + '</div>';
+  const focusCard = '<div class="card-w focus-card"><h3>' + icon('bolt', 'sm') + 'Heute dran<button class="btn white sm more2" data-action="nav" data-view="home">Alle (' + focus.length + ')</button></h3>' +
+    '<p class="hint" style="margin:-6px 0 12px"><span>Überfälliges zuerst, dann alles, was für heute ansteht</span>' + (b && b.available ? ' · <span>Auslastung ' + util + ' %</span>' : '') + '</p>' +
+    (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Für heute ist nichts offen. Neues legst du über „Neue Aufgabe“ an.</div>') + '</div>';
   return '<div class="page wide">' +
     '<div class="card-w dash-top"><div class="du">' + avatar(S.me.email, 'xl') + '<div><h1><span>' + hello + '</span>, ' + esc(S.me.name.split(' ')[0]) + '!</h1><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div></div></div>' +
     '<div class="dr"><button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
     '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>' +
     '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + reportCard() +
-    '<div class="stiles">' + stile('', 'checksq', newWeek ? newWeek + ' neu diese Woche' : 'Keine neuen diese Woche', 'Aufgaben gesamt', my.length, 'home') +
-    stile('green', 'check', doneWeek ? doneWeek + ' diese Woche' : 'Noch keine diese Woche', 'Erledigt', my.filter(isDone).length, 'home') +
-    stile('yellow', 'clock', dueSoon ? dueSoon + ' bald fällig' : 'Nichts bald fällig', 'Aktiv', open.length, 'home') +
-    stile(overdueN ? 'red hot' : 'red', 'alert', overdueN ? 'Jetzt handeln' : 'Alles im Plan', 'Überfällig', overdueN, 'home') + '</div>' +
+    '<div class="stiles">' + stile('', 'checksq', newWeek ? '+' + newWeek + ' seit Montag' : 'Seit Montag nichts Neues', 'Meine Aufgaben', my.length, 'home') +
+    stile('green', 'check', doneWeek ? doneWeek + ' seit Montag' : 'Seit Montag noch keine', 'Abgeschlossen', my.filter(isDone).length, 'home') +
+    stile('yellow', 'clock', dueSoon ? dueSoon + ' in den nächsten 3 Tagen' : 'Keine Frist in 3 Tagen', 'Offen', open.length, 'home') +
+    stile(overdueN ? 'red hot' : 'red', 'alert', overdueN ? 'Bitte ansehen' : 'Im Zeitplan', 'Überfällig', overdueN, 'home') + '</div>' +
     '<div class="dash-grid"><div class="w-8">' + projCard + '</div><div class="w-4">' + focusCard + '</div>' +
     weekGlanceCard(t, people) +
     loadCard + doneCard +
@@ -1590,7 +1590,7 @@ function calendarPage() {
   const mode = S.cal.mode === 'week' && window.innerWidth < 700 ? 'day' : S.cal.mode;
   // the hours fill the window: about 7–21 h are visible without scrolling, small windows still scroll
   PL.hh = Math.max(24, Math.min(56, Math.floor(Math.max(320, window.innerHeight - 235) / 14)));
-  // personal calendar by default; a team gives a quick look at that team (details: Verfügbarkeit)
+  // personal calendar by default; a team gives a quick look at that team (details: availability page)
   const teamId = S.cal.teamId && team(S.cal.teamId) ? S.cal.teamId : '';
   const people = teamId ? teamMembers(team(teamId)) : [S.me.email];
   const t = TODAY();

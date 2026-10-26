@@ -39,7 +39,7 @@ files(ROOT).forEach(f => {
   });
 });
 if (hits.length) {
-  console.error('Mögliche Geheimnisse im Code:\n  ' + hits.join('\n  '));
+  console.error('Possible secrets in the code:\n  ' + hits.join('\n  '));
   process.exit(1);
 }
-console.log('Secret-Scan ok: keine Schlüssel oder Tokens im Code');
+console.log('Secret scan ok: no keys or tokens in the code');

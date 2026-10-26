@@ -5,9 +5,11 @@
 const vm = require('vm');
 const { load } = require('../dev/load');
 
-const ME = 'chris@firma.de';
+const ME = 'demo.user@firma.de';
 const ANNA = 'anna.schmidt@firma.de';
 const LEA = 'lea.huber@firma.de';
+
+const x_reset = ctx => ctx.__exports.Config.reset();
 
 /** A fresh app. opts.demo seeds the demo teams, projects and tasks. */
 function freshApp(opts) {
@@ -15,7 +17,11 @@ function freshApp(opts) {
   ctx.__GAS_QUIET__ = true;
   ctx.__GAS_USER__ = ME;
   ctx.setup();
-  if (opts && opts.demo) ctx.seedDemoData();
+  if (opts && opts.demo) {
+    ctx.PropertiesService.getScriptProperties().setProperty('ALLOW_DEMO_DATA', 'true');
+    x_reset(ctx);
+    ctx.seedDemoData();
+  }
   const x = ctx.__exports;
   const api = {
     ctx: ctx,

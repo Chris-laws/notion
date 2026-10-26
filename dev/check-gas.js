@@ -1,4 +1,4 @@
-// Statische Prüfung vor dem Upload nach Apps Script: node dev/check-gas.js
+// Static check before the upload to Apps Script: node dev/check-gas.js
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -13,14 +13,14 @@ try { manifest = JSON.parse(fs.readFileSync(path.join(src, 'appsscript.json'), '
 if (manifest.runtimeVersion !== 'V8') fail('runtimeVersion muss V8 sein');
 if (!manifest.webapp || !manifest.webapp.executeAs || !manifest.webapp.access) fail('webapp.executeAs/access fehlt');
 
-// Server-Dateien: Syntax, kein ESM
+// server files: syntax, no ES modules
 files.filter(f => f.endsWith('.js')).forEach(f => {
   const code = fs.readFileSync(path.join(src, f), 'utf8');
   if (/^\s*(import|export)\s/m.test(code)) fail(f + ': import/export wird in Apps Script nicht unterstützt');
   try { new vm.Script(code, { filename: f }); } catch (e) { fail(f + ': Syntaxfehler ' + e.message); }
 });
 
-// HTML: include()-Ziele, Script-Tags, Inline-JS-Syntax
+// HTML: include() targets, script tags, inline JS syntax
 const html = files.filter(f => f.endsWith('.html'));
 html.forEach(f => {
   const code = fs.readFileSync(path.join(src, f), 'utf8');
@@ -36,7 +36,7 @@ html.forEach(f => {
   }
 });
 
-// Aufgerufene Server-Routen existieren
+// every server route the client calls exists
 const code = fs.readFileSync(path.join(src, 'Code.js'), 'utf8');
 const routes = new Set([...code.matchAll(/^\s*'([\w.]+)':/gm)].map(m => m[1]));
 html.forEach(f => {
@@ -44,8 +44,8 @@ html.forEach(f => {
   for (const m of c.matchAll(/\bcall\(\s*'([\w.]+)'/g)) if (!routes.has(m[1])) fail(f + ': Route ' + m[1] + ' fehlt in Code.js');
 });
 
-// Platzhalter-Schlüssel darf nirgends im Browser-Code stehen
+// the placeholder key must never appear in browser code
 html.forEach(f => { if (/AIza[0-9A-Za-z_-]{20,}/.test(fs.readFileSync(path.join(src, f), 'utf8'))) fail(f + ': möglicher API-Schlüssel im Browser-Code'); });
 
-if (errors.length) { console.error('Prüfung fehlgeschlagen:\n- ' + errors.join('\n- ')); process.exit(1); }
-console.log('Apps-Script-Prüfung ok: ' + files.length + ' Dateien, ' + routes.size + ' Routen');
+if (errors.length) { console.error('Check failed:\n- ' + errors.join('\n- ')); process.exit(1); }
+console.log('Apps Script check ok: ' + files.length + ' files, ' + routes.size + ' routes');

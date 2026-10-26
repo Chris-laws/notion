@@ -12,7 +12,7 @@ const read = f => fs.readFileSync(path.join(SRC, f), 'utf8');
 
 let html = read('Index.html')
   .replace(/<\?!= include\('(\w+)'\) \?>/g, (m, name) => read(name + '.html'))
-  .replace(/<\?!= JSON\.stringify\(String\(userEmail.*?\?>/, () => '(new URLSearchParams(location.search).get("user") || "chris@firma.de")')
+  .replace(/<\?!= JSON\.stringify\(String\(userEmail.*?\?>/, () => '(new URLSearchParams(location.search).get("user") || "demo.user@firma.de")')
   .replace('<?!= clientLib() ?>', () => 'var Shared = (' + ctx.SharedFactory.toString() + ')();');
 
 const server = serverFiles().map(f => '// ---- ' + f + '\n' + read(f)).join('\n');
@@ -23,10 +23,11 @@ const runtime = `
 (function () {
   ${shim}
   const params = new URLSearchParams(location.search);
-  globalThis.__GAS_USER__ = params.get('user') || 'chris@firma.de';
+  globalThis.__GAS_USER__ = params.get('user') || 'demo.user@firma.de';
   globalThis.__GAS_QUIET__ = true;
   ${server}
   setup();
+  PropertiesService.getScriptProperties().setProperty('ALLOW_DEMO_DATA', 'true');
   seedDemoData();
   const server = { api: api };
   function runner(ok, ko) {
@@ -49,4 +50,4 @@ const runtime = `
 
 html = html.replace('<body>', '<body>' + runtime);
 fs.writeFileSync(path.join(__dirname, 'preview.html'), html);
-console.log('dev/preview.html geschrieben');
+console.log('dev/preview.html written');

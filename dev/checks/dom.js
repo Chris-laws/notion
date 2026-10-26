@@ -14,7 +14,7 @@ async function bootApp(opts) {
   require('../build-preview');
   const html = fs.readFileSync(path.join(__dirname, '..', 'preview.html'), 'utf8');
   const dom = new JSDOM(html, {
-    url: 'http://localhost/?user=' + encodeURIComponent(opts.user || 'chris@firma.de'),
+    url: 'http://localhost/?user=' + encodeURIComponent(opts.user || 'demo.user@firma.de'),
     runScripts: 'dangerously',
     pretendToBeVisual: true,
     beforeParse(w) {

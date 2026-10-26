@@ -1,96 +1,46 @@
-# FURPS-Durchgang (Stand 24.10.2026, Version 1.14)
+# Quality characteristics (FURPS)
 
-Bewertet wurde die Web-App aus Sicht der Nutzer:innen, Schwerpunkt Usability. „Behoben“ heißt: in dieser Version umgesetzt und in der Vorschau geprüft.
+Current state of the web app from the users' point of view. Each item is backed by an automated check where possible (see [WORKFLOW.md](WORKFLOW.md)); the check id is given in brackets.
 
 ## Functionality
 
-| Befund | Status |
-|---|---|
-| Neue Aufgaben ohne zuständige Person landeten unklar in „Meine Aufgaben“; leere Aufgaben blieben liegen | behoben: Person ist Pflicht (Standard: Ersteller), leere neue Aufgaben werden beim Schließen verworfen |
-| Suche fand keine Personen | behoben: Personen in der Suche, Treffer öffnet deren Aufgaben |
-| Region passte nicht zum Land (nur deutsche Bundesländer) | behoben: Regionen je Land, Feld entfällt bei Ländern ohne regionale Feiertage |
-| Feiertage-Panel in der Verfügbarkeit sah nur die Tabellenwochen statt 90 Tage | behoben |
-| Rechte: Server prüft (Team-Lead/Admin), Meldungen sind deutsch und verständlich | geprüft, unverändert |
-| Firmenverzeichnis (alle Kolleg:innen ohne Erst-Login suchbar) | offen: braucht Google-Workspace-Konto statt Gmail |
+- Tasks, sub-tasks, recurrence, projects, teams, events, absences, company holidays, capacity and availability (`tests`).
+- Every task has at least one responsible person (default: the creator); empty new tasks are discarded when the dialog closes.
+- Search covers tasks, projects and people.
+- Regions follow the selected country; the field is hidden for countries without regional holidays.
+- Permissions are enforced on the server for every API route (`security`).
+- Open: a full company directory (all colleagues searchable before their first sign-in) needs the Workspace directory API.
 
 ## Usability
 
-| Befund | Status |
-|---|---|
-| Tastenkürzel-Symbol „⌘K“ unverständlich, Suchleiste zu kurz | behoben: Badge entfernt, Suchleiste über die volle Breite, Kürzel im Tooltip (Strg/Cmd + K) |
-| Begriffe uneinheitlich („Kapazität“ vs. „Verfügbarkeit“) | behoben: überall „Verfügbarkeit“ |
-| Löschen einer Aufgabe nur mit Bestätigungsdialog | behoben: sofort weg, 6 s „Rückgängig“ (inkl. Unteraufgaben) |
-| Gespeicherte Ansichten nicht löschbar | behoben: Mülleimer mit „Rückgängig“ |
-| Leerzustände verwiesen auf ⌘K | behoben: konkrete Handlungsaufforderung |
-| Kein Einstieg bei leerer Datenbank | behoben: 3-Schritte-Hinweis auf der Übersicht, solange es kein Team gibt |
-| Keine Hilfe / Tastenkürzel nicht auffindbar | behoben: „?“-Knopf oben rechts und Taste „?“: Kurzanleitung, Kürzel, Schnell-Eingabe, Version |
-| Icon-Buttons ohne Beschriftung (Häkchen, Farben, Kalenderzellen) | behoben: Tooltips/ARIA-Labels; automatische Prüfung aller Seiten ohne Treffer |
-| Kontrast Hilfstexte zu niedrig (ca. 2,9 : 1 hell) | behoben: hell 5,4 : 1, dunkel 5,6 : 1 (WCAG AA) |
-| Touch-Ziele am Handy zu klein | behoben: mind. 40 px |
-| Seiten scrollten wie eine Website, Dialoge zu lang | behoben (Version 1.11): feste Kopfbereiche, nur Boxen scrollen; Dialoge mit festem Kopf und Buttons |
-| Sprache, Hell/Dunkel immer erreichbar | behoben: oben rechts |
-| Nicht-sichtbarer Speicherstatus | behoben: Punkt neben dem App-Namen pulsiert beim Speichern; „Alle Änderungen gespeichert“ in der Aufgabe |
+- One people manager wherever people are added: search, invite by e-mail, remove with undo.
+- Deleting a task takes effect at once with a 6-second undo (sub-tasks included); saved views can be deleted with undo.
+- Empty states say what to do next; an empty database shows a three-step start.
+- Help ("?" button and key) with short guide, shortcuts and quick-add syntax; shortcuts work regardless of Shift/Caps Lock and keyboard layout.
+- Icon buttons have tooltips and ARIA labels; dialogs keep focus and return it; clicking next to a dialog only closes it when nothing was typed (`a11y`).
+- Contrast meets WCAG AA in light and dark mode (`contrast`); touch targets are at least 40 px on phones.
+- Fixed headers, only content boxes scroll; language and theme switch always in the top bar.
+- Complete English translation, including server messages (`i18n`).
 
 ## Reliability
 
-| Befund | Status |
-|---|---|
-| Technische Fehlermeldungen von Google (Lock, Timeout, Netzwerk) | behoben: verständliche Meldung mit Lösungshinweis |
-| Kein Hinweis bei Verbindungsverlust | behoben: Offline-Banner, beim Wiederverbinden Abgleich |
-| Formulareingaben gingen bei Hintergrund-Aktualisierung verloren | behoben (früher): Entwürfe bleiben, Neuaufbau nur bei echten Änderungen |
-| Gelöschte Aufgabe bei sofortigem Seitenwechsel innerhalb der 6 s | behoben: wird beim Verlassen der Seite sofort gelöscht |
-| Gleichzeitiges Speichern mehrerer Personen | geprüft: Server sperrt Schreibvorgänge (LockService) |
-| Automatischer Wiederholversuch bei Serverfehler | behoben (1.19): Lese-Aufrufe 2 Wiederholungen mit Backoff (0,6 s / 1,8 s); Schreib-Aufrufe melden sich verständlich |
+- Google errors (lock, timeout, network) are shown as understandable messages with a hint.
+- Offline banner; on reconnect the data is synced.
+- Drafts survive background refreshes; the view is only rebuilt on real changes.
+- Writes are serialised with a script lock; the target row is verified before every write (`consistency`).
+- Refused calls ("too many at once") are retried with growing, randomised delays; reads also on transient errors.
+- XSS: user text never turns into markup in any view (`xss`).
 
 ## Performance
 
-| Befund | Status |
-|---|---|
-| Ganze Seite wurde bei jeder Kleinigkeit neu aufgebaut, Animationen flackerten | behoben (1.3) |
-| Neue Aufgabe wartete auf den Server | behoben (1.3): erscheint sofort |
-| Tabellen werden pro Anfrage gecacht, Einstellungen einmal gelesen | behoben (1.3) |
-| Lange Listen: Tabelle hat Seiten (25–200 Zeilen), Liste und Board nicht; bei mehreren Tausend Aufgaben prüfen | offen |
-
-## Ergänzungen 1.19
-
-| Befund | Status |
-|---|---|
-| Tastenkürzel N, T, ? reagierten nicht (Groß-/Kleinschreibung, nur im Kalender, Fokus im Google-Rahmen) | behoben: unabhängig von Shift/Caps und Layout, T von überall, N legt Aufgabe an, Fokus in die App |
-| Kalender musste gescrollt werden | behoben: Stundenhöhe aus Fensterhöhe (6–21 Uhr sichtbar), Handy zeigt Tagesansicht |
-| Keine 404-Seite, leere Seite beim Start | behoben: eigene 404 (auch gelöschte Teams/Projekte/Aufgaben-Links), Startbildschirm, Fehlerseite mit „Erneut versuchen“ |
-| Kein Ladehinweis bei Serveraufrufen | behoben: Ladebalken oben, Spinner auf Speichern-Knöpfen |
-| Dialoge: Fokus ging verloren, Klick daneben verwarf Eingaben | behoben: Fokus bleibt im Dialog und kehrt zurück; Klick daneben schließt nur ohne Eingaben |
-| Bewegung/Druck | behoben: prefers-reduced-motion, Druckansicht |
-
-## QA-Runden (1.19)
-
-| Runde | Geprüft | Funde | Status |
-|---|---|---|---|
-| 1 | Kürzel, Tippschutz, Kalender-Höhe, 404, Team/Mitglied/Projekt/Quick-Add/Kommentar/Timer/Urlaub/Löschen+Rückgängig/Profil, Hell/Dunkel, 390 px | Briefing blieb nach Fehler leer; Kalender- und Verfügbarkeitskopf liefen am Handy über | behoben |
-| 2 | Termin, Unteraufgabe, Tabelle/Gantt/Board/Kalender-Layout, KI-Assistent, Person einladen, dunkle Ansichten | keine | – |
-| 3 | 1024 px und 1280 px, Englisch, Offline-Banner, Fehlertexte, automatischer Wiederholversuch | Verfügbarkeit lief bei 1024 px seitlich über | behoben |
-| 4 | Kontrolllauf der Kernabläufe | keine | – |
-
-## Ladezeiten (1.21)
-
-Gemessen in der lokalen Vorschau (echter Servercode, Tabellen im Speicher); die absoluten Zeiten im echten Apps-Script-Betrieb liegen pro Aufruf typischerweise bei 0,5–2 s und sind dort mit `?perf=1` an der /exec-URL sichtbar (Tabelle unten rechts: Dauer gesamt, Zeit auf dem Server, gelesene Tabellen, Größe). Jede Serverantwort schreibt zusätzlich `api <Route> <ms> ms` ins Apps-Script-Protokoll (Ausführungen).
-
-| Messung | vorher | nachher |
-|---|---|---|
-| Serveraufrufe beim Öffnen des Dashboards | 4 (bootstrap, Briefing, 2× Kalenderdaten) | 3 (bootstrap, Schnellreport, 1× Kalenderfenster) |
-| Zusätzliche Aufrufe beim Wechsel in den Kalender | 2 | 0 |
-| Zusätzliche Aufrufe beim Wechsel in die Verfügbarkeit | 2 | 1 (nur Teamdaten) |
-| Summe Dashboard → Kalender → Verfügbarkeit | 8 | 4–5 |
-| Schnellreport bei erneutem Öffnen innerhalb 5 Min. | – | aus dem Cache |
-| Kleine Tabellen (Personen, Teams, Projekte, Firmen-Feiertage) | jede Anfrage aus der Tabelle | 2 Min. im Script-Cache, beim Schreiben verworfen |
-
-Ladezustände: Start (Logo + Ladeanzeige), Ladebalken oben bei jedem Aufruf, Skeletons in Schnellreport, Agenda, Auslastung, Verfügbarkeit, Seitenpanels, Kommentaren, Abwesenheiten; Spinner in Speichern-Knöpfen und im KI-Assistenten.
+- Page about 480 KB (140 KB gzipped); budgets per request type (`budget`).
+- Versioned, compressed table cache; polling answers "same" while nothing changed; start from the last state in the browser with skeletons until fresh data arrives.
+- About 1,000 people can work at the same time with the default deployment (`load`; details in the README and WORKFLOW.md).
+- `?perf=1` on the app URL shows duration, server time, sheet reads and size per call; every call also logs `api <route> <ms> ms` in the Apps Script executions.
 
 ## Supportability
 
-| Befund | Status |
-|---|---|
-| Keine Versionsangabe | behoben: in der Hilfe |
-| Kein Feedback-Weg | behoben: Hinweis auf Admin-Person in der Hilfe (Platzhalter für ein Formular) |
-| Tests und statische Apps-Script-Prüfung | vorhanden: `npm test`, `npm run check` |
-| Übersetzungen zentral | vorhanden: `src/I18n.html` |
+- Version shown in the help; feedback hint pointing to the admin.
+- Quality gate `npm run guard` with 14 checks, also in CI.
+- Translations in one place: `src/I18n.html`.
+- Migration guide: [MIGRATION.md](MIGRATION.md).

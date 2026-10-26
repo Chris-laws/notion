@@ -26,11 +26,11 @@ function check() {
   const rows = [];
   const add = (what, value, max, unit) => rows.push({ what, value: Math.round(value), max, unit, ok: value <= max });
   const page = pageSize();
-  add('Seite (HTML+CSS+JS)', page.kb, BUDGET.pageKB, 'KB');
-  add('Seite gzip', page.gzipKb, BUDGET.pageGzipKB, 'KB');
+  add('page (HTML+CSS+JS)', page.kb, BUDGET.pageKB, 'KB');
+  add('page gzip', page.gzipKb, BUDGET.pageGzipKB, 'KB');
   const prof = profile(1000, 3000);
-  add('Start-Antwort normale Person', prof.bootstrap.bytes / 1024, BUDGET.bootstrapKB, 'KB');
-  Object.keys(BUDGET.ms).forEach(k => add('Request ' + k + ' (1000 Personen)', prof[k].warm, BUDGET.ms[k], 'ms'));
+  add('first response, regular person', prof.bootstrap.bytes / 1024, BUDGET.bootstrapKB, 'KB');
+  Object.keys(BUDGET.ms).forEach(k => add('request ' + k + ' (1000 people)', prof[k].warm, BUDGET.ms[k], 'ms'));
   return rows;
 }
 
@@ -39,7 +39,7 @@ if (require.main === module) {
   rows.filter(r => !r.ok || process.argv.includes('--show')).forEach(r =>
     console.log('  ' + (r.ok ? '✓' : '✗') + ' ' + r.what.padEnd(34) + String(r.value).padStart(6) + ' ' + r.unit + '  (Budget ' + r.max + ' ' + r.unit + ')'));
   const bad = rows.filter(r => !r.ok);
-  console.log(bad.length ? bad.length + ' Budget(s) überschritten' : 'Performance-Budget ok: ' + rows.length + ' Werte im Rahmen');
+  console.log(bad.length ? bad.length + ' budget(s) exceeded' : 'Performance budget ok: ' + rows.length + ' values within budget');
   process.exit(bad.length ? 1 : 0);
 }
 module.exports = { check, BUDGET, pageSize };

@@ -1,51 +1,45 @@
-# Taskraum – Designsprache
+# LidlFlow – design language
 
-> Vorläufig (Reifegrad L0): kein bestehendes Designsystem. Alle Werte sind bewusst gesetzte Startwerte und stehen als CSS-Variablen in `src/Styles.html`. Änderungen hier zuerst, dann in den Tokens.
+All values live as CSS variables (design tokens) in `src/Styles.html`. Change them here first, then in the tokens. Contrast of the tokens is checked on every guard run (`contrast`, WCAG 2.2).
 
-## Haltung
+## Attitude
 
-Ruhige, helle Oberfläche in der Art moderner Planungs-Apps: weiche Arbeitsfläche, weiße Karten mit großzügigen Rundungen, wenig Linien, klare Hierarchie. Aufbau und Muster (Übersicht mit Kennzahlen und Projektübersicht, Aufgabentabelle, Kanban-Board, Gantt, Aufgabendetail als Seite mit Zeiterfassung, Tagesplaner mit Zeitblöcken, Agenda, Quick-Add mit farbiger Syntax) folgen den vom Auftraggeber gelieferten Referenz-Screens und allgemein üblichen Layoutideen; sie sind selbst gezeichnet. Alle Farben, Formen, Texte und Icons sind eigenständig gestaltet; es wurden keine fremden Assets, Icons, Texte oder Screenshots übernommen.
+A calm, light interface: soft canvas, white cards with generous rounding, few lines, a clear hierarchy. Colour always means something; it is never decoration.
 
-Lidl-Anmutung dezent: Farbe hat eine Aufgabe, nie Dekoration.
+- **Blue** (`--accent` `#012e90`) is the accent: selection, links, primary action, progress, events.
+- **Yellow** (`--yellow` `#fcc702`) only as a small marker: logo, active navigation bar, today.
+- **Red** (`--danger` `#d3191d`) means action needed: overdue, urgent, team below the staffing threshold, errors.
+- Everything else is ink and cool grey on a light ground.
 
-- **Blau** (`#0050aa`) ist der Akzent: Auswahl, Links, primäre Aktion, Fortschritt.
-- **Gelb** (`#ffe500`) nur als kleine Markierung: Logo-Punkt, aktiver Navigationsbalken, heutiger Tag, Feiertage.
-- **Rot** (`#e60a14`) heißt Handlungsbedarf: überfällig, dringend, Team ab Schwelle abwesend.
-- Alles andere ist Tinte und kühles Grau auf hellem Grund.
+## Semantic colours
 
-## Farben
-
-| Token | Hell | Einsatz |
+| Meaning | Token(s) | Used for |
 |---|---|---|
-| Text | dunkles Blaugrau | Text |
-| Hintergrund | sehr helles Grau | Arbeitsfläche |
-| Karte | Weiß | Karten, Seitenleiste |
-| Akzent | `#0050aa` | Blau |
-| Marker | `#ffe500` | Gelb |
-| Gefahr | `#e60a14` | Rot |
+| Done / success | `--success`, `--success-soft` | done status, "all teams well staffed", progress of finished work |
+| Attention / due soon | `--warning`, `--warning-soft`, `--warning-strong` | due within days, public holidays, warning toasts, medium priority |
+| Error / overdue | `--danger`, `--danger-soft` | overdue, urgent priority, understaffed days, errors |
+| Info / in progress | `--accent`, `--accent-soft`, `--st-doing` | in progress, events, links |
+| AI | `--ai`, `--ai-soft`, `--ai-text` | everything the AI produces |
+| Neutral | `--text-3`, `--bg-hover`, `--st-backlog` | backlog, absences, low priority |
 
-Dunkelmodus ist über dieselben Tokens hinterlegt. Abwesenheiten: Urlaub Blau, Krank Rot, Fortbildung Tinte, Sonstiges Grau, Feiertag Gelb. Status als Kreise: Backlog gestrichelt, Offen leer, In Arbeit gelb, Review blau, Erledigt grün mit Haken.
+Status (`--st-*`): backlog grey (dashed circle), open slate (empty circle), in progress blue (half circle), review purple, done green (check). Priority (`--prio-*`): urgent red, high orange, medium amber, low grey. Dark mode uses the same tokens with their own values.
 
-## Typografie
+## Typography
 
-Nur Inter (optische Größe automatisch). Hierarchie über Größe und Gewicht, keine Großbuchstaben-Etiketten.
+The operating system's UI font (Segoe UI, San Francisco, Roboto …); no external web fonts. Hierarchy through size and weight, no all-caps labels except small section headings.
 
-## Form
+## Shape
 
-Karten mit 14–20 px Radius und sanftem Schatten, Dialoge und Palette 20 px. Trennung durch Fläche und Abstand statt harter Linien. Tabs als Segmentschalter.
+Cards with 14–20 px radius and a soft shadow, dialogs and the command palette 20 px. Separation by surface and spacing rather than hard lines. Tabs as segmented controls.
 
 ## Layout
 
-- Seitenleiste: standardmäßig schmale Icon-Leiste (68 px) mit Team- und Projektmarken, per Menü-Taste auf volle Breite aufklappbar. Einträge: Übersicht, Meine Aufgaben, Alle Aufgaben, Tagesplaner, Kalender & Agenda, Verfügbarkeit; aktive Seite sanft blau mit gelbem Balken.
-- Übersicht: Begrüßung mit Quick-Add, Briefing, vier Kennzahlen, Widgets in 12er-Raster.
-- Kopfzeile: zentrale Suchleiste (öffnet die Palette). Seitenköpfe sind Karten mit Titel, Untertitel und Aktionen; Aufgabenseiten haben darunter Filterleiste und Ansichtsumschalter (Liste, Tabelle, Board, Kalender, Gantt) sowie gespeicherte Ansichten.
-- Tabelle: Status, Priorität und Tags als weiche Pillen, Projekt als volle Farbfläche, Fortschrittsbalken, Fußzeile mit Zeilenzahl und Seiten.
-- Board: Spalten mit Farbpunkt und Zähler (einklappbar), Karten mit Farbstreifen links, Priorität, Projekt, Datum, Überfällig-Hinweis, Tags, Fortschritt.
-- Gantt: Aufgabenliste links, Zeitraster rechts mit Heute-Linie, Wochenenden, Tooltip; Balkenfarbe nach Status.
-- Aufgabendetail (Vollseite): Kopfkarte mit Chips, fünf Eigenschaftskarten (Status, Priorität, Start, Fällig, Fortschritt), links Beschreibung und Unteraufgaben, rechts Zeiterfassung, Details, smarte Hilfen und Kommentare.
-- Quick-Add: Eingabezeile mit farbig markierter Syntax, Vorschau mit Titel und Chips, Legende der Kürzel.
-- Projektseite: Farbbanner mit Tabs Übersicht, Aufgaben, Mitglieder.
-- Tagesplaner: Liste ungeplanter Aufgaben links, Zeitraster 06–20 Uhr rechts, Blöcke per Drag & Drop in 15-Minuten-Schritten.
-- Kalender: Kopfkarte mit Titel, Team-Auswahl, Filtern und Ansichtsumschalter (Agenda, Planer, Monat, Woche, Tag, Heatmap); darunter Kurzbefehl-Leiste. Agenda mit rotem Block „Überfällig“ und Tagen als Zeilen, Woche/Tag als Zeitraster mit Ganztagesstreifen, Heatmap mit Kennzahlen.
-- Detail: Seitenpanel mit weicher Eigenschaftskarte, KI-Vorschlägen, Unteraufgaben, Kommentaren.
-- Responsiv ab 1180 px und 860 px.
+- Sidebar: navigation (overview, my tasks, all tasks, calendar, availability), then teams with their projects; the active page is soft blue with a yellow bar.
+- Overview: greeting, AI summary, key numbers, project card, "up today", week at a glance, workload, done per week, on a 12-column grid.
+- Top bar: central search (opens the palette), help, theme and language switch.
+- Task pages: filter bar and view switch (list, table, board, calendar, Gantt) plus saved views.
+- Task detail: side panel or full page with property cards, description, sub-tasks, time tracking, AI helpers and comments.
+- Project page: colour banner with tabs overview, tasks, members.
+- Calendar: header card with title, team scope, layers and view switch (week, day, month, agenda, heatmap).
+- Loading: skeleton placeholders in the shape of the page; animations respect `prefers-reduced-motion`.
+- Responsive breakpoints at 1180 px, 900 px and 600 px; dialogs become bottom sheets on phones.

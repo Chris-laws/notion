@@ -10,7 +10,7 @@ const X = ctx.__exports;
 const S = X.Shared;
 ctx.__GAS_QUIET__ = true;
 
-const ME = 'chris@firma.de';
+const ME = 'demo.user@firma.de';
 const as = email => { ctx.__GAS_USER__ = email; };
 const call = (method, payload) => {
   const res = JSON.parse(ctx.api(method, JSON.stringify(payload || {})));
@@ -77,7 +77,7 @@ test('task filter: status filter, done toggle, tabs and counts agree', () => {
 test('quick-add parser', () => {
   const pctx = {
     today: '2026-10-23', me: ME,
-    users: [{ email: 'anna.schmidt@firma.de', name: 'Anna Schmidt' }, { email: ME, name: 'Chris' }],
+    users: [{ email: 'anna.schmidt@firma.de', name: 'Anna Schmidt' }, { email: ME, name: 'Demo User' }],
     teams: [{ id: 'tm1', name: 'Marketing' }],
     projects: [{ id: 'pr1', name: 'Website' }],
   };
@@ -147,6 +147,8 @@ test('Nager.Date response is used and cached', () => {
 console.log('API');
 test('setup + demo data + bootstrap', () => {
   as(ME);
+  ctx.PropertiesService.getScriptProperties().setProperty('ALLOW_DEMO_DATA', 'true');
+  X.Config.reset();
   ctx.seedDemoData();
   const b = call('bootstrap');
   assert.strictEqual(b.me.email, ME);
@@ -569,7 +571,7 @@ test('errors are returned, not thrown', () => {
 
 test('team availability warns at 50 % absence (holidays + vacation)', () => {
   as(ME);
-  const marketing = call('bootstrap').teams.find(t => t.name === 'Marketing'); // Chris (DE), Sofia (IT), Lea (AT)
+  const marketing = call('bootstrap').teams.find(t => t.name === 'Marketing'); // demo user (DE), Sofia (IT), Lea (AT)
   const a = call('availability', { teamId: marketing.id, from: '2026-12-07', weeks: 1 });
   assert.strictEqual(a.threshold, 50);
   const dec8 = a.team.find(d => d.date === '2026-12-08'); // IT + AT holiday
@@ -589,4 +591,4 @@ test('team availability warns at 50 % absence (holidays + vacation)', () => {
   assert.ok(range.warnings.some(w => w.date === '2026-12-08' && w.teamId === marketing.id));
 });
 
-console.log('\n' + passed + ' Tests ' + (process.exitCode ? 'mit Fehlern' : 'bestanden'));
+console.log('\n' + passed + ' tests ' + (process.exitCode ? 'with failures' : 'passed'));

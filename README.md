@@ -1,185 +1,146 @@
-# LidlFlow – Team-Tool für Aufgaben und Kalender in Google Apps Script
+# LidlFlow – task management and team calendar on Google Apps Script
 
-Task-Management und Teamkalender für Unternehmen, die mit Google Workspace arbeiten.
-Anmeldung per Google SSO, Daten in einem Google Sheet, ruhige Oberfläche mit Seiten, Listen, Board und Kalender.
+Task management and a team calendar for companies on Google Workspace. Sign-in with Google SSO, data in a Google Sheet, a calm interface with pages, lists, board and calendar. The interface is German and English (switch in the top bar).
 
-## Funktionen
+For moving the app into a company Workspace, see **[MIGRATION.md](MIGRATION.md)**. For the development workflow and the quality gate, see **[WORKFLOW.md](WORKFLOW.md)**.
 
-**Aufgaben**
-- Aufgaben für sich selbst, eine Person, mehrere Personen oder ganze Teams
-- Teams (Teambereiche) mit Lead und Mitgliedern, darin Projekte
-- Projekte mit eigenem Mitgliederkreis: ganzes Team oder gemischt aus verschiedenen Teams
-- Ansichten: **Liste**, **Tabelle** (sortierbar, Inline-Bearbeitung, Fortschrittsbalken, Seitenzahl), **Board** (Drag & Drop, Gruppierung nach Status/Priorität/Person/Projekt, Spalten einklappbar), **Kalender** und **Gantt** (Balken ziehen verschiebt, rechter Rand ändert das Fälligkeitsdatum, Zoom Woche/Monat/Quartal); gespeicherte Ansichten pro Seite (im Browser)
-- Aufgabe als Seitenansicht oder Vollseite (Eigenschaftskarten, Fortschritt manuell oder automatisch, Zeiterfassung mit Timer, Unteraufgaben, Kommentare): Status, Zuweisung, Priorität, Start/Fällig, Projekt, Teams, Aufwand, Tags, Wiederholung, Beschreibung, Unteraufgaben, Kommentare
-- Wiederkehrende Aufgaben (täglich, werktags, wöchentlich, monatlich)
-- Befehlspalette (`Strg+K`) mit Quick-Add in natürlicher Sprache, die Syntax wird farbig markiert:
-  `Angebot senden morgen @anna #website !hoch 2h` → Titel, Fälligkeit, Person, Projekt, Priorität und Aufwand werden erkannt
-- **Übersicht** (Startseite): Begrüßung mit Tagesfortschritt, Tagesbriefing, vier Kennzahlen, Projektübersicht, „Heute im Fokus“, Teamabwesenheit, Agenda, Aktivitäts-Heatmap
-- **Projektseite** mit Übersicht (Aufgabenverteilung, Kurzstatistik, Fortschritt im Detail), Aufgaben und Mitgliedern
-- **Tagesplaner**: Aufgabenliste links, Zeitraster rechts. Aufgaben per Drag & Drop als Zeitblöcke legen (15-Minuten-Raster, Länge = Aufwandsschätzung); gespeichert als `planDate` und `planStart`
-- **Kalender** mit sechs Ansichten (Tasten `1`–`6`): Agenda (Überfällig oben, Zeitraum Heute/Woche/Monat/90 Tage), Planer, Monat, Woche, Tag (Zeitraster mit Drag & Drop) und Heatmap erledigter Aufgaben; Urlaub, Feiertage und Teamwarnung ab 50 % in jeder Ansicht
-- „Meine Aufgaben“ als Datenbank mit Liste, Board, Tabelle
+## Features
 
-**Kalender, Urlaub und Verfügbarkeit**
-- Teamkalender mit Aufgaben, Terminen/Meilensteinen, Abwesenheiten und **internationalen Feiertagen**
-- Feiertage pro Person nach Land **und Region** (z. B. Allerheiligen nur für `DE-BY`, Thanksgiving nur für `US`)
-- Quellen: [Nager.Date](https://date.nager.at) (≈120 Länder inkl. regionaler Feiertage), Fallback auf Googles Feiertagskalender und eine eingebaute Berechnung für DE, AT, CH, US, GB, FR, IT, ES, NL, PL; dazu eigene Firmen-Feiertage
-- Woher die Daten kommen: Land und Region stehen im **Profil** jeder Person (Einstellungen; ohne Land gilt `DEFAULT_COUNTRY`). Für jedes Team werden die Länder aller Mitglieder zusammengezogen, jeder Feiertag zeigt, **wen** er betrifft; regionale Feiertage gelten nur bei passender Region. „Persönlich“ im Kalender nutzt nur das eigene Land und die eigene Region.
-- Feiertage werden **nicht** in die Tabelle eingetragen, sondern live geholt und pro Land und Jahr 30 Tage zwischengespeichert (Script-Cache + Tabelle `HolidayCache`). Eine Änderung von Land/Region im Profil wirkt sofort. Firmen-Feiertage pflegen Admins separat unter Einstellungen.
-- Urlaub wird direkt im Teamkalender gepflegt: mehrere Tage mit der Maus markieren oder „Urlaub eintragen“
-- **Verfügbarkeit**: Tagesraster pro Team, wer wann weg ist (Urlaub, Krank, Fortbildung, Feiertag). Sind an einem Tag **mindestens 50 %** eines Teams abwesend, gibt es eine Warnung im Kalender, in der Verfügbarkeit, im Tagesbriefing und direkt beim Eintragen des Urlaubs. Feiertage zählen mit, je nach Land und Region der Person. Schwelle über `ABSENCE_WARN_PERCENT` anpassbar
-- Aufwandsplanung pro Person und Woche (für „Wer hat Kapazität?“): Wochenstunden und Arbeitstage (Teilzeit), minus Feiertage und Abwesenheiten, verglichen mit dem geschätzten Aufwand offener Aufgaben (verteilt auf die Arbeitstage zwischen Start und Fälligkeit)
+**Tasks**
+- Tasks for yourself, one person, several people or whole teams
+- Teams with a lead and members, projects inside teams
+- Projects with their own member list: the whole team or a mix of people from several teams
+- Views: **list**, **table** (sortable, inline editing, progress bars, paging), **board** (drag & drop, grouping by status/priority/person/project, collapsible columns), **calendar** and **Gantt** (drag bars to move, drag the right edge to change the due date, zoom week/month/quarter); saved views per page (in the browser)
+- Task as side panel or full page: status, assignees, priority, start/due, project, teams, effort, tags, recurrence, description, sub-tasks, comments, progress (manual or automatic), time tracking with a timer
+- Recurring tasks (daily, weekdays, weekly, monthly)
+- Command palette (`Ctrl+K`) with natural-language quick add, the syntax is highlighted:
+  `Angebot senden morgen @anna #website !hoch 2h` → title, due date, person, project, priority and effort are recognised
+- **Overview** (start page): greeting, AI summary, key numbers, project card, "up today", week at a glance, workload, done per week
+- **Project page** with overview (status distribution, quick stats, progress in detail), tasks and members
+- **Calendar** with week, day (time grid with drag & drop), month, agenda and heatmap; vacations, holidays and the team warning in every view
+- **People manager**: one dialog wherever people are added (search, invite by e-mail, remove with undo)
 
-**Smarte Funktionen (Vertex AI vorbereitet)**
-- Ohne KI-Schlüssel läuft alles regelbasiert: Quick-Add-Parser, „Wer hat Kapazität?“ (Vorschlag nach freier Kapazität, Feiertagen und Abwesenheiten), Tagesbriefing
-- Mit Vertex-AI-Schlüssel übernimmt Gemini: verfeinertes Quick-Add, formuliertes Briefing, Zerlegen von Aufgaben in Teilaufgaben mit Aufwandsschätzung
-- Der Schlüssel liegt nur serverseitig in den Skripteigenschaften und erreicht nie den Browser
+**Calendar, absences and availability**
+- Team calendar with tasks, events/milestones, absences and **international public holidays**
+- Holidays per person by country **and region** (e.g. All Saints' Day only for `DE-BY`)
+- Sources: [Nager.Date](https://date.nager.at) (about 120 countries incl. regional holidays), fallback to Google's holiday calendar and a built-in list for DE, AT, CH, US, GB, FR, IT, ES, NL, PL; plus company holidays maintained by admins
+- Country and region come from each person's **profile** (settings; without a country `DEFAULT_COUNTRY` applies)
+- Holidays are fetched live and cached per country and year for 30 days (script cache + sheet `HolidayCache`)
+- **Availability**: day grid per team showing who is away. If **50 % or more** of a team is away on a day, the calendar, the availability page, the overview and the absence dialog warn. Threshold: `ABSENCE_WARN_PERCENT`
+- **Privacy**: a sick leave is shown as "sick" only to the person and to admins; everyone else (and the AI summary) sees "away". Notes on absences are visible to the person and admins only
+- Capacity per person and week: weekly hours and workdays (part time), minus holidays and absences, compared with the estimated effort of open tasks
+
+**Smart functions (prepared for Vertex AI)**
+- Without an AI key everything runs on rules: quick-add parser, "who has capacity?", summary
+- With a Vertex AI key Gemini refines quick add, writes the summary and splits tasks into sub-tasks with effort estimates
+- The key stays on the server in the script properties and never reaches the browser
 
 ## Performance
 
-- **Tabellen-Cache:** Jede Tabelle liegt zusätzlich im Script-Cache (große Tabellen in Stücken von 90 KB). Pro Tabelle gibt es ein Versions-Token, das jeder Schreibzugriff nach dem `flush` erneuert. Eine Kopie gilt nur, solange ihr Token aktuell ist. Lesen kommt so meist ohne Tabellenzugriff aus, nach dem Schreiben sieht man trotzdem sofort den neuen Stand. Schreiben (`Db.tx`) liest immer direkt aus der Tabelle, damit die Zeilennummern stimmen. Wer Zeilen von Hand in der Tabelle ändert, sieht das nach spätestens 10 Minuten.
-- **Polling:** `tasks.list` bekommt die zuletzt gesehene Version. Solange sich nichts geändert hat, antwortet der Server nur `{ same: true }`.
-- **Start:** Der Bootstrap-Aufruf startet sofort beim Laden der Seite. Der letzte Stand liegt im Browser (`localStorage`, nur für dieselbe Person, höchstens 7 Tage alt, unter 2 MB), daher erscheint die App sofort und wird dann aktualisiert. Bis dahin zeigt sie Skeleton-Platzhalter in der Form der Zielseite.
-- **Seitengröße:** Das Logo ist WebP in doppelter Anzeigegröße (27 KB statt 167 KB). Die Webfont blockiert das erste Bild nicht.
-- `?perf=1` an der App-URL zeigt Dauer und Tabellenzugriffe je Aufruf.
+- **Table cache:** every table is also kept in the script cache (large tables gzipped and split into chunks). Each table has a version token that every write renews after `flush`; a cached copy is only used while its token is current. Writes use the version-checked copy, check the target row before writing and put the new state straight back into the cache.
+- **Polling:** `tasks.list` gets the last seen version; while nothing changed the server only answers `{ same: true }`. Clients poll every 120 s ± 25 % and slow down after failures.
+- **Start:** the bootstrap call starts while the page loads. The last state is kept in the browser (`localStorage`, same person only, at most 7 days, under 2 MB), so the app shows at once and then refreshes; until then skeleton placeholders in the shape of the page are shown.
+- **Page size:** about 480 KB (140 KB gzipped); the logo is WebP; the app uses the system font, no external web fonts.
+- `?perf=1` on the app URL shows duration and sheet reads per call.
 
-## Einrichtung
+## Setup
 
-Voraussetzung: Google-Workspace-Konto (die Anmeldung per Google SSO liefert die E-Mail nur für Konten derselben Workspace-Domain, private Gmail-Konten werden nicht erkannt), Node.js.
-
-Vor dem Upload: `npm test` und `npm run check` (prüft Manifest, `include()`-Ziele, Syntax und Routen) laufen lassen.
+Requirements: a Google Workspace account (Google SSO only returns the e-mail for accounts of the same Workspace domain) and Node.js 20.
 
 ```bash
+npm install
+npm run guard                      # all quality checks, see WORKFLOW.md
 npm install -g @google/clasp
 clasp login
-clasp create --type webapp --title "Taskraum" --rootDir src   # legt .clasp.json an
+cp .clasp.json.example .clasp.json # then put the script id in
 clasp push
 ```
 
-Danach im Apps-Script-Editor (`clasp open`):
+Then in the Apps Script editor (`clasp open`):
 
-1. Funktion **`setup`** ausführen und Berechtigungen bestätigen. Das legt die Datenbank-Tabelle an und speichert die Grundeinstellungen. Die ausführende Person wird Admin.
-2. Optional **`seedDemoData`** ausführen, um ein Beispielteam mit Projekten und Aufgaben zu bekommen.
-3. **Bereitstellen → Neue Bereitstellung → Web-App**
-   - Ausführen als: **Ich**
-   - Zugriff: **Jeder in &lt;deiner Domain&gt;**
+1. Run **`setup`** and confirm the permissions. It creates the database spreadsheet and stores the default settings; the person running it becomes admin.
+2. **Deploy → New deployment → Web app**: execute as **Me**, access **Anyone within your domain**.
 
-Bei einer neuen Version: `clasp push`, dann `setup()` erneut ausführen (ergänzt neue Spalten, vorhandene Daten bleiben) und unter **Bereitstellungen verwalten** eine neue Version veröffentlichen.
+For a new version: `clasp push`, run `setup()` again (adds new columns, data stays) and publish a new version under **Manage deployments**.
 
-Die Web-App-URL ist der Link für alle Kolleg:innen. Google meldet sie automatisch an; beim ersten Besuch werden sie im Personenverzeichnis angelegt.
+### Script properties
 
-### Skripteigenschaften
+*Project settings → Script properties*. `setup()` creates them with default values.
 
-*Projekteinstellungen → Skripteigenschaften*. `setup()` legt alle mit Standardwerten an.
-
-| Eigenschaft | Bedeutung |
+| Property | Meaning |
 |---|---|
-| `SPREADSHEET_ID` | Datenbank-Tabelle (wird von `setup()` gesetzt) |
-| `APP_NAME` | Name in der Oberfläche, Standard `Taskraum` |
-| `ALLOWED_DOMAIN` | Nur diese E-Mail-Domain darf rein (setzt `setup()` auf deine Domain) |
-| `ADMIN_EMAILS` | Kommagetrennte Admin-Adressen |
-| `DEFAULT_COUNTRY` | Land für neue Personen, Standard `DE` |
-| `DEFAULT_HOURS_PER_WEEK` | Wochenstunden für neue Personen, Standard `40` |
-| `ABSENCE_WARN_PERCENT` | Ab wie viel Prozent Abwesenheit ein Team gewarnt wird, Standard `50` |
-| `VERTEX_API_KEY` | **Platzhalter** `PLATZHALTER_VERTEX_AI_API_KEY` – hier später den Vertex-AI-Schlüssel eintragen |
-| `VERTEX_MODEL` | Standard `gemini-2.5-flash` |
-| `VERTEX_PROJECT_ID`, `VERTEX_LOCATION` | Optional: GCP-Projekt und Region für einen regionalen Endpunkt (z. B. `europe-west3`) |
+| `SPREADSHEET_ID` | Database spreadsheet (set by `setup()`) |
+| `APP_NAME` | Name in the interface, default `LidlFlow` |
+| `ALLOWED_DOMAIN` | Only this e-mail domain may sign in (`setup()` sets the domain of the person running it) |
+| `ADMIN_EMAILS` | Comma-separated admin addresses |
+| `DEFAULT_COUNTRY` | Country for new people, default `DE` |
+| `DEFAULT_HOURS_PER_WEEK` | Weekly hours for new people, default `40` |
+| `ABSENCE_WARN_PERCENT` | Team warning threshold in percent, default `50` |
+| `VERTEX_API_KEY` | Placeholder `PLATZHALTER_VERTEX_AI_API_KEY`; put the company's Vertex AI key here to switch AI on |
+| `VERTEX_MODEL` | Default `gemini-2.5-flash` |
+| `VERTEX_PROJECT_ID`, `VERTEX_LOCATION` | Optional: GCP project and region for a regional endpoint (e.g. `europe-west3`) |
+| `ALLOW_DEMO_DATA` | Only in test copies: `true` allows `seedDemoData()`; leave empty in production |
 
-**KI-Funktionen sind vorerst Dummy:** Solange der Platzhalter-Schlüssel steht, liefert „Aufgabe zerlegen“ einen Beispielvorschlag (mit Hinweis in der Oberfläche) und die übrigen smarten Helfer arbeiten regelbasiert. Sobald ein echter Schlüssel in `VERTEX_API_KEY` steht, ist keine Codeänderung nötig.
+While the placeholder key is set, the AI features fall back to rules and "split into sub-tasks" shows a clearly marked example. The key is sent in the `x-goog-api-key` header, never in the URL.
 
-Gespeicherte Ansichten (Filter/Sortierung) liegen im Browser der jeweiligen Person, nicht in der Tabelle.
-
-Ohne `VERTEX_PROJECT_ID` wird der globale Endpunkt im Vertex-AI-Express-Modus genutzt. Der Schlüssel wird im Header `x-goog-api-key` gesendet, nicht in der URL.
-
-## Codeguard
-
-`npm run guard` führt **14 Checks** aus: Lint und Clean Code, Tests mit Coverage, Mutationstest, Apps-Script-Bereitschaft, Rechte pro API-Methode, XSS, Secrets, Englisch, Kontrast, Barrierefreiheit, Daten-Konsistenz, Last, Performance-Budget sowie Lizenzen und Marken. Er endet mit Exit-Code 1, sobald einer fehlschlägt, und läuft auch als GitHub Action. Die Liste mit Zweck und Schwelle zeigt `npm run guard -- --list`. Einzelne Checks laufen mit `npm run guard -- --only lint,tests`. Wie die Checks mit den Arbeitsstufen und den superpowers-Skills zusammenhängen, steht in **[WORKFLOW.md](WORKFLOW.md)**.
-
-### Lastsimulation
-
-`npm run load` simuliert bis zu 10 000 Personen, **ohne die Live-App zu belasten**:
-
-1. **Profil:** Jeder Request-Typ läuft einmal durch den echten Servercode in Node (Apps-Script-Shims). Ein Zähler erfasst, was er kostet: Tabellen-Lesezugriffe und Zeilen, Schreibzugriffe, Cache-Aufrufe, Komprimierung, Lock.
-2. **Latenzmodell** pro Apps-Script-Operation (Annahmen in `dev/load-sim.js`, z. B. Sheet-Lesen 120 ms + 0,004 ms pro Zelle, Cache 15 ms, 250 ms Overhead pro Aufruf).
-3. **Ereignissimulation** über 15 Minuten Spitzenlast: Login-Welle, Polling, Schreiben etwa alle 10 Minuten pro Person (60 % Ändern, 25 % Anlegen, 15 % Kommentar). Dabei gelten die echten Grenzen: höchstens **30 gleichzeitige Ausführungen** (die App läuft als bereitstellendes Konto, alle teilen sich dieses Kontingent), darüber wird sofort abgelehnt. Alle Schreibvorgänge laufen über **ein Script-Lock** (nach 20 s Abbruch).
-4. **Erlang B** (Verlustsystem mit 30 Plätzen) als theoretischer Abgleich.
-5. **Konsistenz:** über 1000 Schreibvorgänge auf dem echten Code, zwischendurch werden Zeilen von Hand vertauscht.
-
-Ergebnis (3 Aufgaben pro Person, vorher → nachher):
-
-| Gleichzeitig aktiv | p95 | abgelehnt | Lock-Wartezeit p95 |
-|---|---|---|---|
-| 250 | 1,4 s → 0,8 s | 0 % → 0 % | 0,8 s → 0,2 s |
-| 500 | 2,3 s → 0,9 s | 0 % → 0 % | 5,2 s → 0,4 s |
-| 1 000 | 18,2 s → 1,1 s | 25 % → 0 % | 20,6 s → 1,7 s |
-| 2 500 | 9,9 s → 15,9 s | 76 % → 74 % | Grenze erreicht |
-| 10 000 | – | 95 % → 92 % | Grenze erreicht |
-
-Behobene Engpässe:
-- **Komprimierter Tabellen-Cache:** Ab etwa 6000 Aufgaben passte die Tabelle nicht mehr in den Cache (2,4 MB JSON). Jeder Poll las dann das ganze Sheet. Jetzt gzip + Base64: 6000 Aufgaben sind etwa 120 KB, 30 000 etwa 580 KB.
-- **Write-through im Lock:** Schreibvorgänge lesen nicht mehr die ganze Tabelle unter dem Lock. Sie nutzen die versionsgeprüfte Cache-Kopie, prüfen vor dem Schreiben eine Zelle (richtige Zeile, auch wenn jemand das Sheet sortiert hat) und legen den neuen Stand direkt wieder in den Cache.
-- **Retry und Polling:** Abgelehnte Aufrufe („zu viele gleichzeitig“) werden mit gestreuter, wachsender Wartezeit wiederholt. Das ist auch für Schreibvorgänge sicher, denn sie liefen nie. Polling alle 120 s ± 25 %, nach Fehlern länger. Clients pollen so nicht mehr im Gleichschritt.
-
-Grenzen der Architektur, mit Zahlen aus der Simulation:
-- **Etwa 1000 gleichzeitig aktive Personen** schafft die App gut. Darüber begrenzen die 30 parallelen Ausführungen des bereitstellenden Kontos.
-- **Ausführung als jeweilige Person** (`executeAs: USER_ACCESSING`) hebt diese Grenze auf: 10 000 Personen ergeben dann 0 % abgelehnt und p95 1,6 s. Dafür braucht jede Person Zugriff auf die Tabelle, das Rechtemodell ändert sich.
-- **Das globale Schreib-Lock** schafft bei 30 000 Aufgaben nur etwa 0,6 Schreibvorgänge/s. Für 10 000 aktive Personen bräuchte es eine Aufteilung der Aufgaben (z. B. je Team eine Tabelle) oder eine echte Datenbank (Cloud SQL / Firestore).
-
-## Lizenzen und Marken
-
-- **Code:** eigener Code, intern für das Unternehmen. Es wird keine Fremdbibliothek ausgeliefert. Auf Apps Script landet nur `src/`.
-- **Schrift:** Inter (Rasmus Andersson), über Google Fonts geladen, SIL Open Font License 1.1.
-- **Logo und Farben:** LidlFlow-Logo, Lidl-Blau und Lidl-Gelb sind für den internen Einsatz im Unternehmen gedacht. Für eine Nutzung außerhalb braucht es die Freigabe der Markeninhaberin oder einen neutralen Namen.
-- **Externe Dienste:** Feiertage von Nager.Date (date.nager.at, frei nutzbar), KI über Google Vertex AI (eigener Schlüssel in den Skripteigenschaften).
-- **Entwicklungswerkzeuge** (`devDependencies`, nicht ausgeliefert): freie Lizenzen, einzige Ausnahme `eslint-plugin-sonarjs` (LGPL-3.0, nur für den Lint).
-- Der Codeguard prüft das bei jedem Lauf (`dev/checks/license.js`): keine Produktnamen anderer Hersteller im Code und in den Docs, nur erlaubte externe Hosts, Lizenzen aller Pakete.
-
-## Entwicklung
+## Development
 
 ```bash
-npm test          # führt den echten Servercode gegen In-Memory-Nachbildungen der Apps-Script-Dienste aus
-npm run preview   # baut dev/preview.html: komplette App mit Demodaten im Browser, ohne Google-Konto
-npm run check     # statische Prüfung für Apps Script
+npm test          # integration suite, unit tests, English check
+npm run guard     # all 14 checks (see WORKFLOW.md); `npm run guard -- --list` shows them
+npm run preview   # builds dev/preview.html: the whole app with demo data in the browser, no Google account
+npm run load      # load simulation (never against the live app)
 npm run push      # clasp push
 ```
 
-`dev/preview.html?user=anna.schmidt@firma.de` zeigt die App aus Sicht einer anderen Person.
+`dev/preview.html?user=anna.schmidt@firma.de` shows the app as another person.
 
-### Aufbau
+### Structure
 
 ```
 src/
-  appsscript.json   Manifest (Web-App, Scopes)
-  Code.js           doGet, api()-Router, Bootstrap
-  Shared.js         Konstanten, Datumslogik, Quick-Add-Parser (Server und Browser)
-  Db.js             Tabellen-Schicht über Google Sheets (Lock, Formel-Schutz)
-  Auth.js           Google SSO, Berechtigungen, Konfiguration
+  appsscript.json   manifest (web app, scopes)
+  Code.js           doGet, api() router, bootstrap
+  Shared.js         constants, date logic, quick-add parser, task filter (server and browser)
+  Db.js             table layer over Google Sheets (lock, versioned cache, formula guard)
+  Auth.js           Google SSO, permissions, configuration
   Users.js, Teams.js, Tasks.js
-  Calendar.js       Termine, Abwesenheiten, Kapazitätsberechnung
-  Availability.js   Wer ist wann weg, Team-Warnung ab Schwelle
-  Holidays.js       Internationale Feiertage mit Cache und Fallbacks
-  Ai.js             Smarte Funktionen, Vertex-AI-Anbindung
-  Setup.js          setup(), seedDemoData()
-  Index.html        Seitengerüst
-  Styles.html       Design (hell/dunkel, mobil)
-  App.html          Zustand, Routing, Seitenleiste
-  Components.html   Menüs, Eigenschafts-Editoren, Dialoge, Befehlspalette
-  Views.html        Liste, Board, Tabelle, Kalender, Verfügbarkeit, Teams, Projekte, Einstellungen
-  Peek.html         Aufgaben-Detailansicht
-dev/                Tests und lokale Vorschau (wird nicht hochgeladen)
+  Calendar.js       events, absences, capacity
+  Availability.js   who is away when, team warning, privacy of absence types
+  Holidays.js       international holidays with cache and fallbacks
+  Ai.js             smart functions, Vertex AI
+  Setup.js          setup(), seedDemoData() (test copies only)
+  Index.html        page skeleton
+  Styles.html       design tokens and styles (light/dark, mobile)
+  App.html          state, routing, sidebar, server calls
+  Components.html   menus, property editors, dialogs, people manager, command palette
+  Views.html        list, board, table, calendar, availability, teams, projects, settings
+  Peek.html         task detail panel
+  I18n.html         English translation of the interface
+dev/                tests, local preview, quality checks (not uploaded)
+test/               unit tests (node:test)
 ```
 
-### Berechtigungen
+### Permissions
 
-- Alle sehen Teams, Projekte und das Personenverzeichnis.
-- Aufgaben sieht, wer sie erstellt hat, wem sie zugewiesen sind, wer in einem zugewiesenen Team ist oder wer zum Projekt bzw. dessen Team gehört. Admins sehen alles.
-- Teams bearbeiten: Lead, erstellende Person, Admins. Projekte anlegen: Mitglieder des Teams.
-- Notizen bei Abwesenheiten sehen nur die Person selbst und Admins.
+- Everyone sees teams, projects and the people directory.
+- A task is visible to its creator, its assignees, members of an assigned team and members of its project (or the project's team). Admins see everything.
+- Teams: lead, creator and admins edit. Projects: team members create; moving a project into another team needs membership there.
+- Events: the creator and admins change and delete.
+- Every API route requires a signed-in person of the allowed domain.
 
-### Grenzen
+### Limits
 
-Google Sheets als Datenbank passt für Teams bis in den niedrigen vierstelligen Bereich an Aufgaben. Schreibzugriffe laufen über eine Sperre (`LockService`), damit gleichzeitige Änderungen sich nicht überschreiben. Für deutlich größere Datenmengen lässt sich `Db.js` gegen Firestore oder Cloud SQL tauschen, ohne die übrigen Dateien zu ändern.
+With Google Sheets as the database and the web app running as the deploying account, about 1,000 people can work at the same time (all share 30 parallel executions; see the load simulation in WORKFLOW.md). Larger setups need the web app to run as the visiting person, tasks split per team, or `Db.js` swapped for Firestore or Cloud SQL without changing the other files.
+
+## Licences and brands
+
+- **Code:** proprietary, for internal use in the company. No third-party library is shipped; only `src/` is uploaded to Apps Script. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **Font:** the operating system's font; no web fonts are loaded from external hosts.
+- **Logo and colours:** the LidlFlow logo and the Lidl colours are for internal use in the company.
+- **External services:** holidays from Nager.Date (date.nager.at; only country and year are sent), AI via Google Vertex AI (company key in the script properties; task data is sent only when a key is set).
+- **Development tools** (`devDependencies`, not shipped): permissive licences; the one exception is `eslint-plugin-sonarjs` (LGPL-3.0, lint only).
 
 ## Design
 
-Die Designsprache (Farben, Typografie, Abstände, Komponenten) steht in [DESIGN.md](DESIGN.md) und ist als CSS-Variablen in `src/Styles.html` umgesetzt.
+Colours, typography, spacing and components are described in [DESIGN.md](DESIGN.md) and implemented as CSS variables in `src/Styles.html`.

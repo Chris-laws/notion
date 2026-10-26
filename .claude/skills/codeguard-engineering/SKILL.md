@@ -18,7 +18,7 @@ Requirement ─▶ Plan ─▶ TDD ─▶ Implementation ─▶ Verification ─
 | # | Stage | Skill (invoke it) | Guard checks | Exit criterion |
 |---|---|---|---|---|
 | 1 | Requirement | `superpowers:brainstorming` | – | Goal, limits and success criterion fixed in one sentence each; open questions answered. |
-| 2 | Plan | `superpowers:writing-plans` (+ `superpowers:using-git-worktrees` for isolation) | – | Plan in `docs/superpowers/plans/` with files, interfaces, tests per task, "Review Focus". |
+| 2 | Plan | `superpowers:writing-plans` (+ `superpowers:using-git-worktrees` for isolation) | – | Plan in `docs/plans/` with files, interfaces, tests per task, "Review Focus". |
 | 3 | TDD | `superpowers:test-driven-development` | `tests`, `mutation` | Every new behaviour had a **red** test first; all green; coverage and mutation score at or above their ratchet. |
 | 4 | Implementation | `superpowers:executing-plans` or `superpowers:subagent-driven-development` (parallel: `superpowers:dispatching-parallel-agents`) | `lint` | Smallest code for the test; 0 lint errors; warnings not above the ratchet. |
 | 5 | Verification | `superpowers:verification-before-completion` | all runtime checks | Full guard green; output quoted in the report. |
@@ -67,4 +67,4 @@ One command (`npm run guard` or the project's equivalent) runs a **registry of c
 4. Add the checks above in the order: tests → lint → security → i18n/a11y/contrast/xss → consistency/load/budget → mutation → license.
 5. Write `WORKFLOW.md` in the repo: the stage table above with the project's check ids.
 
-Reference implementation: LidlFlow (Google Apps Script), `C:\Users\IT-Admin\Neuer Ordner\notion` — `dev/checks/`, `dev/guard.js`, `WORKFLOW.md`, `test/`.
+Reference implementation: this repository — `dev/checks/`, `dev/guard.js`, `WORKFLOW.md`, `test/`.

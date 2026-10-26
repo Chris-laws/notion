@@ -45,7 +45,7 @@ function scaledApp(users, tasks) {
   for (let i = 0; i < users; i++) put('Users', { email: 'u' + i + '@firma.de', name: 'User ' + i, country: 'DE', hoursPerWeek: 40, workDays: '1,2,3,4,5', role: 'member', active: true, createdAt: '2026-01-01' });
   for (let i = 0; i < tasks; i++) {
     put('Tasks', { id: 'tk_load_' + i, title: 'Aufgabe ' + i, status: i % 5 ? 'todo' : 'done', priority: '', teams: [teams[i % teams.length]],
-      assignees: ['u' + (i % Math.max(1, users)) + '@firma.de'], tags: [], dueDate: '2026-11-' + String(1 + (i % 28)).padStart(2, '0'), createdBy: 'chris@firma.de', createdAt: '2026-01-01', sort: i });
+      assignees: ['u' + (i % Math.max(1, users)) + '@firma.de'], tags: [], dueDate: '2026-11-' + String(1 + (i % 28)).padStart(2, '0'), createdBy: 'demo.user@firma.de', createdAt: '2026-01-01', sort: i });
   }
   // the sheet changed outside Db: drop every cached copy
   ctx.CacheService.getScriptCache().removeAll(Object.keys(schema).map(t => 'ver_' + t));
@@ -246,7 +246,7 @@ function consistencyCheck(n) {
   let created = 0;
   for (let i = 0; i < n; i++) {
     const t = tasks[Math.floor(r() * tasks.length)];
-    if (r() < 0.2) { app.call('tasks.save', { title: 'c' + i, assignees: ['chris@firma.de'] }); created++; continue; }
+    if (r() < 0.2) { app.call('tasks.save', { title: 'c' + i, assignees: ['demo.user@firma.de'] }); created++; continue; }
     const field = r() < 0.5 ? 'title' : 'priority';
     const value = field === 'title' ? 'v' + i : ['low', 'medium', 'high', 'urgent'][i % 4];
     app.call('tasks.save', { id: t.id, [field]: value });
@@ -280,16 +280,16 @@ function main() {
   const kinds = profile(Math.min(sizeUsers, 10000), Math.min(sizeUsers * tasksPerUser, 30000));
   const nTasks = Math.min(sizeUsers * tasksPerUser, 30000);
   const tableJson = JSON.stringify(Array.from({ length: nTasks }, (_, i) => ({ obj: { id: 'tk_load_' + i, title: 'Aufgabe ' + i, status: 'todo', priority: '', projectId: '', teams: ['tm_x'],
-    assignees: ['u' + i + '@firma.de'], tags: [], startDate: '', dueDate: '2026-11-01', estimate: 0, parentId: '', recurrence: '', sort: i, createdBy: 'chris@firma.de',
+    assignees: ['u' + i + '@firma.de'], tags: [], startDate: '', dueDate: '2026-11-01', estimate: 0, parentId: '', recurrence: '', sort: i, createdBy: 'demo.user@firma.de',
     createdAt: '2026-01-01', updatedAt: '', completedAt: '', planDate: '', planStart: 0, progress: 0, spent: 0, timerStart: '' }, row: i + 2 })));
   const tasksBytes = tableJson.length;
   const tasksZipBytes = Math.ceil(require('zlib').gzipSync(tableJson).length * 4 / 3);
   const prof = { kinds, tasksBytes, tasksZipBytes, shared: require('./load').load({ quiet: true }).__exports.Shared };
-  console.log('Profil (echter Servercode, ' + sizeUsers + ' Personen, ' + Math.min(sizeUsers * tasksPerUser, 30000) + ' Aufgaben):');
-  Object.keys(kinds).forEach(k => console.log('  ' + k.padEnd(10) + ' warm ' + String(Math.round(kinds[k].warm)).padStart(6) + ' ms  kalt ' +
-    String(Math.round(kinds[k].cold)).padStart(6) + ' ms  Antwort ' + Math.round(kinds[k].bytes / 1024) + ' KB'));
-  console.log('  Aufgaben-Tabelle im Cache: ' + Math.round(tasksBytes / 1024) + ' KB als JSON (passt ' + (tasksBytes < LIMITS.cacheTableMax ? 'ja' : 'NEIN') + '), komprimiert ' +
-    Math.round(tasksZipBytes / 1024) + ' KB (passt ' + (tasksZipBytes < LIMITS.cacheTableMax ? 'ja' : 'NEIN') + ')');
+  console.log('Profile (real server code, ' + sizeUsers + ' people, ' + Math.min(sizeUsers * tasksPerUser, 30000) + ' tasks):');
+  Object.keys(kinds).forEach(k => console.log('  ' + k.padEnd(10) + ' warm ' + String(Math.round(kinds[k].warm)).padStart(6) + ' ms  cold ' +
+    String(Math.round(kinds[k].cold)).padStart(6) + ' ms  response ' + Math.round(kinds[k].bytes / 1024) + ' KB'));
+  console.log('  Task table in the cache: ' + Math.round(tasksBytes / 1024) + ' KB as JSON (fits ' + (tasksBytes < LIMITS.cacheTableMax ? 'yes' : 'NO') + '), compressed ' +
+    Math.round(tasksZipBytes / 1024) + ' KB (fits ' + (tasksZipBytes < LIMITS.cacheTableMax ? 'yes' : 'NO') + ')');
 
   const before = { pollSec: 90, pollJitter: 0, writeEveryMin: 10, retry: 'reads', jitter: false, cacheInTx: false, zip: false };
   const after = { pollSec: 120, pollJitter: 0.25, writeEveryMin: 10, retry: 'all', jitter: true, cacheInTx: true, zip: true, writeThrough: true };
@@ -305,8 +305,8 @@ function main() {
     // offered load uses the service time of each variant (median of the successful calls)
     rows.push({ n, b, a, eb: erlangB(b.rps, (b.p50 || 400) / 1000, LIMITS.concurrent), ea: erlangB(a.rps, (a.p50 || 400) / 1000, LIMITS.concurrent) });
   });
-  console.log('\nSimulation 15 min Spitzenlast (3 Aufgaben pro Person), je Zelle vorher → nachher:');
-  const cols = [['Nutzer', 7], ['Req/s', 15], ['p50 ms', 15], ['p95 ms', 16], ['p99 ms', 16], ['abgelehnt %', 14], ['Lock-Timeout %', 15], ['Lock-Wartez. p95', 17], ['Cache-Treffer %', 16], ['Erlang-B abgel. %', 18]];
+  console.log('\nSimulation, 15 min peak load (3 tasks per person), each cell before → after:');
+  const cols = [['People', 7], ['Req/s', 15], ['p50 ms', 15], ['p95 ms', 16], ['p99 ms', 16], ['refused %', 14], ['lock timeout %', 15], ['lock wait p95', 17], ['cache hits %', 16], ['Erlang B refused %', 18]];
   console.log(cols.map(c => c[0].padStart(c[1])).join(' '));
   const f = (x, y, w) => (x + ' → ' + y).padStart(w);
   rows.forEach(({ n, b, a, eb, ea }) => console.log([String(n).padStart(7), f(b.rps, a.rps, 15), f(b.p50, a.p50, 15), f(b.p95, a.p95, 16), f(b.p99, a.p99, 16),
@@ -317,26 +317,26 @@ function main() {
     const nt = Math.min(big.n * tasksPerUser, 30000);
     const profBig = { kinds: profile(Math.min(big.n, 10000), nt), tasksBytes, tasksZipBytes, shared: prof.shared };
     const w = simulate(profBig, Object.assign({ users: big.n, minutes: 15, concurrent: 1000 }, after));
-    console.log('\nWas wäre wenn (' + big.n + ' Nutzer, Ausführung als jeweilige Person, ~1000 parallel): p50 ' + w.p50 + ' ms, p95 ' + w.p95 +
-      ' ms, abgelehnt ' + w.refusedPct + ' %, Lock-Timeout ' + w.lockTimeoutPct + ' %, Lock-Wartezeit p95 ' + w.lockWaitP95 + ' ms');
-    console.log('Schreib-Kapazität des globalen Locks bei ' + nt + ' Aufgaben: ca. ' + round(1000 / profBig.kinds.update.lockWarm) + ' Schreibvorgänge/s');
+    console.log('\nWhat if (' + big.n + ' people, executed as the visiting person, ~1000 parallel): p50 ' + w.p50 + ' ms, p95 ' + w.p95 +
+      ' ms, refused ' + w.refusedPct + ' %, Lock-Timeout ' + w.lockTimeoutPct + ' %, lock wait p95 ' + w.lockWaitP95 + ' ms');
+    console.log('Write capacity of the global lock at ' + nt + ' tasks: about ' + round(1000 / profBig.kinds.update.lockWarm) + ' writes/s');
   }
   const c = consistencyCheck(quick ? 300 : 1500);
-  console.log('\nKonsistenz (echter Code, ' + c.writes + ' Schreibvorgänge, Zeilen zwischendurch von Hand vertauscht): verlorene Updates ' +
-    c.lostUpdates + ', doppelte IDs ' + c.duplicateIds + ', ' + c.created + ' neu angelegt');
-  console.log('Dauer ' + Math.round((Date.now() - t0) / 1000) + ' s');
+  console.log('\nConsistency (real code, ' + c.writes + ' writes, rows shuffled by hand in between): lost updates ' +
+    c.lostUpdates + ', duplicate ids ' + c.duplicateIds + ', ' + c.created + ' created');
+  console.log('Duration ' + Math.round((Date.now() - t0) / 1000) + ' s');
   return { rows, consistency: c, prof };
 }
 
 if (require.main === module && process.argv.includes('--consistency')) {
   const c = consistencyCheck(1500);
-  console.log('Daten-Konsistenz: ' + c.writes + ' Schreibvorgänge (Zeilen zwischendurch von Hand vertauscht), verlorene Updates ' + c.lostUpdates + ', doppelte IDs ' + c.duplicateIds);
+  console.log('Data consistency: ' + c.writes + ' writes (rows shuffled by hand in between), lost updates ' + c.lostUpdates + ', duplicate ids ' + c.duplicateIds);
   process.exit(c.lostUpdates || c.duplicateIds ? 1 : 0);
 } else if (require.main === module) {
   const out = main();
   const worst = out.rows[0];
   // guard budget for the short profile: small team load must stay healthy
   const fail = out.consistency.lostUpdates || out.consistency.duplicateIds || worst.a.refusedPct > 1 || worst.a.p95 > 3000;
-  if (process.argv.includes('--quick') && fail) { console.error('Lastbudget verletzt'); process.exit(1); }
+  if (process.argv.includes('--quick') && fail) { console.error('load budget violated'); process.exit(1); }
 }
 module.exports = { simulate, profile, erlangB, consistencyCheck, COST, LIMITS };

@@ -4,10 +4,10 @@ const assert = require('node:assert/strict');
 const vm = require('vm');
 const { freshApp, ME, ANNA, LEA } = require('./helpers');
 
-const FOREIGN = 'fremd@gmail.com';
+const FOREIGN = 'fremd@example.com';
 const OUTSIDER = 'extern@firma.de';
 
-/** Chris (admin) owns a team with Anna, a project, a task, an event; Anna has an absence. */
+/** The admin owns a team with Anna, a project, a task, an event; Anna has an absence. */
 function world() {
   const app = freshApp();
   [ME, ANNA, LEA, OUTSIDER].forEach(e => app.as(e).call('bootstrap'));

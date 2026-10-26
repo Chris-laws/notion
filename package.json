@@ -1,8 +1,12 @@
 {
-  "name": "taskraum",
+  "name": "lidlflow",
   "version": "1.0.0",
   "private": true,
-  "description": "Notion-artiges Team-Task-Management mit smartem Kalender als Google Apps Script Web-App",
+  "description": "Task management and team calendar as a Google Apps Script web app",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node dev/test.js && node --test test/ && node dev/i18n-audit.js",
     "check": "node dev/check-gas.js",

@@ -10,7 +10,7 @@ const CHECKS = require('./checks');
 
 const args = process.argv.slice(2);
 if (args.includes('--list')) {
-  CHECKS.forEach(c => console.log(c.id.padEnd(12) + c.name + '\n' + ' '.repeat(12) + 'Zweck: ' + c.purpose + '\n' + ' '.repeat(12) + 'Schwelle: ' + c.limit + '  · Stufe: ' + c.stage));
+  CHECKS.forEach(c => console.log(c.id.padEnd(12) + c.name + '\n' + ' '.repeat(12) + 'Purpose: ' + c.purpose + '\n' + ' '.repeat(12) + 'Threshold: ' + c.limit + '  · Stage: ' + c.stage));
   process.exit(0);
 }
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : null;
@@ -26,6 +26,6 @@ const results = run.map(c => {
 console.log('\nCodeguard');
 results.forEach(r => console.log('  ' + (r.ok ? '✓' : '✗') + ' ' + r.c.name.padEnd(46) + r.s.padStart(5) + ' s   ' + r.c.limit));
 const failed = results.filter(r => !r.ok);
-console.log(failed.length ? '\n' + failed.length + ' von ' + results.length + ' Checks fehlgeschlagen: ' + failed.map(r => r.c.id).join(', ')
-  : '\nAlle ' + results.length + ' Checks grün');
+console.log(failed.length ? '\n' + failed.length + ' of ' + results.length + ' checks failed: ' + failed.map(r => r.c.id).join(', ')
+  : '\nAll ' + results.length + ' checks green');
 process.exit(failed.length ? 1 : 0);

@@ -92,6 +92,7 @@ const Config = {
     VERTEX_MODEL: 'gemini-2.5-flash',
     VERTEX_PROJECT_ID: '',
     VERTEX_LOCATION: 'global',
+    ALLOW_DEMO_DATA: '',
   },
 
   props_: null,
@@ -101,8 +102,7 @@ const Config = {
 
   get(name) {
     if (!Config.props_) Config.props_ = PropertiesService.getScriptProperties().getProperties();
-    let v = Config.props_[name];
-    if (name === 'APP_NAME' && v === 'Taskraum') v = 'LidlFlow'; // the old default name, renamed
+    const v = Config.props_[name];
     return v === null || v === undefined ? (Config.DEFAULTS[name] || '') : v;
   },
 

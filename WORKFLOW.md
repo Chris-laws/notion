@@ -1,57 +1,78 @@
-# Entwicklungs-Workflow
+# Development workflow
 
-Jede Änderung an LidlFlow läuft durch dieselbe Pipeline. Jede Stufe hat einen **superpowers-Skill**, der vorgibt, *wie* gearbeitet wird, und **Codeguard-Checks**, die automatisch prüfen, *ob* das Ergebnis stimmt. Eine Stufe ist erst fertig, wenn ihre Checks grün sind. `npm run guard` führt alle Checks aus und endet bei jedem Verstoß mit Exit-Code 1. `npm run guard -- --list` zeigt sie mit Zweck und Schwelle. Dieselbe Prüfung läuft als GitHub Action bei jedem Push und Pull Request.
+Every change to LidlFlow runs through the same pipeline. Each stage has a **superpowers skill** that sets *how* to work and **codeguard checks** that prove automatically *that* the result is right. A stage is only done when its checks are green. `npm run guard` runs all checks and exits with code 1 on any violation; `npm run guard -- --list` shows them with purpose and threshold; `npm run guard -- --only lint,tests` runs a subset. The same command runs as a GitHub Action on every push and pull request.
 
-Alle genannten Skills stammen aus dem Plugin **superpowers** und standen in der Entwicklungssitzung zur Verfügung.
-
-Der ganze Ablauf ist zusätzlich als Claude-Code-Skill **`codeguard-engineering`** gespeichert (`.claude/skills/codeguard-engineering/SKILL.md`). Claude lädt ihn bei jeder Änderung und führt durch die Stufen, die passenden superpowers-Skills und den Guard.
+The skills come from the Claude Code plugin **superpowers**. The whole pipeline is also stored as the Claude Code skill **`codeguard-engineering`** (`.claude/skills/codeguard-engineering/SKILL.md`), which guides through the stages, the matching skills and the guard.
 
 ```
-Anforderung ─▶ Plan ─▶ TDD ─▶ Implementierung ─▶ Verifikation ─▶ Code-Review ─▶ Branch-Abschluss/Deploy
+Requirement ─▶ Plan ─▶ TDD ─▶ Implementation ─▶ Verification ─▶ Code review ─▶ Finish/Deploy
                         ▲                              │
-                        └──── Debugging bei Fehlern ◀──┘
+                        └──── Debugging on failure ◀───┘
 ```
 
-| # | Stufe | superpowers-Skill | Codeguard-Checks (`--only …`) | Fertig, wenn |
+| # | Stage | superpowers skill | Guard checks (`--only …`) | Done when |
 |---|---|---|---|---|
-| 1 | Anforderung klären | `brainstorming` | – | Ziel, Grenzen und Erfolgskriterium stehen in einem Satz fest; offene Fragen sind beantwortet. |
-| 2 | Plan | `writing-plans` (bei Bedarf `using-git-worktrees`) | – | Plan unter `docs/superpowers/plans/` mit Dateien, Schnittstellen, Tests je Aufgabe und „Review Focus“. |
-| 3 | TDD | `test-driven-development` | `tests`, `mutation` | Für jedes neue Verhalten gab es zuerst einen **roten** Test. Danach ist alles grün, Coverage und Mutation-Score halten ihre Schwellen. |
-| 4 | Implementierung | `executing-plans` oder `subagent-driven-development` (parallel: `dispatching-parallel-agents`) | `lint` | Kleinste Lösung für den Test, keine neuen Lint-Fehler, Warnungen nicht über der Ratsche. |
-| 5 | Verifikation | `verification-before-completion` | `gas`, `security`, `xss`, `secrets`, `i18n`, `contrast`, `a11y`, `consistency`, `load`, `budget` | `npm run guard` ganz grün. Erst dann gilt etwas als „fertig“. Belege (Ausgabe) stehen im Bericht. |
-| 6 | Code-Review | `requesting-code-review`, Antworten mit `receiving-code-review` | alle | Befunde geprüft (nicht blind übernommen). Jeder echte Befund bekommt einen Test, dann zurück zu Stufe 3. |
-| 7 | Debugging bei Fehlern | `systematic-debugging` | der fehlgeschlagene Check, dann `tests` | Ursache gefunden und belegt, ein Test reproduziert den Fehler und ist nach dem Fix grün. |
-| 8 | Branch-Abschluss / Deploy | `finishing-a-development-branch` | `license` + kompletter Guard | Guard grün, Commit mit Begründung, Push. **Deploy nur, wenn sich Laufzeitcode (`src/`) geändert hat**: `clasp push` + `clasp update-deployment`. |
+| 1 | Requirement | `brainstorming` | – | Goal, limits and success criterion are fixed in one sentence each; open questions are answered. |
+| 2 | Plan | `writing-plans` (if needed `using-git-worktrees`) | – | A plan in `docs/plans/` with files, interfaces, tests per task and a "review focus". |
+| 3 | TDD | `test-driven-development` | `tests`, `mutation` | Every new behaviour had a **red** test first; afterwards everything is green, coverage and mutation score hold their thresholds. |
+| 4 | Implementation | `executing-plans` or `subagent-driven-development` (parallel: `dispatching-parallel-agents`) | `lint` | Smallest solution for the test, no new lint errors, warnings not above the ratchet. |
+| 5 | Verification | `verification-before-completion` | `gas`, `security`, `xss`, `secrets`, `i18n`, `contrast`, `a11y`, `consistency`, `load`, `budget` | `npm run guard` fully green; only then is something "done". The output is quoted as evidence. |
+| 6 | Code review | `requesting-code-review`, answers with `receiving-code-review` | all | Findings checked on their merits; every real finding gets a test, then back to stage 3. |
+| 7 | Debugging | `systematic-debugging` | the failed check, then `tests` | Root cause found and proven; a test reproduces the bug and is green after the fix. |
+| 8 | Finish / deploy | `finishing-a-development-branch` | `license`, `migration` + full guard | Guard green, commit with reasons, push. **Deploy only when runtime code (`src/`) changed**: `clasp push` + `clasp update-deployment`. |
 
-## Die Checks
+## The checks
 
-| id | Was | Schwelle |
+| id | What | Threshold |
 |---|---|---|
-| `lint` | ESLint + Sonar-Regeln: Bugs, unsicherer Code, Funktionslänge, Komplexität, Duplikate, ungenutzter Code | 0 Fehler, Warnungen ≤ Ratsche (heute 78) |
-| `tests` | Unit-Tests (`test/`), Mock-Tests externer Dienste (Nager.Date, Vertex/Gemini: Fehler, Timeout, kaputtes JSON), Integrationssuite (`dev/test.js`), Coverage über `src/` | alle grün, Zeilen/Funktionen ≥ 90 %, Zweige ≥ 75 % |
-| `mutation` | Mutationstest der Domänenlogik (`Shared.js`): veränderte Operatoren müssen von den Tests erkannt werden | Score ≥ 85 % |
-| `gas` | Apps-Script-Bereitschaft: Syntax, Routen, Dateien wie nach `clasp push` | 0 Fehler |
-| `security` | Rechte pro API-Methode: jede Route aus `ROUTES` hat eine Regel. Fremde Domain wird abgewiesen, Außenstehende ändern keine fremden Daten, private Felder bleiben privat | 0 offene Routen |
-| `xss` | 5 Angriffsmuster in 7 Datenarten (Aufgabe, Projekt, Team, Kommentar, Termin, Tag, Name), Rundgang durch alle Ansichten | 0 eingeschleuste Elemente/Attribute |
-| `secrets` | Schlüssel, Tokens, private Keys im Repository | 0 Funde |
-| `i18n` | Jede Seite, jeder Dialog, jede Server-Fehlermeldung auf Englisch | 0 deutsche Reste |
-| `contrast` | WCAG-Kontrast der semantischen Farb-Tokens in Hell und Dunkel | Text ≥ 4,5:1, Sekundärtext/Symbole ≥ 3:1 |
-| `a11y` | Alt-Texte, zugängliche Namen, Beschriftungen, Dialoge (`role`, `aria-modal`), kein positiver `tabindex`, eindeutige IDs, `prefers-reduced-motion`, Skeleton je Seite | 0 Verstöße |
-| `consistency` | 1500 Schreibvorgänge auf dem echten Code, Zeilen zwischendurch von Hand vertauscht | 0 verlorene Updates, 0 doppelte IDs |
-| `load` | Lastsimulation (Kurzprofil) mit den echten Grenzen: 30 parallele Ausführungen, globales Lock | 200 Aktive: ≤ 1 % abgelehnt, p95 ≤ 3 s |
-| `budget` | Seitengröße, Start-Antwort, Dauer je Request-Typ bei 1000 Personen | Seite ≤ 520 KB (gzip ≤ 150), Request-Budgets |
-| `license` | Lizenzen aller Pakete, nur erlaubte externe Hosts, keine Produktnamen anderer Hersteller, Lizenzhinweise in der README | 0 Funde |
+| `lint` | ESLint + sonarjs rules: bugs, unsafe code, function length, complexity, duplicates, unused code | 0 errors, warnings ≤ ratchet |
+| `tests` | Unit tests (`test/`), test doubles for external services (Nager.Date, Vertex/Gemini: error, timeout, broken JSON, empty answer), integration suite (`dev/test.js`), coverage of `src/` | all green, lines/functions ≥ 90 %, branches ≥ 75 % |
+| `mutation` | Mutation test of the domain logic (`Shared.js`): changed operators must be caught by the tests | score ≥ 85 % |
+| `gas` | Apps Script readiness: syntax, routes, files as after `clasp push` | 0 errors |
+| `security` | Rights per API method: every route in `ROUTES` has a rule; a foreign domain is refused; outsiders change no one else's data; private fields stay private | 0 open routes |
+| `xss` | 5 attack strings in 7 kinds of data (task, project, team, comment, event, tag, name), tour through all views | 0 injected elements/attributes |
+| `secrets` | Keys, tokens, private keys in the repository | 0 hits |
+| `i18n` | Every page, dialog and server message in English | 0 German leftovers |
+| `contrast` | WCAG contrast of the semantic colour tokens, light and dark | text ≥ 4.5:1, secondary text/icons ≥ 3:1 |
+| `a11y` | Alt texts, accessible names, labels, dialogs (`role`, `aria-modal`), no positive `tabindex`, unique ids, `prefers-reduced-motion`, a skeleton per page | 0 violations |
+| `consistency` | 1,500 writes on the real code while rows are shuffled by hand in between | 0 lost updates, 0 duplicate ids |
+| `load` | Load simulation (short profile) with the real limits: 30 parallel executions, global lock | 200 active: ≤ 1 % refused, p95 ≤ 3 s |
+| `budget` | Page size, first response, duration per request type at 1,000 people | page ≤ 520 KB (gzip ≤ 150), request budgets |
+| `license` | Licences of all packages, only allowed external hosts, licence section in the README | 0 hits |
+| `migration` | Ready to hand over: no personal or environment-specific data (addresses, ids, URLs, local paths), documentation in English, required files present | 0 hits |
 
-**Einen Check ergänzen:** ein Skript, das bei Verstoß mit Exit-Code 1 endet, plus ein Eintrag in `dev/checks/index.js` (`id`, `name`, `purpose`, `limit`, `stage`, `cmd`). Mehr braucht es nicht. Der Guard, `--list` und die GitHub Action übernehmen ihn automatisch.
+**Adding a check:** a script that exits with code 1 on a violation plus one entry in `dev/checks/index.js` (`id`, `name`, `purpose`, `limit`, `stage`, `cmd`). The guard, `--list` and the GitHub Action pick it up automatically. Checks that need local, non-versioned settings read them from git-ignored files under `dev/local/`.
 
-**Ratschen:** Lint-Warnungen, Coverage, Mutation-Score und Performance-Budget stehen auf dem heutigen Stand. Wird etwas besser, wird die Schwelle nachgezogen, nie gelockert.
+**Ratchets:** lint warnings, coverage, mutation score and performance budget sit at today's values. When things improve the threshold is tightened, never loosened.
 
-## Was der Guard bewusst nicht automatisch prüft
+## Load simulation
 
-- **Echtes Lastverhalten bei Google:** Die Simulation arbeitet mit einem Latenzmodell. Echte Zeiten liefert `?perf=1` in der Live-App. Lasttests gegen die Live-App sind gesperrt (Quoten, Kontosperre).
-- **Optik und Verständlichkeit:** ob etwas schön, ruhig und verständlich wirkt. Das bleibt Sichtprüfung mit Screenshots in Hell, Dunkel und auf dem Handy.
-- **Echte Screenreader und Tastaturbedienung im Browser:** Der A11y-Check prüft das Markup. Ein Durchgang mit Screenreader bleibt manuell.
-- **Kontrast von Farben außerhalb der Tokens:** z. B. Avatar- und Projektfarben, die Nutzer wählen.
-- **Google-SSO, Freigaben und Domain-Einstellungen:** nur in der echten Umgebung prüfbar.
-- **Rechtliche Bewertung:** Markennutzung und Lizenzen werden technisch erkannt, rechtlich bewertet werden sie nicht.
-- **Inhalt der KI-Antworten:** Der Guard prüft Format, Fallback und Links, nicht, ob Gemini inhaltlich Sinnvolles sagt.
+`npm run load` simulates up to 10,000 people **without touching the live app** (platform quotas could lock the account):
+
+1. **Profile:** every request type runs once through the real server code in Node (Apps Script shims). A meter counts what it costs: sheet reads and rows, writes, cache calls, compression, lock.
+2. **Latency model** per Apps Script operation (assumptions in `dev/load-sim.js`, e.g. sheet read 120 ms + 0.004 ms per cell, cache 15 ms, 250 ms overhead per call).
+3. **Event simulation** of 15 minutes peak load: login wave, polling, a write about every 10 minutes per person (60 % change, 25 % create, 15 % comment), with the real limits: at most **30 parallel executions** (the app runs as the deploying account, everyone shares that quota; above it a call is refused at once) and **one script lock** for all writes (aborts after 20 s).
+4. **Erlang B** (loss system with 30 servers) as a theoretical cross-check.
+5. **Consistency:** 1,500 writes on the real code while rows are shuffled by hand.
+
+Result (3 tasks per person, before → after the cache and retry work):
+
+| Active at the same time | p95 | refused | lock wait p95 |
+|---|---|---|---|
+| 250 | 1.4 s → 0.8 s | 0 % → 0 % | 0.8 s → 0.2 s |
+| 500 | 2.3 s → 0.9 s | 0 % → 0 % | 5.2 s → 0.4 s |
+| 1,000 | 18.2 s → 1.1 s | 25 % → 0 % | 20.6 s → 1.7 s |
+| 2,500 | 9.9 s → 15.9 s | 76 % → 74 % | limit reached |
+| 10,000 | – | 95 % → 92 % | limit reached |
+
+Limits of the architecture: about **1,000 people at the same time** work well. Running the web app as the visiting person (`executeAs: USER_ACCESSING`) lifts the 30-execution limit (10,000 people: 0 % refused, p95 1.6 s) but every person then needs access to the spreadsheet. The global write lock manages about 0.6 writes/s at 30,000 tasks; beyond that tasks need to be split per team or `Db.js` moved to a real database.
+
+## What the guard deliberately does not check
+
+- **Real latency at Google:** the simulation uses a latency model; real times come from `?perf=1` in the live app.
+- **Look and clarity:** whether something looks calm and is understandable stays a visual review in light, dark and on a phone (see [TESTPLAN.md](TESTPLAN.md)).
+- **Real screen readers and keyboard use in the browser:** the a11y check covers the markup; a screen-reader pass stays manual.
+- **Contrast of user-chosen colours** (avatars, projects).
+- **Google SSO, sharing and domain settings:** only testable in the real environment.
+- **Legal assessment** of brands and licences.
+- **Content of AI answers:** the guard checks format, fallback and links, not whether Gemini says something useful.

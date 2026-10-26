@@ -21,7 +21,7 @@ async function seed(w) {
   await run(`
     const P = ${JSON.stringify(PAYLOADS)};
     const t = S.teams[0];
-    await call('users.save', { email: S.me.email, name: 'Chris ' + P[0] });
+    await call('users.save', { email: S.me.email, name: 'Demo ' + P[0] });
     const team = await call('teams.save', { name: 'Team ' + P[1], members: [S.me.email] });
     const proj = await call('projects.save', { teamId: team.id, name: 'Projekt ' + P[2], description: P[3], members: [] });
     const created = await call('tasks.save', { title: 'Aufgabe ' + P[0], description: P[1], tags: [P[2]], projectId: proj.id, assignees: [S.me.email], dueDate: TODAY() });
@@ -36,13 +36,13 @@ async function seed(w) {
 function inspect(w) {
   const doc = w.document;
   const hits = [];
-  doc.querySelectorAll('.xss-marker').forEach(el => hits.push('eingeschleustes Element <' + el.tagName.toLowerCase() + '>'));
+  doc.querySelectorAll('.xss-marker').forEach(el => hits.push('injected element <' + el.tagName.toLowerCase() + '>'));
   doc.querySelectorAll('*').forEach(el => Array.from(el.attributes).forEach(a => {
-    if (/^on/i.test(a.name) && /__xss/.test(a.value)) hits.push('eingeschleustes Attribut ' + a.name + ' an <' + el.tagName.toLowerCase() + '>');
-    if (/^(href|src|action)$/i.test(a.name) && /^\s*javascript:/i.test(a.value)) hits.push('javascript:-Link an <' + el.tagName.toLowerCase() + '>');
+    if (/^on/i.test(a.name) && /__xss/.test(a.value)) hits.push('injected attribute ' + a.name + ' on <' + el.tagName.toLowerCase() + '>');
+    if (/^(href|src|action)$/i.test(a.name) && /^\s*javascript:/i.test(a.value)) hits.push('javascript: link on <' + el.tagName.toLowerCase() + '>');
   }));
-  doc.querySelectorAll('script').forEach(el => { if (/__xss/.test(el.textContent)) hits.push('eingeschleustes <script>'); });
-  if (w.__xss) hits.push('Schadcode wurde ausgeführt');
+  doc.querySelectorAll('script').forEach(el => { if (/__xss/.test(el.textContent)) hits.push('injected <script>'); });
+  if (w.__xss) hits.push('payload was executed');
   return hits;
 }
 
@@ -55,14 +55,14 @@ async function main() {
   w.eval("go('home')");
   await wait(400);
   const shown = w.document.body.textContent.indexOf('class="xss-marker"') >= 0;
-  if (!seeded || !shown) found['Testdaten nicht angelegt oder nicht sichtbar (seeded ' + seeded + ', sichtbar ' + shown + ')'] = 'seed';
+  if (!seeded || !shown) found['test data not created or not visible (seeded ' + seeded + ', visible ' + shown + ')'] = 'seed';
   const extra = ["openPeek(window.__xssTask)", "closePeek(); go('project', S.projects[S.projects.length - 1].id)"];
-  await walk(w, (win, where) => inspect(win).forEach(h => { found[h] = found[h] || where; }), (where, e) => { found['Skriptfehler: ' + e.message] = where; });
+  await walk(w, (win, where) => inspect(win).forEach(h => { found[h] = found[h] || where; }), (where, e) => { found['script error: ' + e.message] = where; });
   for (const js of extra) { w.eval(js); await wait(400); inspect(w).forEach(h => { found[h] = found[h] || js; }); }
   w.close();
   const keys = Object.keys(found);
   keys.forEach(k => console.log('  ✗ ' + k + '  (' + found[k] + ')'));
-  console.log(keys.length ? keys.length + ' XSS-Befunde' : 'XSS ok: ' + PAYLOADS.length + ' Angriffsmuster in 7 Datenarten, alle Ansichten escapen sauber');
+  console.log(keys.length ? keys.length + ' XSS findings' : 'XSS ok: ' + PAYLOADS.length + ' attack strings in 7 kinds of data, every view escapes them');
   process.exit(keys.length ? 1 : 0);
 }
 

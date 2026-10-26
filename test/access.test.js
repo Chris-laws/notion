@@ -5,7 +5,7 @@ const { freshApp, ME, ANNA, LEA } = require('./helpers');
 
 const OUTSIDER = 'extern@firma.de';
 
-/** Chris (first user = admin) creates a team with Anna; Lea and the outsider are not in it. */
+/** The admin (first user) creates a team with Anna; Lea and the outsider are not in it. */
 function teamApp() {
   const app = freshApp();
   app.call('bootstrap');
@@ -61,6 +61,6 @@ describe('changing things', () => {
   });
   test('a domain outside the company is refused', () => {
     const app = freshApp();
-    assert.match(app.as('fremd@gmail.com').error('bootstrap') || '', /nur für @firma\.de/);
+    assert.match(app.as('fremd@example.com').error('bootstrap') || '', /nur für @firma\.de/);
   });
 });

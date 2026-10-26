@@ -2,9 +2,9 @@
  * International public holidays.
  *
  * Source order: script cache -> HolidayCache sheet -> Nager.Date API
- * (https://date.nager.at, ~120 countries incl. regional holidays) ->
- * Google's public holiday calendars -> a built-in calculation for common
- * European countries and the US. Company holidays from the
+ * (https://date.nager.at, ~120 countries incl. regional holidays; only the
+ * country and year are sent) -> a built-in calculation for common European
+ * countries and the US. Company holidays from the
  * CompanyHolidays sheet are always added on top.
  *
  * A holiday looks like:
@@ -58,9 +58,7 @@ const Holidays = {
       if (list && list.length && list[0].nameEn === undefined) list = null; // stored before English names
     }
     if (!list) {
-      list = Holidays.fetchNager_(country, year)
-        || Holidays.fetchGoogle_(country, year)
-        || Holidays.builtin_(country, year);
+      list = Holidays.fetchNager_(country, year) || Holidays.builtin_(country, year);
       if (list.length && list[0].source !== 'builtin') {
         Db.tx(() => {
           const row = { key: key, json: JSON.stringify(list), fetchedAt: new Date().toISOString() };
@@ -109,21 +107,6 @@ const Holidays = {
       const list = data
         .filter(h => !h.types || h.types.indexOf('Public') >= 0)
         .map(h => ({ date: h.date, name: h.localName || h.name, nameEn: h.name || h.localName, country: country, counties: h.counties || null, source: 'nager' }));
-      return list.length ? list : null;
-    } catch (e) {
-      return null;
-    }
-  },
-
-  fetchGoogle_(country, year) {
-    try {
-      const cal = CalendarApp.getCalendarById('en.' + country.toLowerCase() + '#holiday@group.v.calendar.google.com');
-      if (!cal) return null;
-      const events = cal.getEvents(new Date(Date.UTC(year, 0, 1)), new Date(Date.UTC(year + 1, 0, 1)));
-      const list = events.map(ev => ({
-        date: Utilities.formatDate(ev.getAllDayStartDate ? ev.getAllDayStartDate() : ev.getStartTime(), 'UTC', 'yyyy-MM-dd'),
-        name: ev.getTitle(), nameEn: ev.getTitle(), country: country, counties: null, source: 'google',
-      }));
       return list.length ? list : null;
     } catch (e) {
       return null;

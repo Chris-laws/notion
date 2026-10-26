@@ -8,28 +8,28 @@ const path = require('path');
 
 /** Every text/background pair the UI really uses, with its minimum ratio. */
 const PAIRS = [
-  ['--text', '--bg', 4.5, 'Text auf Karten'],
-  ['--text', '--canvas', 4.5, 'Text auf dem Seitenhintergrund'],
-  ['--text', '--bg-elevated', 4.5, 'Text in Dialogen'],
-  ['--text-2', '--bg', 4.5, 'Sekundärtext'],
-  ['--text-2', '--bg-subtle', 4.5, 'Sekundärtext auf grauer Fläche'],
-  ['--text-3', '--bg', 3, 'Hinweise, Metadaten'],
-  ['--accent-text', '--accent-soft', 4.5, 'Akzent-Chips'],
-  ['--accent-text', '--bg', 4.5, 'Links'],
-  ['#ffffff', '--accent', 4.5, 'Primär-Buttons'],
-  ['--danger', '--danger-soft', 4.5, 'Fehler/überfällig-Chips'],
-  ['--danger', '--bg', 4.5, 'Überfällig-Text'],
-  ['--warning', '--warning-soft', 4.5, 'Warn-Chips, Feiertage'],
-  ['--success', '--success-soft', 4.5, 'Erledigt-Chips'],
-  ['--on-warning', '--warning-strong', 4.5, 'Warn-Toast'],
-  ['--ai-text', '--ai-soft', 4.5, 'KI-Elemente'],
-  ['--yellow-ink', '--yellow-soft', 4.5, 'Gelbe Hinweise'],
-  ['--st-doing', '--bg', 3, 'Status „In Arbeit" (Symbol)'],
-  ['--st-review', '--bg', 3, 'Status „Review" (Symbol)'],
-  ['--st-done', '--bg', 3, 'Status „Erledigt" (Symbol)'],
-  ['--prio-high', '--bg', 3, 'Priorität hoch (Balken)'],
-  ['--prio-high', '--prio-high-soft', 4.5, 'Priorität hoch (Pill)'],
-  ['--border-strong', '--bg', 1.5, 'Rahmen von Eingabefeldern (sichtbar)'],
+  ['--text', '--bg', 4.5, 'text on cards'],
+  ['--text', '--canvas', 4.5, 'text on the page background'],
+  ['--text', '--bg-elevated', 4.5, 'text in dialogs'],
+  ['--text-2', '--bg', 4.5, 'secondary text'],
+  ['--text-2', '--bg-subtle', 4.5, 'secondary text on grey surface'],
+  ['--text-3', '--bg', 3, 'hints, metadata'],
+  ['--accent-text', '--accent-soft', 4.5, 'accent chips'],
+  ['--accent-text', '--bg', 4.5, 'links'],
+  ['#ffffff', '--accent', 4.5, 'primary buttons'],
+  ['--danger', '--danger-soft', 4.5, 'error/overdue chips'],
+  ['--danger', '--bg', 4.5, 'overdue text'],
+  ['--warning', '--warning-soft', 4.5, 'warning chips, holidays'],
+  ['--success', '--success-soft', 4.5, 'done chips'],
+  ['--on-warning', '--warning-strong', 4.5, 'warning toast'],
+  ['--ai-text', '--ai-soft', 4.5, 'AI elements'],
+  ['--yellow-ink', '--yellow-soft', 4.5, 'yellow hints'],
+  ['--st-doing', '--bg', 3, 'status in progress (icon)'],
+  ['--st-review', '--bg', 3, 'status review (icon)'],
+  ['--st-done', '--bg', 3, 'status done (icon)'],
+  ['--prio-high', '--bg', 3, 'high priority (bars)'],
+  ['--prio-high', '--prio-high-soft', 4.5, 'high priority (pill)'],
+  ['--border-strong', '--bg', 1.5, 'input borders (visible)'],
 ];
 
 function hex(c) {
@@ -77,7 +77,7 @@ function check(css) {
   ['light', 'dark'].forEach(mode => PAIRS.forEach(([fg, bg, min, what]) => {
     const f = fg.startsWith('--') ? resolve('var(' + fg + ')', t[mode]) : fg;
     const b = resolve('var(' + bg + ')', t[mode]);
-    if (!hex(f) || !hex(b)) { rows.push({ mode, what, fg, bg, min, ratio: null, ok: false, why: 'kein Farbwert' }); return; }
+    if (!hex(f) || !hex(b)) { rows.push({ mode, what, fg, bg, min, ratio: null, ok: false, why: 'no colour value' }); return; }
     const ratio = contrastRatio(f, b);
     rows.push({ mode, what, fg, bg, min, ratio, ok: ratio >= min });
   }));
@@ -89,8 +89,8 @@ if (require.main === module) {
   const rows = check(css);
   const bad = rows.filter(r => !r.ok);
   rows.filter(r => !r.ok || process.argv.includes('--all')).forEach(r =>
-    console.log('  ' + (r.ok ? '✓' : '✗') + ' ' + (r.mode === 'light' ? 'hell  ' : 'dunkel') + ' ' + String(r.ratio).padStart(5) + ':1 (min ' + r.min + ')  ' + r.what + '  ' + r.fg + ' auf ' + r.bg + (r.why ? ' – ' + r.why : '')));
-  console.log(bad.length ? bad.length + ' Farbpaare unter der Kontrast-Schwelle' : 'Kontrast ok: ' + rows.length + ' Farbpaare in Hell und Dunkel');
+    console.log('  ' + (r.ok ? '✓' : '✗') + ' ' + (r.mode === 'light' ? 'light' : 'dark ') + ' ' + String(r.ratio).padStart(5) + ':1 (min ' + r.min + ')  ' + r.what + '  ' + r.fg + ' on ' + r.bg + (r.why ? ' – ' + r.why : '')));
+  console.log(bad.length ? bad.length + ' colour pairs below the contrast threshold' : 'Contrast ok: ' + rows.length + ' colour pairs in light and dark');
   process.exit(bad.length ? 1 : 0);
 }
 module.exports = { contrastRatio, resolve, themes, check, PAIRS };

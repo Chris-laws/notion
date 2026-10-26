@@ -10,7 +10,7 @@ const path = require('path');
 
 const { bootApp, walk } = require('./checks/dom');
 
-// German markers: umlauts/ß or frequent German words that never appear in the English UI
+// German markers: umlauts, sharp s or frequent German words that never appear in the English UI
 const GERMAN = /[äöüÄÖÜß]|\b(und|oder|der|die|das|den|dem|des|nicht|kein|keine|keinen|noch|mit|für|von|bis|zu|zum|zur|ist|sind|wird|werden|ein|eine|einen|auf|aus|bei|nach|über|unter|alle|allen|heute|morgen|gestern|Woche|Wochen|Monat|Tag|Tage|Tagen|Aufgabe|Aufgaben|Projekt|Projekte|offen|offene|erledigt|fällig|Fällig|neue|neues|Neue|Neues|Termin|Termine|Urlaub|Krank|Feiertag|Feiertage|Abwesenheit|Abwesend|abwesend|Stunden|Std|Mitglied|Mitglieder|Einstellungen|Speichern|Abbrechen|Löschen|Bearbeiten|Hinzufügen|Suchen|Zurück|Weiter|Ansicht|Gruppe|Priorität|Zuständig|Fortschritt|Aufwand|Beschreibung|Kommentar|Kommentare|Hallo|Guten|Abend|Morgen|Uhr|Mo|Di|Mi|Fr|Sa|Mär|Mai|Okt|Dez)\b/;
 // I18N_STRICT=1: also typical German endings and small words (more noise, for a manual review)
 const STRICT = /\b[A-Za-zäöü]+(ung|ungen|keit|heit|lich|isch|chen|schaft)\b|\b(ich|du|wir|wenn|dann|auch|nur|schon|hier|jetzt|mehr|weniger|wer|was|wie|wo|ohne|gegen|seit|beim|vom|im|am|um)\b/;
@@ -80,7 +80,7 @@ async function main() {
 
   const keys = Object.keys(found);
   keys.forEach(k => console.log('  ' + found[k].padEnd(22) + ' ' + k));
-  console.log(keys.length ? '\n' + keys.length + ' deutsche Reste im englischen Modus' : 'Englisch vollständig: keine deutschen Reste gefunden');
+  console.log(keys.length ? '\n' + keys.length + ' German leftovers in English mode' : 'English complete: no German leftovers');
   w.close();
   process.exit(keys.length ? 1 : 0);
 }

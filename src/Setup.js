@@ -6,7 +6,7 @@
 function setup() {
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('SPREADSHEET_ID');
-  const ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.create('Taskraum – Datenbank');
+  const ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.create('LidlFlow – Database');
   props.setProperty('SPREADSHEET_ID', ss.getId());
   Db.ensureSchema(ss);
 
@@ -26,8 +26,15 @@ function setup() {
   return ss.getUrl();
 }
 
-/** Optional: fills the app with an example team, projects and tasks. */
+/**
+ * Optional: fills the app with an example team, projects and tasks. The made-up people get
+ * addresses in the company domain, which could belong to real colleagues; so this only runs
+ * when the script property ALLOW_DEMO_DATA is "true" (never on the production spreadsheet).
+ */
 function seedDemoData() {
+  if (Config.get('ALLOW_DEMO_DATA') !== 'true') {
+    throw new Error('Demo-Daten sind ausgeschaltet. Nur in Testkopien die Skripteigenschaft ALLOW_DEMO_DATA auf "true" setzen.');
+  }
   Db.reset();
   const me = Auth.currentUser();
   const today = Util.today();

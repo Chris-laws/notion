@@ -46,8 +46,8 @@ describe('recurrence', () => {
 
 describe('quick-add parser', () => {
   const ctx = {
-    today: '2026-10-23', me: 'chris@firma.de',
-    users: [{ email: 'anna.schmidt@firma.de', name: 'Anna Schmidt' }, { email: 'chris@firma.de', name: 'Chris' }],
+    today: '2026-10-23', me: 'demo.user@firma.de',
+    users: [{ email: 'anna.schmidt@firma.de', name: 'Anna Schmidt' }, { email: 'demo.user@firma.de', name: 'Demo User' }],
     teams: [{ id: 'tm1', name: 'Marketing' }],
     projects: [{ id: 'pr1', name: 'Website' }],
   };
@@ -67,7 +67,7 @@ describe('quick-add parser', () => {
     assert.equal(r.dueDate || '', '');
   });
   test('@ich assigns me', () => {
-    assert.deepEqual(plain(S.parse('Bericht @ich', ctx)).assignees, ['chris@firma.de']);
+    assert.deepEqual(plain(S.parse('Bericht @ich', ctx)).assignees, ['demo.user@firma.de']);
   });
   test('a team or tag given twice is taken once', () => {
     const r = plain(S.parse('Plan +marketing +marketing #q4 #q4', ctx));
@@ -130,7 +130,7 @@ describe('focus order', () => {
 });
 
 describe('task filter (taskQuery)', () => {
-  const ME = 'chris@firma.de';
+  const ME = 'demo.user@firma.de';
   const day = '2026-10-23';
   const mk = (id, status, due, extra) => Object.assign({ id, title: id, status, dueDate: due || '', tags: [], assignees: [ME], priority: '' }, extra || {});
   const ids = r => r.list.map(t => t.id).join(',');

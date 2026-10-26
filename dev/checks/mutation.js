@@ -63,8 +63,8 @@ if (require.main === module) {
   const min = minArg > 0 ? Number(process.argv[minArg + 1]) : 0;
   const r = run();
   const score = Math.round(100 * r.killed / Math.max(1, r.total));
-  r.survivors.slice(0, 15).forEach(m => console.log('  überlebt: ' + FILE + ':' + m.line + '  ' + m.from + ' → ' + m.to));
-  console.log('Mutation-Score ' + FILE + ': ' + score + ' % (' + r.killed + ' von ' + r.total + ' Mutanten erkannt, Schwelle ' + min + ' %)');
+  r.survivors.slice(0, 15).forEach(m => console.log('  survived: ' + FILE + ':' + m.line + '  ' + m.from + ' → ' + m.to));
+  console.log('Mutation-Score ' + FILE + ': ' + score + ' % (' + r.killed + ' of ' + r.total + ' mutants killed, threshold ' + min + ' %)');
   process.exit(score >= min ? 0 : 1);
 }
 module.exports = { mutants, run };
