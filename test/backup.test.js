@@ -81,12 +81,12 @@ describe('backup on the settings page', () => {
     const w = await bootApp({ lang: 'de' });
     try {
       w.eval("go('settings')");
-      await wait(400);
+      for (let end = Date.now() + 5000; !w.document.querySelector('[data-action="backup-run"]') && Date.now() < end;) await wait(50);
       const btn = w.document.querySelector('[data-action="backup-run"]');
       assert.ok(btn, 'button shown');
       assert.match(w.document.querySelector('#view').textContent, /Datensicherung/);
       btn.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
-      await wait(500);
+      for (let end = Date.now() + 5000; !/Letztes Backup/.test(w.document.querySelector('#view').textContent) && Date.now() < end;) await wait(50);
       assert.match(w.document.querySelector('#view').textContent, /Letztes Backup/);
     } finally { w.close(); }
   });

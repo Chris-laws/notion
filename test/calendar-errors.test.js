@@ -9,8 +9,9 @@ after(() => w && w.close());
 
 describe('calendar request fails', () => {
   test('after two automatic retries a message with a retry button appears, and retrying loads again', async () => {
-    w.eval(`window.__calls = 0; window.__orig = runCall;
-      runCall = (m, p) => (m === 'calendar.range' ? (window.__calls++, Promise.reject(new Error('internal'))) : window.__orig(m, p));
+    // the server fails while __down is set; retries still in flight afterwards simply succeed
+    w.eval(`window.__calls = 0; window.__orig = runCall; window.__down = true;
+      runCall = (m, p) => (m === 'calendar.range' && window.__down ? (window.__calls++, Promise.reject(new Error('internal'))) : window.__orig(m, p));
       S.cal.cache = {}; S.cal.cursor = '2027-02-01'; go('calendar')`);
     // "internal" is retried twice (0.6 s, 1.8 s, plus jitter) before the message shows
     for (let end = Date.now() + 9000; !w.document.querySelector('.cal-error') && Date.now() < end;) await wait(50);
@@ -28,10 +29,13 @@ describe('calendar request fails', () => {
     w.eval('render()');
     await wait(100);
     assert.equal(w.eval('window.__calls'), tries, 'no endless retry loop on re-render');
-    w.eval('runCall = window.__orig');
-    box.querySelector('[data-action="cal-retry"]').click();
-    await wait(400);
-    assert.equal(w.document.querySelector('.cal-error'), null, 'gone after a successful retry');
+    w.eval('window.__down = false');
+    // look the button up again: a background render may have replaced the element meanwhile
+    w.document.querySelector('[data-action="cal-retry"]').click();
+    // the server answers in its own time (slower on CI runners): wait for it, at most 5 s
+    for (let end = Date.now() + 5000; w.document.querySelector('.cal-error') && Date.now() < end;) await wait(50);
+    const left = w.document.querySelector('.cal-error');
+    assert.equal(left, null, 'gone after a successful retry: ' + (left ? left.textContent + ' calls=' + w.eval('window.__calls') + ' errors=' + w.eval('JSON.stringify(S.cal.errors)') : ''));
   });
   test('the bare "internal" message becomes a sentence', () => {
     assert.match(w.eval("friendlyError('internal')"), /Server/);
