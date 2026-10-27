@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node dev/test.js && node --test --test-concurrency=4 test/ && node dev/i18n-audit.js",
+    "test": "node dev/test.js && node --test --test-concurrency=2 test/ && node dev/i18n-audit.js",
     "check": "node dev/check-gas.js",
     "preview": "node dev/build-preview.js",
     "push": "clasp push",
