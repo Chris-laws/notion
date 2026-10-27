@@ -12,7 +12,7 @@ module.exports = [
     purpose: 'bugs, unsafe code, function length, complexity, duplicates, unused code',
     limit: '0 errors; ≤ 78 warnings (ratchet)' },
   { id: 'tests', stage: 'TDD', name: 'Unit, mock and integration tests + coverage',
-    cmd: 'npx c8 --check-coverage --lines 90 --functions 90 --branches 75 --reporter=text-summary node --test test/ dev/test.js',
+    cmd: 'npx c8 --check-coverage --lines 90 --functions 90 --branches 75 --reporter=text-summary node --test --test-concurrency=4 test/ dev/test.js',
     purpose: 'domain logic, permissions, cache, external services (test doubles), API flows',
     limit: 'all green; coverage lines ≥ 90 %, functions ≥ 90 %, branches ≥ 75 %' },
   { id: 'mutation', stage: 'TDD', name: 'Mutation test (Shared.js)', cmd: 'node dev/checks/mutation.js --min 85',

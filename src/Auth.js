@@ -37,22 +37,49 @@ const Auth = {
   },
 };
 
-/** Who may see and change what. */
+/**
+ * Who may see and change what.
+ *
+ * Confidential teams and projects (confidential = true) exist only for their listed members:
+ * a confidential team for its lead and members, a confidential project for the people in its
+ * own member list (no "whole team" rule). Nobody else sees them or anything in them, admins
+ * included; context() lists them in hiddenTeams / hiddenProjects and every route filters by that.
+ */
 const Access = {
+  isConfidential(x) { return !!x && (x.confidential === true || String(x.confidential).toLowerCase() === 'true'); },
+
   context(user) {
     const email = user.email;
     const teamIds = {};
+    const hiddenTeams = {};
     Db.all('Teams').forEach(t => {
-      if (t.lead === email || (t.members || []).indexOf(email) >= 0) teamIds[t.id] = true;
+      const member = t.lead === email || (t.members || []).indexOf(email) >= 0;
+      if (member) teamIds[t.id] = true;
+      else if (Access.isConfidential(t)) hiddenTeams[t.id] = true;
     });
     const projectIds = {};
+    const hiddenProjects = {};
     Db.all('Projects').forEach(p => {
-      if (teamIds[p.teamId] || (p.members || []).indexOf(email) >= 0) projectIds[p.id] = true;
+      const listed = (p.members || []).indexOf(email) >= 0;
+      if (hiddenTeams[p.teamId] || (Access.isConfidential(p) && !listed)) hiddenProjects[p.id] = true;
+      else if (teamIds[p.teamId] || listed) projectIds[p.id] = true;
     });
-    return { email: email, admin: Auth.isAdmin(user), teamIds: teamIds, projectIds: projectIds };
+    return { email: email, admin: Auth.isAdmin(user), teamIds: teamIds, projectIds: projectIds, hiddenTeams: hiddenTeams, hiddenProjects: hiddenProjects };
+  },
+
+  /** Context of the signed-in person (for routes that only need the hidden lists). */
+  current() { return Access.context(Auth.currentUser()); },
+
+  seesTeam(team, ctx) { return !!team && !ctx.hiddenTeams[team.id]; },
+  seesProject(project, ctx) { return !!project && !ctx.hiddenProjects[project.id]; },
+
+  /** Task inside a confidential area the person is not part of: invisible, whoever they are. */
+  hiddenTask(t, ctx) {
+    return !!(t.projectId && ctx.hiddenProjects[t.projectId]) || (t.teams || []).some(id => ctx.hiddenTeams[id]);
   },
 
   canSeeTask(t, ctx) {
+    if (Access.hiddenTask(t, ctx)) return false;
     if (ctx.admin || t.createdBy === ctx.email) return true;
     if ((t.assignees || []).indexOf(ctx.email) >= 0) return true;
     if ((t.teams || []).some(id => ctx.teamIds[id])) return true;
@@ -60,6 +87,7 @@ const Access = {
   },
 
   canDeleteTask(t, ctx) {
+    if (Access.hiddenTask(t, ctx)) return false;
     if (ctx.admin || t.createdBy === ctx.email) return true;
     const project = t.projectId && Db.get('Projects', t.projectId);
     const teamIds = (t.teams || []).concat(project ? [project.teamId] : []);
@@ -70,12 +98,23 @@ const Access = {
   },
 
   canManageTeam(team, ctx) {
+    // a confidential team is managed by its members only (no admin, no creator outside it)
+    if (Access.isConfidential(team)) return !!ctx.teamIds[team.id];
     return ctx.admin || team.lead === ctx.email || team.createdBy === ctx.email;
   },
 
   canManageProject(project, ctx) {
+    if (ctx.hiddenProjects[project.id]) return false;
+    if (Access.isConfidential(project)) return (project.members || []).indexOf(ctx.email) >= 0;
     if (ctx.admin || project.createdBy === ctx.email || ctx.teamIds[project.teamId]) return true;
     return (project.members || []).indexOf(ctx.email) >= 0;
+  },
+};
+
+/** Changes to confidential objects: who, when, which id (never names or content). */
+const Audit = {
+  log(action, kind, ref) {
+    Db.insert('Audit', { id: Util.uid('au_'), at: new Date().toISOString(), by: Auth.email(), action: action, kind: kind, ref: ref });
   },
 };
 

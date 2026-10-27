@@ -19,11 +19,11 @@ const SCHEMA = {
     num: ['hoursPerWeek'],
   },
   Teams: {
-    cols: ['id', 'name', 'icon', 'color', 'description', 'lead', 'members', 'createdBy', 'createdAt'],
+    cols: ['id', 'name', 'icon', 'color', 'description', 'lead', 'members', 'createdBy', 'createdAt', 'confidential'],
     json: ['members'],
   },
   Projects: {
-    cols: ['id', 'teamId', 'name', 'icon', 'color', 'description', 'status', 'members', 'startDate', 'endDate', 'createdBy', 'createdAt'],
+    cols: ['id', 'teamId', 'name', 'icon', 'color', 'description', 'status', 'members', 'startDate', 'endDate', 'createdBy', 'createdAt', 'confidential'],
     json: ['members'],
   },
   Tasks: {
@@ -49,6 +49,10 @@ const SCHEMA = {
   },
   HolidayCache: {
     cols: ['key', 'json', 'fetchedAt'],
+  },
+  // who changed which confidential object when (ids only, never content)
+  Audit: {
+    cols: ['id', 'at', 'by', 'action', 'kind', 'ref'],
   },
   // write-ahead undo steps of the running transaction (empty when nothing is in flight)
   Journal: {

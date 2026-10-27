@@ -34,7 +34,8 @@ const Availability = {
   /** Warning days of every team (or of the given teams) in a range. */
   warnings(from, to, teamIds, viewer) {
     const out = [];
-    Db.all('Teams').filter(t => !teamIds || teamIds.indexOf(t.id) >= 0).forEach(t => {
+    const ctx = Access.current();
+    Db.all('Teams').filter(t => Access.seesTeam(t, ctx) && (!teamIds || teamIds.indexOf(t.id) >= 0)).forEach(t => {
       const users = Calendar.people_(t.id);
       if (users.length < 2) return;
       Availability.grid_(users, from, to, viewer).team.filter(d => d.warn).forEach(d => {

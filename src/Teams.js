@@ -6,8 +6,9 @@ const Teams = {
     const name = String(p.name || '').trim().slice(0, 80);
     if (!name) throw new Error('Bitte einen Teamnamen angeben.');
     const members = cleanEmails_(p.members);
-    const lead = p.lead ? String(p.lead).toLowerCase() : me.email;
-    if (members.indexOf(lead) < 0) members.unshift(lead);
+    // a confidential team gets no automatic lead: the admin creating it does not become a member
+    const lead = p.lead ? String(p.lead).toLowerCase() : p.confidential === true && !p.id ? members[0] || '' : me.email;
+    if (lead && members.indexOf(lead) < 0) members.unshift(lead);
     const data = {
       name: name,
       icon: String(p.icon || '').slice(0, 8),
@@ -17,17 +18,10 @@ const Teams = {
       members: members,
     };
     return Db.tx(() => {
-      // at most 8 teams per person
-      const others = Db.all('Teams').filter(t => t.id !== p.id);
-      members.forEach(e => {
-        const n = others.filter(t => Teams.people_(t).indexOf(e) >= 0).length;
-        if (n >= Shared.MAX_TEAMS) {
-          const u = Db.get('Users', e);
-          throw new Error((u && u.name ? u.name : e) + ' ist schon in ' + Shared.MAX_TEAMS + ' Teams. Mehr geht nicht: bitte erst aus einem anderen Team entfernen.');
-        }
-      });
+      const confidential = Teams.checkConfidential_(p, members, ctx);
+      Teams.checkMaxTeams_(members, p.id);
       // teams that share people never share a colour
-      const taken = Teams.takenColors_(members, p.id);
+      const taken = Teams.takenColors_(members, p.id, ctx);
       if (!data.color) data.color = Shared.TEAM_COLORS.find(c => !taken[c]) || 'blue';
       if (Shared.TEAM_COLORS.indexOf(data.color) < 0) throw new Error('Unbekannte Teamfarbe.');
       if (taken[data.color]) throw new Error('Diese Farbe hat schon das Team „' + taken[data.color] + '“. Bitte eine andere wählen.');
@@ -38,12 +32,40 @@ const Teams = {
         // the dialog has no icon field: keep the icon unless one is sent
         if (p.icon === undefined) delete data.icon;
         Users.ensure(members);
+        if (confidential) Audit.log('update', 'team', p.id);
         return Db.update('Teams', p.id, data);
       }
       Users.ensure(members);
-      return Db.insert('Teams', Object.assign(data, {
-        id: Util.uid('tm_'), createdBy: me.email, createdAt: new Date().toISOString(),
+      const created = Db.insert('Teams', Object.assign(data, {
+        id: Util.uid('tm_'), createdBy: me.email, createdAt: new Date().toISOString(), confidential: confidential,
       }));
+      if (confidential) Audit.log('create', 'team', created.id);
+      return created;
+    });
+  },
+
+  /**
+   * Whether the team is confidential (set when it is created, never changed later) and the rules for it:
+   * created by admins only, managed by its members only, always at least 2 members.
+   */
+  checkConfidential_(p, members, ctx) {
+    const before = p.id ? Db.get('Teams', p.id) : null;
+    const confidential = before ? Access.isConfidential(before) : p.confidential === true;
+    if (before && confidential && !Access.canManageTeam(before, ctx)) throw new Error('Team nicht gefunden.');
+    if (!before && confidential && !ctx.admin) throw new Error('Vertrauliche Teams können nur Admins anlegen.');
+    if (confidential && members.length < 2) throw new Error('Ein vertrauliches Team braucht mindestens 2 Mitglieder.');
+    return confidential;
+  },
+
+  /** At most MAX_TEAMS teams per person. */
+  checkMaxTeams_(members, teamId) {
+    const others = Db.all('Teams').filter(t => t.id !== teamId);
+    members.forEach(e => {
+      const n = others.filter(t => Teams.people_(t).indexOf(e) >= 0).length;
+      if (n >= Shared.MAX_TEAMS) {
+        const u = Db.get('Users', e);
+        throw new Error((u && u.name ? u.name : e) + ' ist schon in ' + Shared.MAX_TEAMS + ' Teams. Mehr geht nicht: bitte erst aus einem anderen Team entfernen.');
+      }
     });
   },
 
@@ -52,10 +74,11 @@ const Teams = {
   },
 
   /** Colour -> team name, for teams (other than teamId) that share at least one person with `people`. */
-  takenColors_(people, teamId) {
+  takenColors_(people, teamId, ctx) {
     const taken = {};
     Db.all('Teams').forEach(t => {
-      if (t.id === teamId) return;
+      // a confidential team the person cannot see never shows up, not even by name in a message
+      if (t.id === teamId || (ctx && !Access.seesTeam(t, ctx))) return;
       if (Teams.people_(t).some(e => people.indexOf(e) >= 0)) taken[t.color] = t.name;
     });
     return taken;
@@ -91,7 +114,9 @@ const Teams = {
     return Db.tx(() => {
       const team = Db.get('Teams', id);
       if (!team) return false;
+      if (!Access.seesTeam(team, ctx)) throw new Error('Team nicht gefunden.');
       if (!Access.canManageTeam(team, ctx)) throw new Error('Keine Berechtigung.');
+      if (Access.isConfidential(team)) Audit.log('remove', 'team', id);
       Db.all('Projects').filter(p => p.teamId === id).forEach(p => Projects.removeInternal_(p.id));
       Db.all('Tasks').filter(t => (t.teams || []).indexOf(id) >= 0).forEach(t => {
         Db.update('Tasks', t.id, { teams: t.teams.filter(x => x !== id) });
@@ -109,7 +134,7 @@ const Projects = {
     const name = String(p.name || '').trim().slice(0, 120);
     if (!name) throw new Error('Bitte einen Projektnamen angeben.');
     const team = Db.get('Teams', p.teamId);
-    if (!team) throw new Error('Bitte ein Team für das Projekt wählen.');
+    if (!team || !Access.seesTeam(team, ctx)) throw new Error('Bitte ein Team für das Projekt wählen.');
     const data = {
       teamId: team.id,
       name: name,
@@ -123,32 +148,45 @@ const Projects = {
     };
     return Db.tx(() => {
       const mayUseTeam = ctx.admin || ctx.teamIds[team.id];
-      if (p.id) {
-        const project = Db.get('Projects', p.id);
-        if (!project) throw new Error('Projekt nicht gefunden.');
-        if (!Access.canManageProject(project, ctx)) throw new Error('Keine Berechtigung für dieses Projekt.');
-        // moving it into another team needs membership there, like creating it there
-        if (project.teamId !== team.id && !mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
-        if (p.icon === undefined) delete data.icon;
-        data.color = Projects.color_(p.color === undefined ? project.color : p.color, team.id, p.id);
-        Users.ensure(data.members);
-        return Db.update('Projects', p.id, data);
-      }
+      if (p.id) return Projects.update_(p, data, team, ctx, mayUseTeam);
       if (!mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
-      data.color = Projects.color_(p.color, team.id, '');
+      const confidential = p.confidential === true;
+      if (confidential && !ctx.admin) throw new Error('Vertrauliche Projekte können nur Admins anlegen.');
+      if (confidential && data.members.length < 2) throw new Error('Ein vertrauliches Projekt braucht mindestens 2 Mitglieder.');
+      data.color = Projects.color_(p.color, team.id, '', ctx);
       Users.ensure(data.members);
-      return Db.insert('Projects', Object.assign(data, {
-        id: Util.uid('pr_'), createdBy: me.email, createdAt: new Date().toISOString(),
+      const created = Db.insert('Projects', Object.assign(data, {
+        id: Util.uid('pr_'), createdBy: me.email, createdAt: new Date().toISOString(), confidential: confidential,
       }));
+      if (confidential || Access.isConfidential(team)) Audit.log('create', 'project', created.id);
+      return created;
     });
+  },
+
+  /** Changes an existing project (inside the lock of save). */
+  update_(p, data, team, ctx, mayUseTeam) {
+    const project = Db.get('Projects', p.id);
+    if (!project || !Access.seesProject(project, ctx)) throw new Error('Projekt nicht gefunden.');
+    if (!Access.canManageProject(project, ctx)) throw new Error('Keine Berechtigung für dieses Projekt.');
+    if (Access.isConfidential(project)) {
+      if (data.members.length < 2) throw new Error('Ein vertrauliches Projekt braucht mindestens 2 Mitglieder.');
+      Audit.log('update', 'project', p.id);
+    }
+    // moving it into another team needs membership there, like creating it there
+    if (project.teamId !== team.id && !mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
+    if (p.icon === undefined) delete data.icon;
+    data.color = Projects.color_(p.color === undefined ? project.color : p.color, team.id, p.id, ctx);
+    Users.ensure(data.members);
+    return Db.update('Projects', p.id, data);
   },
 
   /**
    * The colour a project of team `teamId` may get (inside the lock): none chosen -> the first free one;
    * a colour another project of the team has -> refused, unless the whole palette is in use.
    */
-  color_(wanted, teamId, exceptId) {
-    const all = Db.all('Projects');
+  color_(wanted, teamId, exceptId, ctx) {
+    // projects the person cannot see neither block a colour nor appear in a message
+    const all = Db.all('Projects').filter(x => !ctx || Access.seesProject(x, ctx));
     if (Shared.PROJECT_PALETTE.indexOf(wanted) < 0) return Shared.freeProjectColor(all, teamId, exceptId);
     const taken = Shared.takenProjectColors(all, teamId, exceptId);
     const full = Shared.PROJECT_PALETTE.every(c => taken[c]);
@@ -186,6 +224,9 @@ const Projects = {
     return Db.tx(() => {
       const project = Db.get('Projects', id);
       if (!project) return false;
+      if (!Access.seesProject(project, ctx)) throw new Error('Projekt nicht gefunden.');
+      if (Access.isConfidential(project) && !Access.canManageProject(project, ctx)) throw new Error('Keine Berechtigung.');
+      if (Access.isConfidential(project)) Audit.log('remove', 'project', id);
       const team = Db.get('Teams', project.teamId);
       if (!(ctx.admin || project.createdBy === me.email || (team && team.lead === me.email))) {
         throw new Error('Nur die Person, die das Projekt angelegt hat, Team-Leads oder Admins können es löschen.');

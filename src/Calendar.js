@@ -9,7 +9,8 @@ const Calendar = {
     if (Shared.diffDays(from, to) > 400) throw new Error('Zeitraum zu groß.');
     const people = Calendar.people_(p.teamId);
     const emails = people.map(u => u.email);
-    const events = Db.all('Events').filter(e =>
+    const ctx = Access.context(me);
+    const events = Db.all('Events').filter(e => !ctx.hiddenTeams[e.teamId] &&
       e.startDate <= to && (e.endDate || e.startDate) >= from && (!p.teamId || !e.teamId || e.teamId === p.teamId));
     const absences = Db.all('Absences')
       .filter(a => a.startDate <= to && a.endDate >= from && emails.indexOf(a.email) >= 0)
@@ -26,7 +27,7 @@ const Calendar = {
   people_(teamId) {
     if (!teamId) return Users.list();
     const team = Db.get('Teams', teamId);
-    if (!team) throw new Error('Team nicht gefunden.');
+    if (!team || !Access.seesTeam(team, Access.current())) throw new Error('Team nicht gefunden.');
     const emails = [team.lead].concat(team.members || []);
     return Users.list().filter(u => emails.indexOf(u.email) >= 0);
   },
@@ -42,14 +43,14 @@ const Calendar = {
       type: Shared.EVENT_TYPES.some(t => t.key === p.type) ? p.type : 'meeting',
       startDate: p.startDate,
       endDate: end,
-      teamId: p.teamId && Db.get('Teams', p.teamId) ? p.teamId : '',
+      teamId: p.teamId && Access.seesTeam(Db.get('Teams', p.teamId), Access.context(me)) ? p.teamId : '',
       attendees: cleanEmails_(p.attendees),
       note: String(p.note || '').slice(0, 2000),
     };
     return Db.tx(() => {
       if (p.id) {
         const ev = Db.get('Events', p.id);
-        if (!ev) throw new Error('Termin nicht gefunden.');
+        if (!ev || Access.context(me).hiddenTeams[ev.teamId]) throw new Error('Termin nicht gefunden.');
         if (ev.createdBy !== me.email && !Auth.isAdmin(me)) throw new Error('Nur die erstellende Person oder Admins können den Termin ändern.');
         return Db.update('Events', p.id, data);
       }
@@ -63,7 +64,7 @@ const Calendar = {
     const me = Auth.currentUser();
     return Db.tx(() => {
       const ev = Db.get('Events', id);
-      if (!ev) return false;
+      if (!ev || Access.context(me).hiddenTeams[ev.teamId]) return false;
       if (ev.createdBy !== me.email && !Auth.isAdmin(me)) throw new Error('Nur die erstellende Person oder Admins können den Termin löschen.');
       return Db.remove('Events', id);
     });
@@ -92,7 +93,8 @@ const Calendar = {
         saved = Db.insert('Absences', Object.assign(data, { id: Util.uid('ab_'), createdAt: new Date().toISOString() }));
       }
       // Tell the person right away if their absence pushes a team to the warning level.
-      const teamIds = Db.all('Teams').filter(t => t.lead === email || (t.members || []).indexOf(email) >= 0).map(t => t.id);
+      const seen = Access.context(me);
+      const teamIds = Db.all('Teams').filter(t => Access.seesTeam(t, seen) && (t.lead === email || (t.members || []).indexOf(email) >= 0)).map(t => t.id);
       const warnings = teamIds.length
         ? Availability.warnings(saved.startDate, saved.endDate, teamIds, { email: me.email, admin: Auth.isAdmin(me) }).filter(w => w.people.some(x => x.email === email))
         : [];
@@ -140,13 +142,19 @@ const Capacity = {
     return Capacity.compute_(Calendar.people_(p.teamId), from, weeks);
   },
 
+  /** Open tasks with an estimate and people; confidential work the viewer cannot see does not count. */
+  openTasks_() {
+    const ctx = Access.current();
+    return Db.all('Tasks').filter(t => t.status !== 'done' && Number(t.estimate) > 0 && (t.assignees || []).length && !Access.hiddenTask(t, ctx));
+  },
+
   compute_(users, from, weeks) {
     const S = Shared;
     const to = S.addDays(from, weeks * 7 - 1);
     const today = Util.today();
     const holidays = Holidays.inRange(users.map(u => u.country), from, to);
     const absences = Db.all('Absences').filter(a => a.endDate >= from && a.startDate <= to);
-    const tasks = Db.all('Tasks').filter(t => t.status !== 'done' && Number(t.estimate) > 0 && (t.assignees || []).length);
+    const tasks = Capacity.openTasks_();
     const weekStarts = [];
     for (let i = 0; i < weeks; i++) weekStarts.push(S.addDays(from, i * 7));
 

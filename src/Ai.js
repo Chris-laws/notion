@@ -125,8 +125,8 @@ const Ai = {
       today: Util.today(),
       me: me.email,
       users: Users.list().map(u => ({ email: u.email, name: u.name })),
-      teams: Db.all('Teams').map(t => ({ id: t.id, name: t.name })),
-      projects: Db.all('Projects').map(x => ({ id: x.id, name: x.name })),
+      teams: Db.all('Teams').filter(t => Access.seesTeam(t, Access.context(me))).map(t => ({ id: t.id, name: t.name })),
+      projects: Db.all('Projects').filter(x => Access.seesProject(x, Access.context(me))).map(x => ({ id: x.id, name: x.name })),
     };
   },
 
@@ -301,7 +301,7 @@ const Ai = {
     const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const day = d => (en ? MON[Number(d.slice(5, 7)) - 1] + ' ' + Number(d.slice(8)) : Number(d.slice(8)) + '.' + Number(d.slice(5, 7)) + '.');
     const first = n => n.split(' ')[0];
-    const projects = Db.all('Projects').filter(x => ctx.teamIds[x.teamId] && x.status !== 'done' && Shared.isDate(x.endDate) && x.endDate >= today && x.endDate <= Shared.addDays(to, 7))
+    const projects = Db.all('Projects').filter(x => ctx.teamIds[x.teamId] && Access.seesProject(x, ctx) && x.status !== 'done' && Shared.isDate(x.endDate) && x.endDate >= today && x.endDate <= Shared.addDays(to, 7))
       .map(x => {
         const ts = visible.filter(t => t.projectId === x.id && !t.parentId);
         return { name: x.name, end: x.endDate, done: ts.filter(t => t.status === 'done').length, total: ts.length };
@@ -416,7 +416,7 @@ const Ai = {
     teamIds.forEach(id => Calendar.people_(id).forEach(u => { teamPeople[u.email] = 1; }));
     Db.all('Absences').filter(a => teamPeople[a.email] && a.email !== me.email && String(a.createdAt) > since).slice(0, 3)
       .forEach(a => items.push({ kind: 'absence', text: L(name(a.email) + ' ist ', name(a.email) + ' is away ') + day(a.startDate) + (a.endDate !== a.startDate ? '–' + day(a.endDate) : '') + L(' abwesend', '') }));
-    Db.all('Projects').filter(x => ctx.teamIds[x.teamId] && x.createdBy !== me.email && String(x.createdAt) > since).slice(0, 2)
+    Db.all('Projects').filter(x => ctx.teamIds[x.teamId] && Access.seesProject(x, ctx) && x.createdBy !== me.email && String(x.createdAt) > since).slice(0, 2)
       .forEach(x => items.push({ kind: 'project', text: L('Neues Projekt: ', 'New project: ') + x.name }));
     const today = Util.today();
     const soon = Holidays.inRange(Object.keys(teamPeople).concat([me.email]).map(e => (users[e] || me).country), today, Shared.addDays(today, 7))

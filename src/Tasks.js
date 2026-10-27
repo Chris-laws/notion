@@ -24,29 +24,11 @@ const Tasks = {
   save(p) {
     const me = Auth.currentUser();
     const ctx = Access.context(me);
-    const fields = Tasks.sanitize_(p);
+    const fields = Tasks.sanitize_(p, ctx);
     const now = new Date().toISOString();
     return Db.tx(() => {
-      if (p.id) {
-        const prev = Db.get('Tasks', p.id);
-        if (!prev) throw new Error('Aufgabe nicht gefunden – evtl. wurde sie gelöscht.');
-        if (!Access.canSeeTask(prev, ctx)) throw new Error('Keine Berechtigung für diese Aufgabe.');
-        if (fields.parentId !== undefined) Tasks.checkParent_(fields.parentId, p.id);
-        // new people only once the change is allowed
-        Users.ensure(fields.assignees);
-        fields.updatedAt = now;
-        if (fields.assignees && !fields.assignees.length) fields.assignees = [prev.createdBy || me.email];
-        if (fields.status && fields.status !== prev.status) {
-          fields.completedAt = fields.status === 'done' ? now : '';
-        }
-        const next = Db.update('Tasks', p.id, fields);
-        const changed = [next];
-        if (prev.status !== 'done' && next.status === 'done' && next.recurrence) {
-          changed.push(Tasks.spawnNext_(next, me.email));
-        }
-        return changed;
-      }
-      Tasks.checkParent_(fields.parentId, null);
+      if (p.id) return Tasks.update_(p.id, fields, ctx, me, now);
+      Tasks.checkParent_(fields.parentId, null, ctx);
       Users.ensure(fields.assignees);
       const task = Object.assign({
         id: Util.uid('t_'),
@@ -102,6 +84,29 @@ const Tasks = {
     }));
   },
 
+  /** Changes an existing task (inside the lock of save); returns every task that changed. */
+  update_(id, fields, ctx, me, now) {
+    const prev = Db.get('Tasks', id);
+    if (!prev || Access.hiddenTask(prev, ctx)) throw new Error('Aufgabe nicht gefunden – evtl. wurde sie gelöscht.');
+    if (!Access.canSeeTask(prev, ctx)) throw new Error('Keine Berechtigung für diese Aufgabe.');
+    if (fields.parentId !== undefined) Tasks.checkParent_(fields.parentId, id, ctx);
+    // new people only once the change is allowed
+    Users.ensure(fields.assignees);
+    fields.updatedAt = now;
+    if (fields.assignees && !fields.assignees.length) fields.assignees = [prev.createdBy || me.email];
+    if (fields.status && fields.status !== prev.status) {
+      fields.completedAt = fields.status === 'done' ? now : '';
+    }
+    const next = Db.update('Tasks', id, fields);
+    Tasks.audit_(prev, 'update');
+    Tasks.audit_(next, 'update');
+    const changed = [next];
+    if (prev.status !== 'done' && next.status === 'done' && next.recurrence) {
+      changed.push(Tasks.spawnNext_(next, me.email));
+    }
+    return changed;
+  },
+
   /** Board drag & drop: several tasks at once (new order / column). */
   move(p) {
     const items = (p.items || []).slice(0, 200);
@@ -112,10 +117,25 @@ const Tasks = {
     return changed;
   },
 
-  /** The parent must exist and must not be the task itself or one of its sub-tasks (no cycles). */
-  checkParent_(parentId, taskId) {
+  /** Writes an audit line when the task lies in a confidential team or project (once per request and task). */
+  audit_(t, action) {
+    const project = t.projectId && Db.get('Projects', t.projectId);
+    const team = project && Db.get('Teams', project.teamId);
+    const confidential = Access.isConfidential(project) || Access.isConfidential(team) ||
+      (t.teams || []).some(id => Access.isConfidential(Db.get('Teams', id)));
+    if (!confidential) return;
+    Tasks.audited_ = Tasks.audited_ || {};
+    if (Tasks.audited_[action + t.id]) return;
+    Tasks.audited_[action + t.id] = true;
+    Audit.log(action, 'task', t.id);
+  },
+
+  /** The parent must exist, be visible and must not be the task itself or one of its sub-tasks (no cycles). */
+  checkParent_(parentId, taskId, ctx) {
     if (!parentId) return;
-    let x = Db.get('Tasks', parentId);
+    const parent = Db.get('Tasks', parentId);
+    if (!parent || (ctx && Access.hiddenTask(parent, ctx))) throw new Error('Übergeordnete Aufgabe nicht gefunden.');
+    let x = parent;
     if (!x) throw new Error('Übergeordnete Aufgabe fehlt.');
     for (let depth = 0; x && depth < 100; depth++) {
       if (x.id === taskId) throw new Error('Eine Aufgabe kann nicht ihre eigene Unteraufgabe sein.');
@@ -128,7 +148,9 @@ const Tasks = {
     const ctx = Access.context(me);
     return Db.tx(() => {
       const t = Db.get('Tasks', id);
-      if (!t) return [];
+      if (!t || Access.hiddenTask(t, ctx)) return [];
+      Tasks.audited_ = {};
+      Tasks.audit_(t, 'remove');
       if (!Access.canDeleteTask(t, ctx)) throw new Error('Löschen dürfen nur die erstellende Person, Team-Leads und Admins.');
       // the task and all sub-tasks below it, then their comments: one pass per table
       const all = Db.all('Tasks');
@@ -153,6 +175,8 @@ const Tasks = {
     const me = Auth.currentUser();
     const t = Db.get('Tasks', p.taskId);
     if (!t || !Access.canSeeTask(t, Access.context(me))) throw new Error('Keine Berechtigung.');
+    Tasks.audited_ = {};
+    Db.tx(() => Tasks.audit_(t, 'comment'));
     const body = String(p.body || '').trim().slice(0, 5000);
     if (!body) throw new Error('Kommentar ist leer.');
     return Db.insert('Comments', {
@@ -160,8 +184,11 @@ const Tasks = {
     });
   },
 
-  sanitize_(p) {
+  sanitize_(p, ctx) {
     const f = {};
+    // confidential areas the person is not part of do not exist for them
+    const project = id => { const x = Db.get('Projects', id); return x && (!ctx || Access.seesProject(x, ctx)) ? x : null; };
+    const team = id => { const x = Db.get('Teams', id); return x && (!ctx || Access.seesTeam(x, ctx)) ? x : null; };
     const has = k => Object.prototype.hasOwnProperty.call(p, k);
     if (has('title')) f.title = String(p.title || '').replace(/\s+/g, ' ').trim().slice(0, 300) || 'Ohne Titel';
     if (has('description')) f.description = String(p.description || '').slice(0, 20000);
@@ -171,11 +198,11 @@ const Tasks = {
     }
     if (has('priority')) f.priority = Shared.PRIORITIES.some(s => s.key === p.priority) ? p.priority : '';
     if (has('projectId')) {
-      if (p.projectId && !Db.get('Projects', p.projectId)) throw new Error('Projekt nicht gefunden.');
+      if (p.projectId && !project(p.projectId)) throw new Error('Projekt nicht gefunden.');
       f.projectId = p.projectId || '';
     }
     if (has('teams')) {
-      f.teams = (p.teams || []).filter((id, i, a) => a.indexOf(id) === i && Db.get('Teams', id));
+      f.teams = (p.teams || []).filter((id, i, a) => a.indexOf(id) === i && team(id));
     }
     if (has('assignees')) f.assignees = cleanEmails_(p.assignees);
     if (has('tags')) {
