@@ -1,0 +1,375 @@
+<script>
+/* ==========================================================================
+   Documents and jour fixe of a project: list, viewer, in-app editor (Markdown
+   subset with live preview), versions, conflicts, action items as tasks.
+   The text lives in Drive (server: Docs.js); this file only shows and edits it.
+   ========================================================================== */
+
+/* ---------------- Markdown subset, rendered safely ---------------- */
+// Everything is escaped first; only the few marks below become markup. Links: http(s) only.
+function mdInline(s) {
+  return esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[\s(])_([^_]+)_(?=[\s).,!?]|$)/g, '$1<i>$2</i>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)"]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/(^|\s)@([^\s@]+@[^\s@]+\.[^\s@<]+)/g, (m, sp, e) => sp + '<span class="md-at">@' + esc(user(e).name) + '</span>')
+    .replace(/(^|\s)!(\d{4}-\d{2}-\d{2})(?=\s|$)/g, (m, sp, d) => sp + '<span class="md-due">' + icon('calendar', 'sm') + esc(fmtDate(d, { absolute: true })) + '</span>');
+}
+/** One action item line; o.actions: a button "Als Aufgabe" on open items (needs o.docId). */
+function mdItem(item, o) {
+  const extra = (item.assignee ? ' @' + item.assignee : '') + (item.due ? ' !' + item.due : '');
+  const task = item.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(item.taskId) + '">' + icon('check', 'sm') + 'Aufgabe</button>'
+    : o.actions && !item.done && item.text ? ' <button class="md-mk" data-action="doc-to-task" data-id="' + esc(o.docId) + '" data-text="' + esc(item.text) + '">' + icon('plus', 'sm') + 'Als Aufgabe</button>' : '';
+  return '<li class="md-ai' + (item.done ? ' done' : '') + '"><span class="md-box" aria-hidden="true">' + (item.done ? icon('check', 'sm') : '') + '</span><span>' +
+    mdInline(item.text + extra) + task + '</span></li>';
+}
+function mdTable(rows) {
+  const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+  const body = rows.filter(r => !/^\s*\|[\s:|-]+\|?\s*$/.test(r));
+  return '<div class="md-tw"><table class="md-t">' + body.map((r, k) => '<tr>' + cells(r).map(c => (k ? '<td>' : '<th>') + mdInline(c) + (k ? '</td>' : '</th>')).join('') + '</tr>').join('') + '</table></div>';
+}
+/** List lines: [tag, html] or null. */
+function mdListLine(line, o) {
+  const item = Shared.parseActionItem(line);
+  if (item) return ['ul', mdItem(item, o)];
+  const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
+  if (bullet) return ['ul', '<li>' + mdInline(bullet[1]) + '</li>'];
+  const num = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+  return num ? ['ol', '<li>' + mdInline(num[1]) + '</li>'] : null;
+}
+/** Other lines: heading, quote or paragraph. */
+function mdBlock(line) {
+  const h = /^(#{1,3})\s+(.*)$/.exec(line);
+  if (h) return '<h' + (h[1].length + 1) + ' class="md-h">' + mdInline(h[2]) + '</h' + (h[1].length + 1) + '>';
+  const q = /^>\s?(.*)$/.exec(line);
+  if (q) return '<blockquote class="md-q">' + mdInline(q[1]) + '</blockquote>';
+  return line.trim() ? '<p>' + mdInline(line) + '</p>' : '';
+}
+/** Markdown subset as HTML. o.actions: "Als Aufgabe" buttons on open action items (needs o.docId). */
+function mdRender(text, o) {
+  o = o || {};
+  const lines = String(text || '').split('\n');
+  const out = [];
+  let list = null;
+  const close = () => { if (list) out.push('</' + list + '>'); list = null; };
+  for (let i = 0; i < lines.length; i++) {
+    const li = /^#{1,3}\s/.test(lines[i]) ? null : mdListLine(lines[i], o);
+    if (li) {
+      if (list !== li[0]) { close(); out.push('<' + li[0] + ' class="md-list">'); list = li[0]; }
+      out.push(li[1]);
+      continue;
+    }
+    close();
+    if (/^\s*\|/.test(lines[i])) {
+      const rows = [];
+      for (; i < lines.length && /^\s*\|/.test(lines[i]); i++) rows.push(lines[i]);
+      i--;
+      out.push(mdTable(rows));
+    } else out.push(mdBlock(lines[i]));
+  }
+  close();
+  return '<div class="md">' + out.join('') + '</div>';
+}
+
+/* ---------------- state ---------------- */
+// S.docs[projectId]: list; S.jfs[projectId]: { series, meetings }; S.doc: open document { ..., content }
+// S.docEdit: { id, projectId, title, content, base, kind } while editing
+function docsOf(pid) {
+  if (S.docs[pid] === undefined) {
+    S.docs[pid] = null;
+    call('docs.list', { projectId: pid }).then(l => { S.docs[pid] = l; render({ peek: false }); }).catch(err => { S.docs[pid] = { error: friendlyError(err.message) }; render({ peek: false }); });
+  }
+  return S.docs[pid];
+}
+function jfOf(pid) {
+  if (S.jfs[pid] === undefined) {
+    S.jfs[pid] = null;
+    call('jf.list', { projectId: pid }).then(l => { S.jfs[pid] = l; render({ peek: false }); }).catch(err => { S.jfs[pid] = { error: friendlyError(err.message) }; render({ peek: false }); });
+  }
+  return S.jfs[pid];
+}
+function docsReload(pid) { delete S.docs[pid]; delete S.jfs[pid]; }
+const draftKey = id => 'draft:doc:' + (id || 'new');
+const RHYTHMS = () => [{ key: 'weekly', label: L('Wöchentlich', 'Weekly') }, { key: 'biweekly', label: L('Alle 2 Wochen', 'Every 2 weeks') }, { key: 'monthly', label: L('Monatlich', 'Monthly') }];
+const WEEKDAYS = () => [1, 2, 3, 4, 5, 6, 0].map(d => ({ key: String(d), label: DOW_LONG[d] }));
+
+/* ---------------- documents tab ---------------- */
+function docsTab(p) {
+  if (S.docEdit && S.docEdit.projectId === p.id) return docEditor(p);
+  if (S.doc && S.doc.projectId === p.id && S.doc.kind !== 'jf') return docViewer(p);
+  const list = docsOf(p.id);
+  const head = '<div class="docs-head"><div><h3>' + icon('text', 'sm') + 'Dokumente</h3><p class="hint">Konzepte, Notizen und Anleitungen des Projekts. Gespeichert in Google Drive (Ordner LidlFlow).</p></div>' +
+    '<button class="btn primary" data-action="doc-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neues Dokument</button></div>';
+  if (list === null) return head + skRows(3);
+  if (list.error) return head + '<div class="notice">' + esc(list.error) + '</div>';
+  if (!list.length) return head + '<div class="empty-mini">Noch keine Dokumente. Lege das erste an.</div>';
+  return head + '<div class="docs-list">' + list.map(docCard).join('') + '</div>';
+}
+function docCard(d) {
+  return '<button class="doc-card" data-action="doc-open" data-id="' + esc(d.id) + '">' + icon('text') +
+    '<span class="dc-main"><b>' + esc(d.title) + '</b><small>' + esc(d.preview || '') + '</small></span>' +
+    '<span class="dc-meta">' + (d.lockBy ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + '</span>' : '') +
+    avatar(d.updatedBy) + '<small>' + esc(timeAgo(d.updatedAt)) + '</small></span></button>';
+}
+function docViewer(p) {
+  const d = S.doc;
+  if (!d.content && d.content !== '') return skLines(6);
+  const back = d.kind === 'jf' ? 'jf' : 'docs';
+  return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close" data-v="' + back + '" title="Zurück" aria-label="Zurück">' + icon('back') + '</button>' +
+    '<div class="dv-t"><h2>' + esc(d.title) + '</h2><small>' + esc(L('Version ', 'Version ') + d.version + ' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) + '</small></div>' +
+    (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') +
+    (d.canWrite ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' +
+      '<button class="btn sm danger" data-action="doc-remove" data-id="' + esc(d.id) + '">' + icon('trash', 'sm') + 'Löschen</button>' +
+      '<button class="btn sm primary" data-action="doc-edit">' + icon('text', 'sm') + 'Bearbeiten</button>' : '') + '</div>' +
+    mdRender(d.content, { actions: d.canWrite && d.kind === 'jf', docId: d.id }) + '</div>';
+}
+
+/* ---------------- editor ---------------- */
+function docEditor() {
+  const e = S.docEdit;
+  const other = S.doc && S.doc.id === e.id && S.doc.lockBy && S.doc.lockBy !== S.me.email ? S.doc.lockBy : '';
+  const dirty = docDirty();
+  return '<div class="doc-edit card-w">' +
+    (other ? '<div class="banner warn">' + icon('lock') + '<div><b>' + esc(user(other).name) + ' bearbeitet dieses Dokument gerade.</b> Beim Speichern prüft die App, ob jemand anderes inzwischen gespeichert hat – überschrieben wird nichts.</div></div>' : '') +
+    '<input class="input de-title" data-on-input="doc-title" value="' + esc(e.title) + '" placeholder="Titel" aria-label="Titel des Dokuments" maxlength="120">' +
+    '<div class="ed-tools de-tools" role="toolbar" aria-label="Formatierung">' +
+    [['h', 'Überschrift', 'H'], ['b', 'Fett', '<b>B</b>'], ['i', 'Kursiv', '<i>I</i>'], ['ul', 'Liste', icon('list', 'sm')], ['ai', 'Action Item', icon('checksq', 'sm')],
+      ['link', 'Link', icon('open', 'sm')], ['at', 'Person erwähnen', '@'], ['tbl', 'Tabelle', icon('table', 'sm')], ['due', 'Fälligkeit', icon('calendar', 'sm')]]
+      .map(t => '<button type="button" data-action="de-fmt" data-k="' + t[0] + '" title="' + esc(t[1]) + '" aria-label="' + esc(t[1]) + '">' + t[2] + '</button>').join('') + '</div>' +
+    '<div class="de-split"><textarea class="textarea de-text" data-on-input="doc-text" aria-label="Text des Dokuments" spellcheck="true">' + esc(e.content) + '</textarea>' +
+    '<div class="de-preview" aria-label="Vorschau">' + mdRender(e.content) + '</div></div>' +
+    '<p class="hint">Markdown: # Überschrift · **fett** · _kursiv_ · - Liste · - [ ] Action Item @person@firma.de !2026-11-03 · [Text](Link) · | Tabelle |</p>' +
+    '<div class="peek-commit doc-commit' + (dirty ? '' : ' clean') + '" role="status">' + icon('text', 'sm') +
+    '<span class="grow">' + (dirty ? 'Ungespeicherte Änderungen (als Entwurf im Browser gesichert)' : 'Keine Änderungen') + '</span>' +
+    '<button type="button" class="btn sm" data-action="doc-discard">' + (dirty ? 'Verwerfen' : 'Schließen') + '</button>' +
+    '<button type="button" class="btn sm primary" data-action="doc-save"' + (dirty ? '' : ' disabled') + '>Übernehmen</button></div></div>';
+}
+function docDirty() {
+  const e = S.docEdit;
+  return !!e && (e.content !== e.savedContent || e.title !== e.savedTitle);
+}
+/** Live preview and the save bar without a full render (the textarea keeps focus and caret). */
+function docRefreshPreview() {
+  const e = S.docEdit;
+  const dirty = docDirty();
+  const pv = $('.de-preview');
+  if (pv) pv.innerHTML = mdRender(e.content);
+  const bar = $('.doc-commit');
+  if (bar) {
+    bar.classList.toggle('clean', !dirty);
+    $('.grow', bar).textContent = dirty ? 'Ungespeicherte Änderungen (als Entwurf im Browser gesichert)' : 'Keine Änderungen';
+    $('[data-action="doc-save"]', bar).disabled = !dirty;
+    $('[data-action="doc-discard"]', bar).textContent = dirty ? 'Verwerfen' : 'Schließen';
+  }
+  store.set(draftKey(e.id), dirty ? { title: e.title, content: e.content, base: e.base } : null);
+}
+ON.input['doc-text'] = el => { S.docEdit.content = el.value; docPreviewSoon(); };
+ON.input['doc-title'] = el => { S.docEdit.title = el.value; docPreviewSoon(); };
+const docPreviewSoon = debounce(() => { if (S.docEdit) docRefreshPreview(); }, 150);
+
+function docStartEdit(d, projectId) {
+  const e = { id: d ? d.id : null, projectId: projectId, kind: d ? d.kind : 'doc', title: d ? d.title : '', content: d ? d.content : '',
+    base: d ? d.version : 0, savedTitle: d ? d.title : '', savedContent: d ? d.content : '' };
+  const draft = store.get(draftKey(e.id), null);
+  if (draft && (draft.content !== e.content || draft.title !== e.title)) {
+    e.title = draft.title;
+    e.content = draft.content;
+    toast(L('Dein ungespeicherter Entwurf wurde wiederhergestellt.', 'Your unsaved draft was restored.'));
+  }
+  S.docEdit = e;
+  if (e.id) docLock(e.id);
+  render({ peek: false });
+  const ta = $('.de-text');
+  if (ta) ta.focus();
+}
+let docLockTimer = null;
+function docLock(id) {
+  clearInterval(docLockTimer);
+  call('docs.lock', { id: id }, { quiet: true }).catch(() => {});
+  // renewed while the editor is open (the lock runs out after 5 minutes on its own)
+  docLockTimer = setInterval(() => { if (S.docEdit && S.docEdit.id === id) call('docs.lock', { id: id }, { quiet: true }).catch(() => {}); else clearInterval(docLockTimer); }, 4 * 60000);
+}
+function docEndEdit() {
+  const e = S.docEdit;
+  clearInterval(docLockTimer);
+  if (e && e.id) call('docs.unlock', { id: e.id }, { quiet: true }).catch(() => {});
+  S.docEdit = null;
+}
+
+A['doc-new'] = el => { S.doc = null; docStartEdit(null, el.dataset.id); };
+A['doc-open'] = el => docOpen(el.dataset.id);
+function docOpen(id) {
+  S.doc = { id: id, projectId: S.route.id, kind: (S.jfs[S.route.id] && S.jfs[S.route.id].meetings || []).some(m => m.id === id) ? 'jf' : 'doc' };
+  render({ peek: false });
+  return call('docs.get', { id: id }).then(d => { S.doc = d; render({ peek: false }); }).catch(err => { S.doc = null; render({ peek: false }); fail(err); });
+}
+A['doc-close'] = el => { S.doc = null; S.projTab = el.dataset.v || 'docs'; render({ peek: false }); };
+A['doc-edit'] = () => docStartEdit(S.doc, S.doc.projectId);
+A['doc-discard'] = () => {
+  const e = S.docEdit;
+  store.set(draftKey(e.id), null);
+  docEndEdit();
+  render({ peek: false });
+};
+A['doc-save'] = () => docSave(false);
+function docSave(force) {
+  const e = S.docEdit;
+  const payload = e.id ? { id: e.id, title: e.title, content: e.content, baseVersion: e.base } : { projectId: e.projectId, title: e.title, content: e.content };
+  return call('docs.save', payload).then(r => {
+    if (r.conflict && !force) return docConflict(r.current);
+    if (r.conflict) { e.base = r.current.version; return docSave(false); }
+    store.set(draftKey(e.id), null);
+    docEndEdit();
+    docsReload(e.projectId);
+    toast(L('Gespeichert in Google Drive', 'Saved to Google Drive'));
+    return docOpen(r.id);
+  }).catch(fail);
+}
+/** Someone saved in between: keep mine (on top of theirs) or take theirs. Nothing is lost silently. */
+function docConflict(cur) {
+  openModal({
+    title: L('Inzwischen geändert', 'Changed in the meantime'),
+    body: '<p style="margin:0 0 8px">' + esc(L(user(cur.updatedBy).name + ' hat das Dokument gespeichert, während du es bearbeitet hast (Version ' + cur.version + ').',
+      user(cur.updatedBy).name + ' saved the document while you were editing it (version ' + cur.version + ').')) + '</p>' +
+      '<p class="hint">' + esc(L('Deine Fassung bleibt als Entwurf im Browser erhalten. Ihre Fassung siehst du unten.', 'Your text stays as a draft in this browser. Theirs is shown below.')) + '</p>' +
+      '<div class="de-preview conflict">' + mdRender(cur.content) + '</div>',
+    submitLabel: L('Meine Fassung speichern', 'Save my version'),
+    danger: { label: L('Ihre Fassung übernehmen', 'Take their version'), onClick: () => {
+      const e = S.docEdit;
+      store.set(draftKey(e.id), null);
+      closeModal();
+      docEndEdit();
+      docOpen(e.id);
+    } },
+    onSubmit: () => { S.docEdit.base = cur.version; closeModal(); return docSave(true); },
+  });
+}
+A['doc-remove'] = el => {
+  const d = S.doc;
+  confirmDelete(L('„' + d.title + '“ löschen? Die Datei kommt in den Google-Drive-Papierkorb.', 'Delete “' + d.title + '”? The file goes to the Google Drive trash.'),
+    () => call('docs.remove', { id: el.dataset.id }).then(() => { docsReload(d.projectId); S.doc = null; render({ peek: false }); toast(L('Gelöscht', 'Deleted')); }));
+};
+A['doc-versions'] = el => {
+  const id = el.dataset.id;
+  call('docs.versions', { id: id }).then(list => openModal({
+    title: L('Versionen', 'Versions'),
+    body: list.length ? '<div class="list-plain">' + list.map(v => '<div class="li"><span class="grow"><b>' + esc(L('Version ', 'Version ') + v.version) + '</b> <span class="faint">' +
+      esc(user(v.by).name + ' · ' + timeAgo(v.at)) + '</span></span><button type="button" class="btn sm" data-action="doc-restore" data-id="' + esc(id) + '" data-v="' + v.version + '">' +
+      esc(L('Wiederherstellen', 'Restore')) + '</button></div>').join('') + '</div>' : '<p class="hint">' + esc(L('Noch keine älteren Versionen.', 'No earlier versions yet.')) + '</p>',
+    submitLabel: L('Schließen', 'Close'),
+    onSubmit: () => closeModal(),
+  })).catch(fail);
+};
+A['doc-restore'] = el => call('docs.restore', { id: el.dataset.id, version: Number(el.dataset.v) })
+  .then(() => { closeModal(); toast(L('Version wiederhergestellt', 'Version restored')); return docOpen(el.dataset.id); }).catch(fail);
+
+/** Toolbar: inserts the mark at the caret (or around the selection). */
+A['de-fmt'] = el => {
+  const ta = $('.de-text');
+  if (!ta) return;
+  const k = el.dataset.k;
+  if (k === 'at') {
+    return peopleModal({ title: L('Person erwähnen', 'Mention someone'), single: true, selected: [], prefer: (S.users || []).map(u => u.email),
+      onChange: list => deInsert(ta, '@' + list[0] + ' ', '') });
+  }
+  const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+  const wrap = { b: ['**', '**'], i: ['_', '_'], link: ['[', '](https://)'] }[k];
+  if (wrap) return deInsert(ta, wrap[0] + (sel || L('Text', 'text')) + wrap[1], '', true);
+  const block = { h: '\n## ', ul: '\n- ', ai: '\n- [ ] ', tbl: '\n| Spalte | Spalte |\n|---|---|\n| | |\n', due: ' !' + TODAY() }[k];
+  deInsert(ta, block, '');
+};
+function deInsert(ta, text, after, replace) {
+  const a = ta.selectionStart;
+  const b = replace ? ta.selectionEnd : a;
+  ta.value = ta.value.slice(0, a) + text + after + ta.value.slice(b);
+  ta.selectionStart = ta.selectionEnd = a + text.length;
+  ta.focus();
+  S.docEdit.content = ta.value;
+  docRefreshPreview();
+}
+
+/* ---------------- jour fixe tab ---------------- */
+function jfTab(p) {
+  if (S.docEdit && S.docEdit.projectId === p.id) return docEditor(p);
+  if (S.doc && S.doc.projectId === p.id && S.doc.kind === 'jf') return docViewer(p);
+  const jf = jfOf(p.id);
+  const head = '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3><p class="hint">Regelmäßige Termine mit Protokoll aus der Vorlage. Offene Action Items wandern ins nächste Protokoll.</p></div>' +
+    '<button class="btn primary" data-action="jf-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button></div>';
+  if (jf === null) return head + skRows(3);
+  if (jf.error) return head + '<div class="notice">' + esc(jf.error) + '</div>';
+  const series = jf.series.length ? '<div class="jf-list">' + jf.series.map(s => jfCard(s)).join('') + '</div>'
+    : '<div class="empty-mini">Noch kein Jour Fixe. Lege eine Serie an, z. B. jeden Montag 9:00.</div>';
+  const archive = jf.meetings.length ? '<div class="h2">' + icon('inbox') + 'Protokolle</div><div class="docs-list">' + jf.meetings.map(docCard).join('') + '</div>' : '';
+  return head + series + archive;
+}
+function jfCard(s) {
+  const next = Shared.jfDates(s, TODAY(), Shared.addDays(TODAY(), 62))[0];
+  const last = Shared.jfDates(s, Shared.addDays(TODAY(), -62), TODAY()).pop();
+  const rh = (RHYTHMS().find(r => r.key === s.rhythm) || RHYTHMS()[0]).label;
+  return '<div class="card-w jf-card"><div class="jf-top"><b>' + esc(s.title) + '</b><span class="chip soft">' + esc(rh + ' · ' + DOW_LONG[s.weekday] + ' ' + s.time) + '</span>' +
+    '<span class="grow"></span>' + avatars(s.attendees || [], 5) +
+    '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '" title="Bearbeiten" aria-label="Jour Fixe bearbeiten">' + icon('settings', 'sm') + '</button></div>' +
+    '<div class="jf-acts">' +
+    (last ? '<button class="btn sm" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + last + '">' + icon('text', 'sm') + esc(L('Letzter: ', 'Last: ') + fmtDate(last, { absolute: true })) + '</button>' : '') +
+    (next ? '<button class="btn sm primary" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + next + '">' + icon('text', 'sm') + esc(L('Nächster: ', 'Next: ') + fmtDate(next, { absolute: true })) + '</button>' : '') +
+    (s.meetLink ? '<a class="btn sm" href="' + esc(s.meetLink) + '" target="_blank" rel="noopener noreferrer">' + icon('open', 'sm') + 'Meet</a>' : '') + '</div></div>';
+}
+A['jf-open'] = el => jfOpen(el.dataset.id, el.dataset.v);
+function jfOpen(seriesId, date) {
+  return call('jf.meeting', { seriesId: seriesId, date: date, lang: LANG }).then(m => {
+    const pid = m.projectId;
+    delete S.jfs[pid];
+    S.projTab = 'jf';
+    if (S.route.view !== 'project' || S.route.id !== pid) go('project', pid);
+    S.doc = { id: m.id, projectId: pid, kind: 'jf' };
+    return call('docs.get', { id: m.id });
+  }).then(d => { S.doc = d; render({ peek: false }); }).catch(fail);
+}
+A['jf-new'] = el => jfModal(null, el.dataset.id);
+A['jf-edit'] = el => {
+  const s = Object.values(S.jfs).filter(Boolean).flatMap(x => x.series || []).find(x => x.id === el.dataset.id);
+  if (s) jfModal(s, s.projectId);
+};
+function jfModal(s, projectId) {
+  const p = project(projectId);
+  s = s || { title: 'Jour Fixe', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: TODAY(), attendees: p ? projectMembers(p) : [S.me.email] };
+  openModal({
+    title: s.id ? L('Jour Fixe bearbeiten', 'Edit jour fixe') : L('Neuer Jour Fixe', 'New jour fixe'),
+    body: field('Titel', '<input class="input" name="title" required maxlength="80" value="' + esc(s.title) + '">') +
+      '<div class="row">' + field('Rhythmus', selectField('rhythm', RHYTHMS(), s.rhythm)) + field('Wochentag', selectField('weekday', WEEKDAYS(), String(s.weekday))) + '</div>' +
+      '<div class="row">' + field('Uhrzeit', '<input class="input" type="time" name="time" value="' + esc(s.time) + '">') +
+      field('Dauer (Min.)', '<input class="input" type="number" min="15" max="480" step="5" name="duration" value="' + esc(s.duration) + '">') + '</div>' +
+      '<div class="row">' + field('Ab', '<input class="input" type="date" name="startDate" value="' + esc(s.startDate || '') + '">') +
+      field('Bis (optional)', '<input class="input" type="date" name="endDate" value="' + esc(s.endDate || '') + '">') + '</div>' +
+      divField('Teilnehmende', peoplePicker('attendees', s.attendees || [], { add: 'Personen hinzufügen', prefer: p ? projectMembers(p) : [] })) +
+      field('Google-Meet-Link (optional)', '<input class="input" name="meetLink" placeholder="https://meet.google.com/…" value="' + esc(s.meetLink || '') + '">'),
+    submitLabel: s.id ? 'Speichern' : L('Jour Fixe anlegen', 'Create jour fixe'),
+    danger: s.id ? { label: L('Serie beenden', 'End series'), onClick: () => confirmDelete(L('Serie beenden? Alle Protokolle bleiben erhalten.', 'End the series? All minutes are kept.'),
+      () => call('jf.removeSeries', { id: s.id }).then(() => { delete S.jfs[projectId]; calReload(); })) } : null,
+    onSubmit: v => call('jf.saveSeries', Object.assign({ id: s.id, projectId: projectId }, v, { weekday: Number(v.weekday), attendees: collectPeople(v, 'attendees') }))
+      .then(() => { delete S.jfs[projectId]; closeModal(); calReload(); toast(L('Jour Fixe gespeichert', 'Jour fixe saved')); }),
+  });
+}
+A['doc-to-task'] = el => call('jf.actionToTask', { docId: el.dataset.id, text: el.dataset.text }).then(r => {
+  applyTasks([r.task]);
+  toast(L('Aufgabe angelegt: ', 'Task created: ') + r.task.title, { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.task.id) } });
+  return docOpen(el.dataset.id);
+}).catch(fail);
+
+/* ---------------- admin: storage links ---------------- */
+function storageBox() {
+  if (S.storage === undefined) {
+    S.storage = null;
+    call('storage.links').then(l => { S.storage = l; render(); }).catch(err => { S.storage = { error: friendlyError(err.message) }; render(); });
+  }
+  const l = S.storage;
+  if (!l) return skLines(1);
+  if (l.error) return '<div class="notice">' + esc(l.error) + '</div>';
+  const link = (href, label, ic) => (href ? '<a class="btn sm" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + icon(ic, 'sm') + esc(label) + '</a>' : '');
+  return '<p class="hint">' + esc(L('Alles liegt im Google Drive des App-Kontos: Datenbank, Backups und der Ordner LidlFlow mit Dokumenten und Jour-Fixe-Protokollen.',
+    'Everything lives in the Google Drive of the app account: the database, the backups and the LidlFlow folder with documents and jour fixe minutes.')) + '</p>' +
+    '<div class="row-btns">' + link(l.database, L('Datenbank öffnen', 'Open database'), 'table') + link(l.backups, L('Backups öffnen', 'Open backups'), 'layers') +
+    link(l.drive, L('Drive-Ordner öffnen', 'Open Drive folder'), 'folder') + (l.drive ? '' : '<span class="faint">' + esc(L('Der Drive-Ordner entsteht mit dem ersten Dokument.', 'The Drive folder appears with the first document.')) + '</span>') + '</div>';
+}
+</script>

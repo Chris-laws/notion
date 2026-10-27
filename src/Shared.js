@@ -383,7 +383,59 @@ function SharedFactory() {
     return PROJECT_PALETTE.reduce((best, c) => (count(c) < count(best) ? c : best), PROJECT_PALETTE[0]);
   }
 
+  /**
+   * Meeting dates of a jour fixe series between from and to: weekly, every two weeks (counted
+   * from the first meeting) or monthly (same weekday in the same week of the month).
+   * s: { rhythm, weekday, startDate, endDate? }
+   */
+  function jfDates(s, from, to) {
+    const wd = Math.max(0, Math.min(6, Math.round(Number(s.weekday)) || 0));
+    const first = nextWeekday(isDate(s.startDate) ? s.startDate : from, wd, true);
+    const end = isDate(s.endDate) && s.endDate < to ? s.endDate : to;
+    const out = [];
+    if (s.rhythm === 'monthly') {
+      const nth = Math.floor((Number(first.slice(8)) - 1) / 7);
+      for (let m = first.slice(0, 8) + '01'; m <= end; m = addMonths(m, 1)) {
+        const d = addDays(nextWeekday(m, wd, true), nth * 7);
+        if (d.slice(0, 7) === m.slice(0, 7) && d >= from && d <= end) out.push(d);
+      }
+      return out;
+    }
+    const step = s.rhythm === 'biweekly' ? 14 : 7;
+    let d = first;
+    if (d < from) d = addDays(d, Math.ceil(diffDays(d, from) / step) * step);
+    for (; d <= end && out.length < 400; d = addDays(d, step)) out.push(d);
+    return out;
+  }
+
+  /**
+   * An action item line of a document: "- [ ] text @person@firma.de !2026-11-03", optionally
+   * followed by "⟶ #t_id" once it became a task. Other lines: null.
+   */
+  function parseActionItem(line) {
+    const m = /^\s*[-*]\s+\[( |x|X)\]\s+(.*)$/.exec(String(line || ''));
+    if (!m) return null;
+    let rest = m[2];
+    let taskId = '';
+    const link = /\s*⟶\s*#(t_\w+)\s*$/.exec(rest);
+    if (link) { taskId = link[1]; rest = rest.slice(0, link.index); }
+    let due = '';
+    rest = rest.replace(/(^|\s)!(\d{4}-\d{2}-\d{2})(?=\s|$)/, (x, sp, d) => { due = isDate(d) ? d : ''; return sp; });
+    let assignee = '';
+    rest = rest.replace(/(^|\s)@([^\s@]+@[^\s@]+\.[^\s@]+)(?=\s|$)/, (x, sp, e) => { assignee = e.toLowerCase(); return sp; });
+    return { done: m[1] !== ' ', text: rest.replace(/\s+/g, ' ').trim(), assignee: assignee, due: due, taskId: taskId };
+  }
+
+  /** A name that is safe as a Drive file or folder name (no path characters, never empty or a dot name). */
+  function safeName(s) {
+    // control characters out (by char code: the page embeds this file, escapes would not survive)
+    const visible = String(s || '').split('').filter(c => c.charCodeAt(0) >= 32).join('');
+    const name = visible.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80);
+    return !name || /^\.+$/.test(name) ? '_' : name;
+  }
+
   return {
+    jfDates, parseActionItem, safeName,
     QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,

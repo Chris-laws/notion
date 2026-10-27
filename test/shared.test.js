@@ -208,3 +208,57 @@ describe('project colours per team', () => {
     assert.equal(S.freeProjectColor(full.concat([P('x', 't', 'blue')]), 't', 'x'), 'blue');
   });
 });
+
+describe('jour fixe dates', () => {
+  const ser = (rhythm, weekday, extra) => Object.assign({ rhythm: rhythm, weekday: weekday, startDate: '2026-11-02' }, extra || {});
+  test('weekly: every matching weekday in the range, from the start date on', () => {
+    assert.deepEqual(plain(S.jfDates(ser('weekly', 1), '2026-10-26', '2026-11-22')), ['2026-11-02', '2026-11-09', '2026-11-16']);
+  });
+  test('every two weeks counts from the first meeting', () => {
+    assert.deepEqual(plain(S.jfDates(ser('biweekly', 3), '2026-11-01', '2026-12-10')), ['2026-11-04', '2026-11-18', '2026-12-02']);
+  });
+  test('monthly: the same weekday in the same week of the month (first Monday)', () => {
+    assert.deepEqual(plain(S.jfDates(ser('monthly', 1), '2026-11-01', '2027-01-31')), ['2026-11-02', '2026-12-07', '2027-01-04']);
+  });
+  test('meetings exactly on the first and the last day of the range count', () => {
+    assert.deepEqual(plain(S.jfDates(ser('weekly', 1), '2026-11-02', '2026-11-16')), ['2026-11-02', '2026-11-09', '2026-11-16']);
+    assert.deepEqual(plain(S.jfDates(ser('monthly', 1), '2026-12-07', '2027-02-01')), ['2026-12-07', '2027-01-04', '2027-02-01']);
+  });
+  test('monthly keeps the week of the month: started on the 7th = first week, on a 5th Monday = only months with one', () => {
+    assert.deepEqual(plain(S.jfDates(ser('monthly', 1, { startDate: '2026-12-07' }), '2026-12-01', '2027-01-31')), ['2026-12-07', '2027-01-04']);
+    assert.deepEqual(plain(S.jfDates(ser('monthly', 1, { startDate: '2026-11-30' }), '2026-11-01', '2027-03-31')), ['2026-11-30', '2027-03-29']);
+  });
+  test('an empty end date means no end; at most 400 meetings per call', () => {
+    assert.equal(S.jfDates(ser('weekly', 1, { endDate: '' }), '2026-11-01', '2026-11-30').length, 5);
+    assert.equal(S.jfDates(ser('weekly', 1), '2026-11-01', '2040-01-01').length, 400);
+  });
+  test('an end date stops the series; a range before the start is empty', () => {
+    assert.deepEqual(plain(S.jfDates(ser('weekly', 1, { endDate: '2026-11-10' }), '2026-11-01', '2026-11-30')), ['2026-11-02', '2026-11-09']);
+    assert.deepEqual(plain(S.jfDates(ser('weekly', 1), '2026-01-01', '2026-10-31')), []);
+  });
+});
+
+describe('action items', () => {
+  test('an open item with person and due date', () => {
+    assert.deepEqual(plain(S.parseActionItem('- [ ] Angebot einholen @anna.schmidt@firma.de !2026-11-03')),
+      { done: false, text: 'Angebot einholen', assignee: 'anna.schmidt@firma.de', due: '2026-11-03', taskId: '' });
+  });
+  test('a done item, an item already turned into a task, and plain lines', () => {
+    assert.equal(S.parseActionItem('- [x] Erledigt').done, true);
+    assert.equal(S.parseActionItem('* [ ] Folien ⟶ #t_ab12').taskId, 't_ab12');
+    assert.equal(S.parseActionItem('- [ ] Folien ⟶ #t_ab12').text, 'Folien');
+    assert.equal(S.parseActionItem('- normaler Punkt'), null);
+    assert.equal(S.parseActionItem('Text'), null);
+    assert.equal(S.parseActionItem('- [ ] Termin !2026-02-31').due, '', 'not a real date');
+  });
+});
+
+describe('safe file names', () => {
+  test('characters Drive or a path would trip over become dashes; never empty, never a dot name', () => {
+    assert.equal(S.safeName('Q4 / Plan: "neu"?'), 'Q4 - Plan- -neu--');
+    assert.equal(S.safeName('  \u0000 '), '_');
+    assert.equal(S.safeName('..'), '_');
+    assert.equal(S.safeName('a' + String.fromCharCode(92) + 'b'), 'a-b', 'backslash too');
+    assert.equal(S.safeName('x'.repeat(200)).length, 80);
+  });
+});

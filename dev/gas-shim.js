@@ -167,4 +167,50 @@
     },
   };
   root.CalendarApp = { getCalendarById: () => null };
+
+  // Drive: folders and text files in memory (only what the app uses with the drive.file scope)
+  const drive = {};
+  let driveSeq = 0;
+  const iter = list => { let i = 0; return { hasNext: () => i < list.length, next: () => list[i++] }; };
+  function DFile(name, content, mime, parent) {
+    this.id = 'f_' + (++driveSeq);
+    let trashed = false;
+    let data = String(content);
+    this.getId = () => this.id;
+    this.getName = () => name;
+    this.setName = n => { name = n; return this; };
+    this.getMimeType = () => mime;
+    this.getUrl = () => 'https://drive.google.com/file/d/' + this.id;
+    this.getBlob = () => ({ getDataAsString: () => data });
+    this.setContent = c => { meter('driveWrite'); data = String(c); return this; };
+    this.getSize = () => data.length;
+    this.setTrashed = t => { trashed = !!t; return this; };
+    this.isTrashed = () => trashed;
+    this.getParents = () => iter([parent]);
+    drive[this.id] = this;
+  }
+  function DFolder(name, parent) {
+    this.id = 'd_' + (++driveSeq);
+    const folders = [];
+    const files = [];
+    let trashed = false;
+    this.getId = () => this.id;
+    this.getName = () => name;
+    this.setName = n => { name = n; return this; };
+    this.getUrl = () => 'https://drive.google.com/drive/folders/' + this.id;
+    this.getParents = () => iter(parent ? [parent] : []);
+    this.createFolder = n => { meter('driveWrite'); const f = new DFolder(n, this); folders.push(f); return f; };
+    this.getFoldersByName = n => iter(folders.filter(f => f.getName() === n && !f.isTrashed()));
+    this.getFolders = () => iter(folders.filter(f => !f.isTrashed()));
+    this.createFile = (n, c, m) => { meter('driveWrite'); const f = new DFile(n, c, m || 'text/plain', this); files.push(f); return f; };
+    this.getFiles = () => iter(files.filter(f => !f.isTrashed()));
+    this.setTrashed = t => { trashed = !!t; return this; };
+    this.isTrashed = () => trashed;
+    drive[this.id] = this;
+  }
+  root.DriveApp = {
+    createFolder: n => { meter('driveWrite'); return new DFolder(n, null); },
+    getFolderById: id => { meter('driveRead'); if (!(drive[id] instanceof DFolder)) throw new Error('No item with the given ID could be found.'); return drive[id]; },
+    getFileById: id => { meter('driveRead'); if (!(drive[id] instanceof DFile)) throw new Error('No item with the given ID could be found.'); return drive[id]; },
+  };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -10,7 +10,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
 // no web fonts from external hosts: loading them sends every user's IP address to a third party (GDPR)
-const HOSTS = ['www.googleapis.com', 'date.nager.at', 'aiplatform.googleapis.com', 'docs.google.com', 'www.w3.org', 'script.google.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
+const HOSTS = ['www.googleapis.com', 'date.nager.at', 'aiplatform.googleapis.com', 'docs.google.com', 'www.w3.org', 'script.google.com', 'fonts.googleapis.com', 'fonts.gstatic.com', 'drive.google.com', 'meet.google.com'];
 const LICENSES = /^\(?(MIT|MIT-0|ISC|BSD-2-Clause|BSD-3-Clause|Apache-2\.0|0BSD|BlueOak-1\.0\.0|CC0-1\.0|CC-BY-4\.0|Python-2\.0|Unlicense)(\s+(OR|AND)\s+(MIT|ISC|BSD-2-Clause|BSD-3-Clause|Apache-2\.0|0BSD|CC0-1\.0))*\)?$/;
 
 // dev tools only (never deployed: clasp pushes src/ alone), with the reason

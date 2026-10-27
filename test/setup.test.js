@@ -5,9 +5,10 @@ const { freshApp } = require('./helpers');
 
 describe('manifest', () => {
   const manifest = require('../src/appsscript.json');
-  test('asks only for the scopes the app needs: sheets, holiday calendars (read), outgoing requests, own e-mail', () => {
+  test('asks only for the scopes the app needs: sheets, holiday calendars (read), own Drive files, outgoing requests, own e-mail', () => {
     assert.deepEqual(manifest.oauthScopes.slice().sort(), [
       'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/drive.file',
       'https://www.googleapis.com/auth/script.external_request',
       'https://www.googleapis.com/auth/spreadsheets',
       'https://www.googleapis.com/auth/userinfo.email',

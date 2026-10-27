@@ -50,6 +50,27 @@ const SCHEMA = {
   HolidayCache: {
     cols: ['key', 'json', 'fetchedAt'],
   },
+  // documents and jour fixe minutes: the text is a Markdown file in Drive (fileId), this is the metadata
+  Docs: {
+    cols: ['id', 'projectId', 'kind', 'seriesId', 'date', 'title', 'fileId', 'version', 'size', 'preview',
+      'updatedAt', 'updatedBy', 'createdBy', 'createdAt', 'lockBy', 'lockUntil'],
+    num: ['version', 'size'],
+  },
+  // earlier versions of a document (files in the project's .versions folder)
+  DocVersions: {
+    cols: ['id', 'docId', 'version', 'fileId', 'at', 'by'],
+    num: ['version'],
+  },
+  JfSeries: {
+    cols: ['id', 'projectId', 'title', 'rhythm', 'weekday', 'time', 'duration', 'startDate', 'endDate', 'attendees', 'meetLink',
+      'active', 'createdBy', 'createdAt'],
+    json: ['attendees'],
+    num: ['weekday', 'duration'],
+  },
+  // Drive folder per team, project and series ("project:<id>" -> folder id)
+  Folders: {
+    cols: ['key', 'folderId'],
+  },
   // write-ahead undo steps of the running transaction (empty when nothing is in flight)
   Journal: {
     cols: ['seq', 'tx', 'op', 'tbl', 'rowKey', 'before', 'createdAt'],
@@ -66,7 +87,7 @@ const Db = (function () {
   // Each table has a version token; every write replaces it, so a cached copy is
   // only used while its token is still current (no stale reads after a write).
   // Big tables are split into chunks (the cache takes up to 100 KB per value).
-  const CACHED = { Users: 1, Teams: 1, Projects: 1, CompanyHolidays: 1, Tasks: 1, Events: 1, Absences: 1, Comments: 1 };
+  const CACHED = { Users: 1, Teams: 1, Projects: 1, CompanyHolidays: 1, Tasks: 1, Events: 1, Absences: 1, Comments: 1, Docs: 1, JfSeries: 1, Folders: 1 };
   const CACHE_TTL = 600;
   // characters per chunk: at most 3 bytes each in UTF-8, so a chunk stays under the 100 KB limit;
   // compressed copies are base64 (1 byte per character) and use bigger chunks

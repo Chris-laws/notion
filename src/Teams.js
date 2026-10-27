@@ -38,6 +38,7 @@ const Teams = {
         // the dialog has no icon field: keep the icon unless one is sent
         if (p.icon === undefined) delete data.icon;
         Users.ensure(members);
+        if (team.name !== data.name) Store.rename('team:' + p.id, data.name);
         return Db.update('Teams', p.id, data);
       }
       Users.ensure(members);
@@ -132,6 +133,7 @@ const Projects = {
         if (p.icon === undefined) delete data.icon;
         data.color = Projects.color_(p.color === undefined ? project.color : p.color, team.id, p.id);
         Users.ensure(data.members);
+        if (project.name !== data.name) Store.rename('project:' + p.id, data.name);
         return Db.update('Projects', p.id, data);
       }
       if (!mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');

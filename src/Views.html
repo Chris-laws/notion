@@ -1580,6 +1580,10 @@ function projectPage(p) {
       rows.map(r => '<div class="brow"><div class="bt"><b>' + r.l + '</b><small>' + r.d + '</small></div><div class="bb"><span class="track"><i style="width:' + r.v + '%"></i></span></div><div class="bv"><b>' + r.v + ' %</b><small>' + r.c + '</small></div></div>').join('') + '</div>';
   } else if (tab === 'tasks') {
     body = database(tasks, { hideProject: true, people: members });
+  } else if (tab === 'docs') {
+    body = docsTab(p);
+  } else if (tab === 'jf') {
+    body = jfTab(p);
   } else {
     const whole = !p.members.length;
     // who belongs to the project: the whole team (default) or a picked list of people
@@ -1607,11 +1611,17 @@ function projectPage(p) {
     '<div class="pj-acts"><button class="icon-btn sq" data-action="new-task" title="Neue Aufgabe">' + icon('plus') + '</button>' +
     '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
     '<button class="icon-btn sq" data-action="project-edit" data-id="' + esc(p.id) + '" title="Projekt bearbeiten">' + icon('settings') + '</button></div></div>' +
-    '<div class="pj-tabs">' + [['overview', 'Übersicht', ''], ['tasks', 'Aufgaben', top.length], ['members', 'Mitglieder', members.length]].map(x =>
+    '<div class="pj-tabs">' + [['overview', 'Übersicht', ''], ['tasks', 'Aufgaben', top.length], ['docs', 'Dokumente', ''], ['jf', 'Jour Fixe', ''], ['members', 'Mitglieder', members.length]].map(x =>
       '<button class="' + (tab === x[0] ? 'on' : '') + '" data-action="proj-tab" data-v="' + x[0] + '">' + x[1] + (x[2] !== '' ? ' <span class="n">' + x[2] + '</span>' : '') + '</button>').join('') + '</div>' +
     '<div class="fit-body" data-keep-scroll="fit">' + body + '</div></div>';
 }
-A['proj-tab'] = el => { S.projTab = el.dataset.v; render(); };
+A['proj-tab'] = el => {
+  // leaving the editor with unsaved text: the draft stays in the browser and comes back next time
+  if (S.docEdit) docEndEdit();
+  S.doc = null;
+  S.projTab = el.dataset.v;
+  render();
+};
 
 /* ---------------- team calendar ---------------- */
 function scopeButton(action, teamId, personal) {
@@ -1912,7 +1922,8 @@ function settingsPage() {
         '<span class="grow">' + esc(h.name) + ' <span class="faint">' + esc(h.countries.length ? h.countries.join(', ') : 'alle Länder') + '</span></span>' +
         '<button class="btn sm danger" data-action="ch-remove" data-id="' + esc(h.id) + '">Entfernen</button></div>').join('') || '<div class="empty-li">Keine.</div>') +
       '</div><button class="btn sm outline" data-action="ch-new" style="margin-top:8px">' + icon('plus', 'sm') + 'Firmen-Feiertag</button>' +
-      '<div class="h2">' + icon('lock') + 'Datensicherung</div>' + backupBox();
+      '<div class="h2">' + icon('lock') + 'Datensicherung</div>' + backupBox() +
+      '<div class="h2">' + icon('folder') + 'Ablage</div>' + storageBox();
   }
   return '<div class="page">' + pageHead('Einstellungen', '') + '<div class="fit-body" data-keep-scroll="fit">' +
     '<p class="page-sub">Angemeldet über Google als <b>' + esc(me.email) + '</b>. Land, Region, Wochenstunden und Arbeitstage bestimmen deine Kapazität.</p>' +

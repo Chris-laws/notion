@@ -17,7 +17,14 @@ describe('calendar request fails', () => {
     const box = w.document.querySelector('.cal-error');
     assert.ok(box, 'error box shown');
     assert.match(box.textContent, /nicht geladen/);
-    const tries = w.eval('window.__calls');
+    // wait until retries of every range are through (no more calls for 2.5 s)
+    let tries = -1;
+    for (let end = Date.now() + 15000; Date.now() < end;) {
+      const now = w.eval('window.__calls');
+      if (now === tries) break;
+      tries = now;
+      await wait(2500);
+    }
     w.eval('render()');
     await wait(100);
     assert.equal(w.eval('window.__calls'), tries, 'no endless retry loop on re-render');

@@ -729,7 +729,12 @@ function eventModal(ev, date) {
   });
 }
 A['event-new'] = el => eventModal(null, el && el.dataset.date);
-A['event-edit'] = (el, e) => { e.stopPropagation(); const ev = calFind('events', el.dataset.id); if (ev) eventModal(ev); };
+A['event-edit'] = (el, e) => {
+  e.stopPropagation();
+  const ev = calFind('events', el.dataset.id);
+  if (ev && ev.type === 'jf') jfOpen(ev.seriesId, ev.startDate);
+  else if (ev) eventModal(ev);
+};
 
 /* Absence */
 function absenceModal(a) {

@@ -63,9 +63,12 @@ New version later: `npm run guard`, `clasp push`, run `setup()` again (adds new 
 | `spreadsheets` | read and write the database spreadsheet |
 | `script.external_request` | public holidays from Nager.Date; Vertex AI when a key is set |
 | `calendar.readonly` | read Google's public holiday calendars (`en.<country>#holiday@group.v.calendar.google.com`) when Nager.Date does not answer; no personal calendars are read or written |
+| `drive.file` | documents and jour fixe minutes as Markdown files in the app's own Drive folder `LidlFlow`; the app can only see files it created itself, nothing else in Drive |
 | `userinfo.email` | identify the signed-in person (Google SSO) |
 
-No access to Gmail, Drive files or contacts is requested, and nothing is written to any calendar.
+No access to Gmail, contacts or other Drive files is requested, and nothing is written to any calendar.
+
+**Documents and jour fixe.** People write documents and meeting minutes in the app (Markdown with headings, lists, action items, links, tables, @mentions). The text is stored as `.md` files in the Drive of the deploying account: `LidlFlow/Projects/<team>/<project>/Documents` and `…/Jour Fixe/<series>/<date> <series>.md`; earlier versions in `…/<project>/.versions` (last 10 per document). The database keeps the metadata (sheets `Docs`, `DocVersions`, `JfSeries`, `Folders`). Markdown files were chosen over Google Docs because the app writes exactly what people typed (no formatting lost on each save) and no `documents` scope is needed. Users never need access to the files: the app reads and writes them as the owner and shows them to project members only. Saving names the version it started from; if someone saved in between, nothing is overwritten and the app offers both versions. Deleting moves files to the Drive trash. The root folder id is the script property `DRIVE_ROOT_FOLDER_ID`; to move everything to a shared drive later, move the `LidlFlow` folder there (ids stay the same).
 
 **Approval:** if the Workspace admin restricts third-party or internal apps (Admin console → Security → Access and data control → API controls), they must mark the Apps Script project as trusted or allow these scopes for it. **When the scopes change** (for example after an update that adds one), the deploying account must authorise once more: open the Apps Script editor, run any function (e.g. `setup`) and confirm the consent screen; users of the web app see a new consent screen on their next visit.
 

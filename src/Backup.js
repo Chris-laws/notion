@@ -10,7 +10,7 @@
 const Backup = {
   KEEP: 8,
   // tables worth keeping (the journal and the holiday cache are rebuilt by the app)
-  TABLES: ['Users', 'Teams', 'Projects', 'Tasks', 'Comments', 'Events', 'Absences', 'CompanyHolidays'],
+  TABLES: ['Users', 'Teams', 'Projects', 'Tasks', 'Comments', 'Events', 'Absences', 'CompanyHolidays', 'Docs', 'DocVersions', 'JfSeries', 'Folders'],
   INDEX: ['date', 'createdAt', 'by', 'rows'],
 
   target_() {
