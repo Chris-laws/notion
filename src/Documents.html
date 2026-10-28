@@ -28,29 +28,50 @@ function jfName(seriesTitle, projectId) {
 /** Calendar and overview label of an event (jour fixe with team and project). */
 function evLabel(e) { return e.type === 'jf' ? jfName(e.title, e.projectId) : e.title; }
 
-/* ---------------- the tab: one row per meeting ---------------- */
+/* ---------------- the tab: active series on top, the archive below ---------------- */
+/** Next meeting of every active series of the project (today counts); a series past its end is left out. */
+function jfUpcoming(pid) {
+  const today = TODAY();
+  return jfData().series.filter(s => s.projectId === pid)
+    .map(s => ({ s: s, date: Shared.jfDates(s, today, Shared.addDays(today, 400))[0] })).filter(x => x.date)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+/** All minutes of the project except those of the meetings on top, newest first. */
+function jfArchiveRows(pid) {
+  const next = jfUpcoming(pid);
+  return jfData().minutes.filter(m => m.projectId === pid && !next.some(u => u.s.id === m.seriesId && u.date === m.date))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
 function jfTab(p) {
   if (S.protoEdit && S.protoEdit.projectId === p.id) return protoEditor();
   if (S.doc && S.doc.projectId === p.id) return protoViewer();
-  const data = jfData();
-  const today = TODAY();
-  const series = data.series.filter(s => s.projectId === p.id);
-  const minutes = data.minutes.filter(m => m.projectId === p.id);
-  // next meeting of every series, then the minutes of past meetings (newest first)
-  const upcoming = series.map(s => ({ s: s, date: Shared.jfDates(s, today, Shared.addDays(today, 62))[0] })).filter(x => x.date)
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
-  const past = minutes.filter(m => !upcoming.some(u => u.s.id === m.seriesId && u.date === m.date));
-  const byId = id => series.find(s => s.id === id) || { id: id, title: (minutes.find(m => m.seriesId === id) || {}).title || 'Jour Fixe', attendees: [] };
-  const rows = upcoming.map(u => jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true))
-    .concat(past.map(m => jfRow(byId(m.seriesId), m.date, m, false)));
+  const minutes = jfData().minutes;
+  const active = jfUpcoming(p.id).map(u => jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true));
   return '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3>' +
     hintP(L('Regelmäßige Termine mit Protokoll. Offene Aufgaben wandern ins nächste Protokoll.', 'Regular meetings with minutes. Open actions move on to the next minutes.')) + '</div>' +
     '<button class="btn primary" data-action="jf-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button></div>' +
-    (rows.length ? '<div class="jf-rows" role="list">' + rows.join('') + '</div>'
-      : '<div class="empty-mini">' + esc(L('Noch kein Jour Fixe. Lege eine Serie an, z. B. jeden Montag 9:00.', 'No jour fixe yet. Create a series, e.g. every Monday 9:00.')) + '</div>');
+    (active.length ? '<div class="jf-rows jf-active" role="list">' + active.join('') + '</div>'
+      : '<div class="empty-mini">' + esc(L('Kein laufender Jour Fixe. Lege eine Serie an, z. B. jeden Montag 9:00.', 'No running jour fixe. Create a series, e.g. every Monday 9:00.')) + '</div>') +
+    jfArchive(p);
 }
+const ARCHIVE_PAGE = 50;
+/** The archive: collapsed until opened (remembered in the browser); 50 rows, the rest on request. */
+function jfArchive(p) {
+  const rows = jfArchiveRows(p.id);
+  if (!rows.length) return '';
+  const open = store.get('jfArchive', false);
+  const names = {};
+  jfData().series.forEach(s => { names[s.id] = s; });
+  const shown = S.jfArchiveAll ? rows : rows.slice(0, ARCHIVE_PAGE);
+  return '<div class="jf-archive"><button type="button" class="jf-arch-h" data-action="jf-archive" aria-expanded="' + open + '">' + icon(open ? 'chevron' : 'right', 'sm') +
+    '<b>' + L('Archiv', 'Archive') + '</b><span class="n">' + rows.length + '</span><span class="faint">' + esc(L('alle Protokolle, neueste zuerst', 'all minutes, newest first')) + '</span></button>' +
+    (open ? '<div class="jf-rows" role="list">' + shown.map(m => jfRow(names[m.seriesId] || { id: m.seriesId, title: String(m.title || '').split(' · ')[0], attendees: [] }, m.date, m, false)).join('') + '</div>' +
+      (shown.length < rows.length ? '<button type="button" class="btn sm outline" data-action="jf-archive-all">' + esc(L('Alle ' + rows.length + ' anzeigen', 'Show all ' + rows.length)) + '</button>' : '') : '') + '</div>';
+}
+A['jf-archive'] = () => { store.set('jfArchive', !store.get('jfArchive', false)); render({ peek: false }); };
+A['jf-archive-all'] = () => { S.jfArchiveAll = true; render({ peek: false }); };
 /**
- * One meeting: series, date ("Nächster: …" ahead, the plain date afterwards) and people:
+ * One meeting: series, date ("Nächster: …" for the next one, the plain date in the archive) and people:
  * before the meeting everybody invited, afterwards only who missed it (they should read the minutes).
  */
 function jfRow(s, date, minutes, upcoming) {
@@ -59,17 +80,13 @@ function jfRow(s, date, minutes, upcoming) {
   const label = upcoming ? L('Nächster: ', 'Next: ') + fmtDate(date, { absolute: true }) : fmtDate(date, { absolute: true });
   return '<div class="jf-row' + (upcoming ? ' next' : '') + '" role="listitem"><div class="jf-hit" role="button" tabindex="0" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(date) + '" ' +
     'data-on-keydown="jf-row-key" aria-label="' + esc(s.title + ', ' + label) + '">' +
-    '<b class="jf-t">' + esc(s.title) + '</b><span class="jf-d' + (upcoming ? ' next' : '') + '">' + esc(label) + '</span>' + jfBadges(minutes, upcoming) +
+    '<b class="jf-t">' + esc(s.title) + '</b><span class="jf-d' + (upcoming ? ' next' : '') + '">' + esc(label) + '</span>' +
+    (minutes && minutes.openCount ? '<span class="chip warn">' + esc(minutes.openCount + L(' offen', ' open')) + '</span>' : '') +
     '<span class="grow"></span>' +
     (people.length ? (upcoming ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 6) : '') +
     icon('right', 'sm faint') + '</div>' +
-    (upcoming && s.projectId ? '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '"' + labelled(L('Jour Fixe bearbeiten', 'Edit jour fixe')) + '>' + icon('settings', 'sm') + '</button>' : '') +
+    (upcoming ? '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '"' + labelled(L('Jour Fixe bearbeiten', 'Edit jour fixe')) + '>' + icon('settings', 'sm') + '</button>' : '') +
     '</div>';
-}
-/** "noch kein Protokoll" for the next meeting, "2 offen" when action items are still open. */
-function jfBadges(minutes, upcoming) {
-  if (!minutes) return upcoming ? '<span class="chip soft">' + esc(L('noch kein Protokoll', 'no minutes yet')) + '</span>' : '';
-  return minutes.openCount ? '<span class="chip warn">' + esc(minutes.openCount + L(' offen', ' open')) + '</span>' : '';
 }
 ON.keydown['jf-row-key'] = (el, e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); A['jf-open'](el); } };
 A['jf-open'] = el => jfOpen(el.dataset.id, el.dataset.v);
@@ -263,8 +280,10 @@ const protoBarSoon = debounce(() => {
   $('.grow', bar).textContent = dirty ? L('Ungespeicherte Änderungen (als Entwurf im Browser gesichert)', 'Unsaved changes (kept as a draft in this browser)') : L('Keine Änderungen', 'No changes');
   $('[data-action="proto-save"]', bar).disabled = !dirty;
 }, 150);
-const newLine = () => ({ type: 'I', text: '', owner: '', due: '', done: false, taskId: '' });
-A['proto-add-topic'] = () => { S.protoEdit.model.topics.push({ title: '', owner: S.me.email, items: [newLine()] }); protoRender(); };
+// every topic and line gets an id, so two people's changes can be merged on saving
+const newId = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7);
+const newLine = () => ({ id: newId(), type: 'I', text: '', owner: '', due: '', done: false, taskId: '' });
+A['proto-add-topic'] = () => { S.protoEdit.model.topics.push({ id: newId(), title: '', owner: S.me.email, items: [newLine()] }); protoRender(); };
 A['proto-add-line'] = el => { S.protoEdit.model.topics[Number(el.dataset.t)].items.push(newLine()); protoRender(); };
 A['proto-del'] = el => {
   const t = S.protoEdit.model.topics;
@@ -291,7 +310,7 @@ A['proto-save'] = () => protoSave(false);
 function protoSave(force) {
   const e = S.protoEdit;
   const content = Shared.protoToText(e.model);
-  const payload = e.id ? { id: e.id, title: e.title, content: content, baseVersion: e.base }
+  const payload = e.id ? { id: e.id, title: e.title, content: content, baseVersion: e.base, baseContent: e.saved }
     : { projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content };
   return call('docs.save', payload).then(r => {
     if (r.conflict && !force) return protoConflict(r.current);
@@ -299,8 +318,9 @@ function protoSave(force) {
     store.set(protoKey(e), null);
     docEndEdit();
     S.protoEdit = null;
-    toast(L('Protokoll gespeichert', 'Minutes saved'));
-    S.doc = Object.assign({}, r, { content: content, canWrite: true });
+    toast(r.merged ? L('Gespeichert und mit den Änderungen von ' + user(r.mergedWith).name + ' zusammengeführt', 'Saved and merged with the changes of ' + user(r.mergedWith).name)
+      : L('Protokoll gespeichert', 'Minutes saved'));
+    S.doc = Object.assign({}, r, { content: r.content || content, canWrite: true });
     render({ peek: false });
     return jfReload();
   }).catch(fail);

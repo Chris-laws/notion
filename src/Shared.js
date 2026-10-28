@@ -445,12 +445,15 @@ function SharedFactory() {
   /** A minutes model with only known fields, types and lengths. */
   function protoClean(m) {
     m = m && typeof m === 'object' ? m : {};
+    // ids let two people's changes be merged topic by topic and line by line
+    const id = x => (/^[A-Za-z0-9_-]{1,16}$/.test(x && x.id) ? x.id : '');
     const item = i => ({
+      id: id(i),
       type: PROTO_TYPES.indexOf(i && i.type) >= 0 ? i.type : 'I',
       text: cut(i && i.text, 2000), owner: mail(i && i.owner), due: isDate(i && i.due) ? i.due : '',
       done: yes(i && i.done), taskId: /^t_\w+$/.test(i && i.taskId) ? i.taskId : '',
     });
-    const topic = t => ({ title: cut(t && t.title, 200), owner: mail(t && t.owner), items: (t && Array.isArray(t.items) ? t.items : []).slice(0, 100).map(item) });
+    const topic = t => ({ id: id(t), title: cut(t && t.title, 200), owner: mail(t && t.owner), items: (t && Array.isArray(t.items) ? t.items : []).slice(0, 100).map(item) });
     return {
       title: cut(m.title, 120), date: isDate(m.date) ? m.date : '', minuteTaker: mail(m.minuteTaker),
       present: mails(m.present), absent: mails(m.absent),
@@ -497,8 +500,65 @@ function SharedFactory() {
     return out;
   }
 
+  /**
+   * Three-way merge of minutes saved by two people at the same time: base = the version both started
+   * from, mine = what I save, theirs = what was saved meanwhile. Topics and lines are matched by id;
+   * new ones from both sides are kept, a deletion wins unless the other side changed the entry, and
+   * fields merge one by one. Only a field both changed differently is a conflict (mine is kept).
+   * Returns { model, conflicts: ['topics.<id>.title', ...] }.
+   */
+  function protoMerge(base, mine, theirs) {
+    const b = protoClean(base);
+    const m = protoClean(mine);
+    const t = protoClean(theirs);
+    const conflicts = [];
+    const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+    const pick = (bv, mv, tv, path) => {
+      if (same(mv, bv) || same(mv, tv)) return tv;
+      if (same(tv, bv)) return mv;
+      conflicts.push(path);
+      return mv;
+    };
+    // people lists: what either side added stays, what either side removed goes
+    const people = (bl, ml, tl) => tl.filter(x => ml.indexOf(x) >= 0 || bl.indexOf(x) < 0).concat(ml.filter(x => bl.indexOf(x) < 0 && tl.indexOf(x) < 0));
+    const fields = (bx, mx, tx, keys, path) => {
+      const out = { id: mx.id || tx.id };
+      keys.forEach(k => { out[k] = pick(bx[k], mx[k], tx[k], path + '.' + k); });
+      return out;
+    };
+    const list = (bl, ml, tl, merge, path) => {
+      const key = (x, i) => x.id || '#' + i;
+      const index = l => { const o = {}; l.forEach((x, i) => { o[key(x, i)] = x; }); return o; };
+      const bi = index(bl), mi = index(ml), ti = index(tl);
+      const out = [];
+      tl.forEach((tx, i) => {
+        const k = key(tx, i);
+        const bx = bi[k], mx = mi[k];
+        if (!mx) { if (!bx || !same(tx, bx)) out.push(tx); return; }
+        if (bx) { out.push(merge(bx, mx, tx, path + '.' + k)); return; }
+        if (!same(mx, tx)) conflicts.push(path + '.' + k);
+        out.push(mx);
+      });
+      ml.forEach((mx, i) => {
+        const k = key(mx, i);
+        if (ti[k]) return;
+        if (!bi[k] || !same(mx, bi[k])) out.push(mx);
+      });
+      return out;
+    };
+    const line = (bx, mx, tx, path) => fields(bx, mx, tx, ['type', 'text', 'owner', 'due', 'done', 'taskId'], path);
+    const topic = (bx, mx, tx, path) => Object.assign(fields(bx, mx, tx, ['title', 'owner'], path), { items: list(bx.items, mx.items, tx.items, line, path + '.items') });
+    const model = protoClean({
+      title: pick(b.title, m.title, t.title, 'title'), date: pick(b.date, m.date, t.date, 'date'),
+      minuteTaker: pick(b.minuteTaker, m.minuteTaker, t.minuteTaker, 'minuteTaker'),
+      present: people(b.present, m.present, t.present), absent: people(b.absent, m.absent, t.absent),
+      topics: list(b.topics, m.topics, t.topics, topic, 'topics'),
+    });
+    return { model: model, conflicts: conflicts };
+  }
+
   return {
-    jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions,
+    jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoMerge,
     QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,

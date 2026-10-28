@@ -81,7 +81,7 @@ const Docs = {
     const ctx = Docs.ctx_();
     const v = Docs.check_(p.title, p.content);
     return Db.tx(() => {
-      if (p.id) return Docs.update_(Docs.doc_(p.id, ctx, true), v, Number(p.baseVersion));
+      if (p.id) return Docs.update_(Docs.doc_(p.id, ctx, true), v, Number(p.baseVersion), p.baseContent);
       if (p.seriesId) return Jf.createMinutes_(p, v, ctx);
       const project = Docs.project_(p.projectId, ctx, true);
       return Docs.create_(project, v, { kind: 'doc' }, Store.documents(project));
@@ -103,11 +103,17 @@ const Docs = {
   },
 
   /** Writes a new version unless someone saved after `base` (inside a transaction). */
-  update_(x, v, base) {
+  update_(x, v, base, baseContent) {
     const doc = x.doc;
     const before = Docs.read_(doc);
+    let merged = false;
     if (base !== Number(doc.version)) {
-      return { conflict: true, current: Object.assign(Docs.meta_(doc), { content: before }) };
+      // minutes saved by someone else meanwhile: merge topic by topic and line by line when nobody
+      // changed the same field; otherwise both versions go back to the person (conflict dialog)
+      const r = Docs.merge_(baseContent, v.content, before);
+      if (!r || r.conflicts.length) return { conflict: true, conflicts: r ? r.conflicts : [], current: Object.assign(Docs.meta_(doc), { content: before }) };
+      v = { title: v.title, content: Shared.protoToText(r.model) };
+      merged = true;
     }
     Docs.keepVersion_(doc, before, x.project);
     Gdrive.write(doc.fileId, v.content);
@@ -119,12 +125,18 @@ const Docs = {
         updatedAt: new Date().toISOString(), updatedBy: me, lockBy: doc.lockBy === me ? '' : doc.lockBy, lockUntil: doc.lockBy === me ? '' : doc.lockUntil,
       }, Docs.summary_(v.content)));
       Docs.remember_(row, v.content);
-      return Docs.meta_(row);
+      return merged ? Object.assign(Docs.meta_(row), { merged: true, mergedWith: doc.updatedBy, content: v.content }) : Docs.meta_(row);
     } catch (e) {
       // the database did not take the new version: the file goes back to what it was
       Gdrive.write(doc.fileId, before);
       throw e;
     }
+  },
+
+  /** Three-way merge of minutes (null when one of the texts is not minutes). */
+  merge_(baseText, mineText, theirsText) {
+    const parts = [baseText, mineText, theirsText].map(t => (typeof t === 'string' ? Shared.protoFromText(t) : null));
+    return parts.every(Boolean) ? Shared.protoMerge(parts[0], parts[1], parts[2]) : null;
   },
 
   /** Keeps the text of the current version as a file; only the last KEEP stay, older ones go to the trash. */
@@ -293,7 +305,7 @@ const Jf = {
   template_(s, date, open, me) {
     return Shared.protoToText({
       title: s.title, date: date, minuteTaker: me, present: s.attendees || [], absent: [],
-      topics: open.length ? [{ title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : [],
+      topics: open.length ? [{ id: 'carry', title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : [],
     });
   },
 

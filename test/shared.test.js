@@ -301,3 +301,80 @@ describe('jour fixe minutes (structured)', () => {
     assert.deepEqual(plain(S.protoOpenActions({ topics: [] })), []);
   });
 });
+
+describe('jour fixe minutes: merging two people saving at the same time', () => {
+  const line = (id, text, extra) => Object.assign({ id: id, type: 'I', text: text, owner: '', due: '', done: false, taskId: '' }, extra || {});
+  const topic = (id, title, items) => ({ id: id, title: title, owner: '', items: items || [] });
+  const base = () => S.protoClean({ date: '2026-11-02', present: ['a@x.de', 'b@x.de'], absent: [], topics: [topic('t1', 'Budget', [line('l1', 'Plan')])] });
+  const edit = fn => { const m = JSON.parse(JSON.stringify(base())); fn(m); return S.protoClean(m); };
+  const titles = m => plain(m.topics.map(t => t.title));
+  test('both add different topics: both are kept, no conflict', () => {
+    const mine = edit(m => m.topics.push(topic('t2', 'Personal')));
+    const theirs = edit(m => m.topics.push(topic('t3', 'Lotterie')));
+    const r = S.protoMerge(base(), mine, theirs);
+    assert.deepEqual(plain(r.conflicts), []);
+    assert.deepEqual(titles(r.model), ['Budget', 'Lotterie', 'Personal']);
+  });
+  test('both add lines to the same topic, or change different fields of one line: all kept', () => {
+    const mine = edit(m => { m.topics[0].items.push(line('l2', 'Mein Punkt')); m.topics[0].items[0].owner = 'a@x.de'; });
+    const theirs = edit(m => { m.topics[0].items.push(line('l3', 'Ihr Punkt')); m.topics[0].items[0].due = '2026-11-06'; });
+    const r = S.protoMerge(base(), mine, theirs);
+    assert.deepEqual(plain(r.conflicts), []);
+    assert.deepEqual(plain(r.model.topics[0].items.map(i => i.text)), ['Plan', 'Ihr Punkt', 'Mein Punkt']);
+    assert.equal(r.model.topics[0].items[0].owner, 'a@x.de');
+    assert.equal(r.model.topics[0].items[0].due, '2026-11-06');
+  });
+  test('the same field changed by both is a conflict (mine is kept in the result, the field is named)', () => {
+    const mine = edit(m => { m.topics[0].title = 'Budget 2027'; });
+    const theirs = edit(m => { m.topics[0].title = 'Budget neu'; });
+    const r = S.protoMerge(base(), mine, theirs);
+    assert.deepEqual(plain(r.conflicts), ['topics.t1.title']);
+    assert.equal(r.model.topics[0].title, 'Budget 2027');
+    const same = S.protoMerge(base(), mine, mine);
+    assert.deepEqual(plain(same.conflicts), [], 'the same change on both sides is no conflict');
+  });
+  test('deleting: gone when the other side left it alone, kept when the other side changed it', () => {
+    const del = edit(m => { m.topics[0].items = []; });
+    assert.deepEqual(plain(S.protoMerge(base(), del, base()).model.topics[0].items), []);
+    assert.deepEqual(plain(S.protoMerge(base(), base(), del).model.topics[0].items), []);
+    const changed = edit(m => { m.topics[0].items[0].text = 'Plan v2'; });
+    assert.equal(S.protoMerge(base(), del, changed).model.topics[0].items[0].text, 'Plan v2');
+    assert.equal(S.protoMerge(base(), changed, del).model.topics[0].items[0].text, 'Plan v2');
+  });
+  test('attendance: additions and removals of both sides are combined; header fields merge like lines', () => {
+    const mine = edit(m => { m.present = ['a@x.de']; m.absent = ['b@x.de']; });
+    const theirs = edit(m => { m.present.push('c@x.de'); m.minuteTaker = 'c@x.de'; });
+    const r = S.protoMerge(base(), mine, theirs);
+    assert.deepEqual(plain(r.model.present), ['a@x.de', 'c@x.de']);
+    assert.deepEqual(plain(r.model.absent), ['b@x.de']);
+    assert.equal(r.model.minuteTaker, 'c@x.de');
+    assert.deepEqual(plain(r.conflicts), []);
+  });
+  test('ids survive cleaning; unknown id shapes are dropped', () => {
+    assert.equal(S.protoClean({ topics: [{ id: 'ab_12', items: [{ id: 'x' }] }] }).topics[0].id, 'ab_12');
+    assert.equal(S.protoClean({ topics: [{ id: '<b>', items: [] }] }).topics[0].id, '');
+  });
+});
+
+describe('jour fixe minutes: edge cases', () => {
+  const merge = (b, m, t) => plain(S.protoMerge({ present: b }, { present: m }, { present: t }).model.present);
+  test('people lists: removing the first person, additions on both sides, no doubles', () => {
+    assert.deepEqual(merge(['a@x.de', 'b@x.de'], ['b@x.de'], ['a@x.de', 'b@x.de']), ['b@x.de'], 'mine removed the first');
+    assert.deepEqual(merge(['a@x.de', 'b@x.de'], ['a@x.de', 'b@x.de'], ['b@x.de']), ['b@x.de'], 'theirs removed the first');
+    assert.deepEqual(merge(['a@x.de'], ['a@x.de', 'c@x.de'], ['c@x.de', 'a@x.de']), ['c@x.de', 'a@x.de'], 'added on both sides: once');
+  });
+  test('cleaning keeps task links, titles and lines; topics are numbered from 1', () => {
+    const c = S.protoClean({ topics: [{ title: 'Eins', items: [{ type: 'A', text: 'a', taskId: 't_1' }] }, { title: 'Zwei', items: [] }] });
+    assert.equal(c.topics[0].items[0].taskId, 't_1');
+    assert.equal(c.topics[0].title, 'Eins');
+    assert.equal(c.topics[0].items.length, 1);
+    const text = S.protoToText(c);
+    assert.match(text, /\| 1\. \| \| \*\*Eins\*\*/);
+    assert.match(text, /\| 2\. \| \| \*\*Zwei\*\*/);
+  });
+  test('a data block at the very start of a text is found as well', () => {
+    const full = S.protoToText({ title: 'X', topics: [] });
+    const block = full.slice(full.lastIndexOf('<!-- lidlflow:protocol '));
+    assert.equal(S.protoFromText(block).title, 'X');
+  });
+});

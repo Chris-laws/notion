@@ -297,3 +297,35 @@ describe('jour fixe: fast and complete (v48)', () => {
     assert.match(app.error('docs.list', {}), /Unbekannte Aktion/);
   });
 });
+
+describe('jour fixe: two people writing the same minutes at the same time', () => {
+  const S = app => app.x.Shared;
+  function setup2() {
+    const { app, project } = world();
+    const s = app.call('jf.saveSeries', { projectId: project.id, title: 'Weekly', rhythm: 'weekly', weekday: 1, startDate: '2026-11-02', attendees: [ME, ANNA] });
+    const m = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    const model = S(app).protoFromText(m.content);
+    model.topics.push({ id: 't1', title: 'Budget', items: [{ id: 'l1', type: 'I', text: 'Plan' }] });
+    const v1 = app.call('docs.save', { projectId: project.id, seriesId: s.id, date: '2026-11-02', title: m.title, content: S(app).protoToText(model) });
+    const base = app.call('docs.get', { id: v1.id }).content;
+    return { app, v1, base };
+  }
+  const change = (app, text, fn) => { const m = app.x.Shared.protoFromText(text); fn(m); return app.x.Shared.protoToText(m); };
+  test('different topics from both: merged automatically, nobody sees a conflict', () => {
+    const { app, v1, base } = setup2();
+    app.as(ANNA).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, baseContent: base, content: change(app, base, m => m.topics.push({ id: 't2', title: 'Von Anna', items: [] })) });
+    const r = app.as(ME).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, baseContent: base, content: change(app, base, m => m.topics.push({ id: 't3', title: 'Von mir', items: [] })) });
+    assert.equal(r.merged, true);
+    assert.equal(r.version, 3);
+    const saved = S(app).protoFromText(app.call('docs.get', { id: v1.id }).content);
+    assert.deepEqual(JSON.parse(JSON.stringify(saved.topics.map(t => t.title))), ['Budget', 'Von Anna', 'Von mir']);
+  });
+  test('the same line changed by both: the conflict dialog with both versions, nothing overwritten', () => {
+    const { app, v1, base } = setup2();
+    app.as(ANNA).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, baseContent: base, content: change(app, base, m => { m.topics[0].items[0].text = 'Annas Plan'; }) });
+    const r = app.as(ME).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, baseContent: base, content: change(app, base, m => { m.topics[0].items[0].text = 'Mein Plan'; }) });
+    assert.equal(r.conflict, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(r.conflicts)), ['topics.t1.items.l1.text']);
+    assert.equal(S(app).protoFromText(app.call('docs.get', { id: v1.id }).content).topics[0].items[0].text, 'Annas Plan');
+  });
+});
