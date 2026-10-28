@@ -295,7 +295,7 @@ describe('jour fixe: fast and complete (v48)', () => {
     const b = app.call('bootstrap');
     assert.equal(b.jf.series.length, 1);
     assert.equal(b.jf.minutes.length, 1);
-    assert.deepEqual(plain(b.jf.minutes[0].people), { present: [ME], absent: [ANNA] }, 'who was there and who missed it, without opening the file');
+    assert.deepEqual(plain(b.jf.minutes[0].people), { present: [ME], absent: [ANNA], by: ME, topics: 0 }, 'who was there and who missed it, without opening the file');
     assert.equal(app.as(OUT).call('bootstrap').jf.series.length, 0, 'only series of visible projects');
   });
   test('a new meeting opens without reading any file: open items of the last meeting come from the table', () => {

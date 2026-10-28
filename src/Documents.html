@@ -64,6 +64,8 @@ function jfTab(p) {
   const minutes = jfData().minutes;
   const active = jfUpcoming(p.id).map(u => jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true))
     .concat(jfMissing(p.id).map(u => jfRow(u.s, u.date, null, false)));
+  const newest = jfData().series.filter(s => s.projectId === p.id).map(s => minutes.filter(m => m.seriesId === s.id)[0]).filter(Boolean);
+  setTimeout(() => jfPrefetch(newest.map(m => m.id)), 400);
   return '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3>' +
     hintP(L('Regelmäßige Termine mit Protokoll. Offene Aufgaben wandern ins nächste Protokoll.', 'Regular meetings with minutes. Open actions move on to the next minutes.')) + '</div>' +
     '<button class="btn primary" data-action="jf-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button></div>' +
@@ -96,37 +98,116 @@ function jfMeet(s) {
   return s.meetLink && /^https:\/\/meet\.google\.com\//.test(s.meetLink) ? '<a class="btn sm jf-meet" href="' + esc(s.meetLink) + '" target="_blank" rel="noopener noreferrer"' +
     labelled(L('Google Meet öffnen', 'Open Google Meet')) + '>' + icon('video', 'sm') + 'Meet</a>' : '';
 }
+/** What the row's button says: prepare the next meeting, write minutes later, or open them. */
+function jfCta(upcoming, minutes) {
+  if (minutes) return L('Protokoll öffnen', 'Open minutes');
+  return upcoming ? L('Protokoll vorbereiten', 'Prepare minutes') : L('Protokoll nachtragen', 'Write minutes');
+}
+/** The middle of a row: weekday and time, then topics, open actions, anchored topics and who writes the minutes. */
+function jfTime(s, date) {
+  if (!/^\d\d:\d\d$/.test(s.time || '')) return '';
+  const end = Number(s.time.slice(0, 2)) * 60 + Number(s.time.slice(3)) + (Number(s.duration) || 30);
+  return '<span class="jf-f">' + icon('clock', 'sm') + esc(DOW[Shared.weekday(date)] + ' ' + s.time + '–' + fmtClock(end % 1440)) + '</span>';
+}
+/** Open actions and anchored topics: of the minutes, or (next meeting) carried over from the last ones. */
+function jfCounts(minutes, carry) {
+  if (minutes) return { open: minutes.openCount || 0, pins: minutes.pinnedCount || 0 };
+  return carry ? { open: carry.open.length, pins: carry.pinned.length } : { open: 0, pins: 0 };
+}
+function jfFacts(s, date, minutes, upcoming) {
+  const out = [jfTime(s, date)];
+  const ppl = minutes && minutes.people ? minutes.people : {};
+  const carry = !minutes && upcoming && s.carry ? s.carry : null;
+  if (ppl.topics) out.push('<span class="jf-f">' + icon('list', 'sm') + esc(ppl.topics + L(ppl.topics === 1 ? ' Thema' : ' Themen', ppl.topics === 1 ? ' topic' : ' topics')) + '</span>');
+  const n = jfCounts(minutes, carry);
+  if (n.open) out.push('<span class="chip warn">' + esc(n.open + (carry ? L(' offen aus dem letzten JF', ' open from the last one') : L(' offen', ' open'))) + '</span>');
+  const pins = n.pins;
+  if (pins) out.push('<span class="jf-f"' + labelled(L('Verankerte Themen', 'Anchored topics')) + '>' + icon('pin', 'sm') + pins + '</span>');
+  if (ppl.by) out.push('<span class="jf-f jf-by">' + avatar(ppl.by) + esc(L('Protokoll: ', 'Minutes: ') + whoName(ppl.by)) + '</span>');
+  return out.join('');
+}
+/**
+ * One meeting. The whole row opens it (one tab stop, its name says what happens); the button look shows how:
+ * prepare the next one, write missing minutes, or open saved ones. People: before the meeting everybody invited,
+ * afterwards only who missed it (they should read the minutes).
+ */
 function jfRow(s, date, minutes, upcoming) {
-  // no minutes yet (or ahead): the people invited; afterwards: who missed it
   const planned = upcoming || !minutes;
   const people = planned ? s.attendees || [] : (minutes.people && minutes.people.absent) || [];
   const label = upcoming ? L('Nächster: ', 'Next: ') + fmtDate(date, { absolute: true }) : fmtDate(date, { absolute: true });
-  return '<div class="jf-row' + (upcoming ? ' next' : '') + '" role="listitem"><div class="jf-hit" role="button" tabindex="0" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(date) + '" ' +
-    'data-on-keydown="jf-row-key">' +
-    '<b class="jf-t">' + esc(s.title) + '</b><span class="jf-d' + (upcoming ? ' next' : '') + '">' + esc(label) + '</span>' +
-    (minutes && minutes.openCount ? '<span class="chip warn">' + esc(minutes.openCount + L(' offen', ' open')) + '</span>' : '') +
-    '<span class="grow"></span>' +
-    (people.length ? (planned ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 6) : '') +
-    icon('right', 'sm faint') + '</div>' +
+  const cta = jfCta(upcoming, minutes);
+  return '<div class="jf-row' + (upcoming ? ' next' : '') + '" role="listitem"><div class="jf-hit" role="button" tabindex="0" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(date) + '"' +
+    (minutes ? ' data-doc="' + esc(minutes.id) + '"' : '') + ' data-on-keydown="jf-row-key"' + labelled(cta + ': ' + s.title + ', ' + label) + '>' +
+    '<span class="jf-main"><b class="jf-t">' + esc(s.title) + '</b><span class="jf-d' + (upcoming ? ' next' : '') + '">' + esc(label) + '</span></span>' +
+    '<span class="jf-mid">' + jfFacts(s, date, minutes, upcoming) + '</span>' +
+    (people.length ? '<span class="jf-ppl">' + (planned ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 5) + '</span>' : '') +
+    '<span class="btn sm jf-cta' + (minutes ? '' : ' primary') + '" aria-hidden="true">' + esc(cta) + icon('right', 'sm') + '</span></div>' +
     jfMeet(s) +
     (upcoming ? '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '"' + labelled(L('Jour Fixe bearbeiten', 'Edit jour fixe')) + '>' + icon('settings', 'sm') + '</button>' : '') +
     '</div>';
 }
 ON.keydown['jf-row-key'] = (el, e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); A['jf-open'](el); } };
 A['jf-open'] = el => jfOpen(el.dataset.id, el.dataset.v);
-/** One call: saved minutes with their text, or a draft from the template (nothing is written before "Übernehmen"). */
+/**
+ * Opens a meeting at once from what the page has: a new meeting is built here (series, carry-over of the last
+ * minutes); saved minutes show right away and their text comes from the page's cache or one call meanwhile.
+ * Only a meeting older than the last minutes asks the server for its draft.
+ */
 function jfOpen(seriesId, date) {
+  const s = jfData().series.find(x => x.id === seriesId);
+  const saved = jfData().minutes.find(m => m.seriesId === seriesId && m.date === date);
+  if (saved) return Promise.resolve(jfOpenSaved(saved));
+  if (s && s.carry && (!s.carryFrom || s.carryFrom < date)) return Promise.resolve(jfOpenDraft(s, date));
+  return jfOpenRemote(seriesId, date);
+}
+function jfShow(m) {
+  S.projTab = 'jf';
+  if (S.route.view !== 'project' || S.route.id !== m.projectId) go('project', m.projectId);
+  S.doc = m;
+  if (m.draft && m.canWrite) return protoStartEdit(m);
+  render({ peek: false });
+}
+function jfOpenDraft(s, date) {
+  const p = project(s.projectId);
+  return jfShow({ id: '', draft: true, kind: 'jf', projectId: s.projectId, seriesId: s.id, date: date, version: 0, title: s.title + ' · ' + date,
+    canWrite: !!p && canEditProject(p), content: Shared.jfTemplate(s, date, s.carry, S.me.email) });
+}
+function jfOpenSaved(meta) {
+  const p = project(meta.projectId);
+  const hit = DOC_TEXT[meta.id];
+  const d = Object.assign({}, meta, { kind: 'jf', canWrite: !!p && canEditProject(p), content: hit && hit.version === meta.version ? hit.content : undefined });
+  jfShow(d);
+  // the skeleton stands until the text is there (usually loaded ahead already)
+  if (d.content === undefined) {
+    docFetch(meta.id).then(full => { if (S.doc && S.doc.id === meta.id && S.doc.content === undefined) { S.doc = full; render({ peek: false }); } }).catch(fail);
+  }
+}
+function jfOpenRemote(seriesId, date) {
   if (S.jfOpening) return Promise.resolve();
   S.jfOpening = true;
-  return call('jf.meeting', { seriesId: seriesId, date: date, lang: LANG }).then(m => {
-    S.jfOpening = false;
-    S.projTab = 'jf';
-    if (S.route.view !== 'project' || S.route.id !== m.projectId) go('project', m.projectId);
-    S.doc = m;
-    if (m.draft && m.canWrite) return protoStartEdit(m);
-    render({ peek: false });
-  }).catch(err => { S.jfOpening = false; fail(err); });
+  return call('jf.meeting', { seriesId: seriesId, date: date, lang: LANG }).then(m => { S.jfOpening = false; jfShow(m); })
+    .catch(err => { S.jfOpening = false; fail(err); });
 }
+/* texts of saved minutes the page has seen (by id and version): opening them again needs no call */
+const DOC_TEXT = {};
+const DOC_LOADING = {};
+function docRemember(d) { if (d && d.id && typeof d.content === 'string') DOC_TEXT[d.id] = { version: d.version, content: d.content }; }
+function docFetch(id) {
+  if (!DOC_LOADING[id]) {
+    DOC_LOADING[id] = call('docs.get', { id: id }, { quiet: true }).then(d => { delete DOC_LOADING[id]; docRemember(d); return d; })
+      .catch(err => { delete DOC_LOADING[id]; throw err; });
+  }
+  return DOC_LOADING[id];
+}
+/** Loads ahead the minutes a person is likely to open next (shown on top, or the newest of each series). */
+function jfPrefetch(ids) {
+  ids.filter(id => !DOC_TEXT[id] && !DOC_LOADING[id]).slice(0, 4).forEach(id => docFetch(id).catch(() => {}));
+}
+// pointing at a row with saved minutes loads them before the click
+document.addEventListener('mouseover', e => {
+  const h = e.target && e.target.closest ? e.target.closest('.jf-hit[data-doc]') : null;
+  if (h) jfPrefetch([h.dataset.doc]);
+});
 /** Team page: the jour fixe of all its projects, next meeting first; a new one for any of the projects. */
 function jfTeamTab(t, projects) {
   const minutes = jfData().minutes;
@@ -210,15 +291,16 @@ function protoHead(m, version) {
 }
 function protoViewer() {
   const d = S.doc;
-  if (d.content === undefined) return skLines(6);
-  const m = Shared.protoFromText(d.content) || Shared.protoClean({ title: d.title, date: d.date });
+  const loading = d.content === undefined;
+  const m = (!loading && Shared.protoFromText(d.content)) || Shared.protoClean({ title: String(d.title || '').split(' · ')[0], date: d.date });
   return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close"' + labelled(L('Zurück', 'Back')) + '>' + icon('back') + '</button>' +
     '<div class="dv-t"><h2>' + esc(jfName(m.title || d.title, d.projectId)) + '</h2><small>' + esc(L('Jour-Fixe-Protokoll', 'Jour fixe minutes')) +
     (d.updatedBy ? esc(' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) : '') + '</small></div>' +
     (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') +
     (d.canWrite && d.id ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' : '') +
-    (d.canWrite ? '<button class="btn sm primary" data-action="proto-edit">' + L('Bearbeiten', 'Edit') + '</button>' : '') + '</div>' +
-    protoHead(m, d.version) + protoTable(m, { actions: d.canWrite && d.id, docId: d.id }) + '</div>';
+    (d.canWrite && !loading ? '<button class="btn sm primary" data-action="proto-edit">' + L('Bearbeiten', 'Edit') + '</button>' : '') + '</div>' +
+    // the header at once; the table as a skeleton until the text is there
+    (loading ? skLines(6) : protoHead(m, d.version) + protoTable(m, { actions: d.canWrite && d.id, docId: d.id })) + '</div>';
 }
 A['doc-close'] = () => { S.doc = null; S.projTab = 'jf'; render({ peek: false }); };
 /** "+1 Thema · 2 Zeilen neu · 1 geändert": what one save changed (null for older entries). */
@@ -262,7 +344,7 @@ A['doc-version-view'] = el => call('docs.version', { id: el.dataset.id, version:
 A['doc-restore'] = el => call('docs.restore', { id: el.dataset.id, version: Number(el.dataset.v) })
   .then(() => { closeModal(); toast(L('Version wiederhergestellt', 'Version restored')); return protoReopen(el.dataset.id); }).catch(fail);
 function protoReopen(id) {
-  return call('docs.get', { id: id }).then(d => { S.doc = d; render({ peek: false }); return jfReload(); });
+  return call('docs.get', { id: id }).then(d => { docRemember(d); S.doc = d; render({ peek: false }); return jfReload(); });
 }
 
 /* ---------------- minutes: the form ---------------- */
@@ -417,6 +499,7 @@ function protoSave() {
       : L('Protokoll gespeichert', 'Minutes saved'));
     S.doc = Object.assign({}, r, { content: r.content || content, canWrite: true });
     delete S.doc.jf;
+    docRemember(S.doc);
     if (r.jf) S.jf = r.jf;
     render({ peek: false });
     docFlush(r.id);
@@ -529,7 +612,7 @@ function jfMakeTasks(o, v) {
     toast(r.tasks.length > 1 ? L(r.tasks.length + ' Aufgaben angelegt', r.tasks.length + ' tasks created') : L('Aufgabe angelegt: ', 'Task created: ') + r.tasks[0].title,
       { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.tasks[0].id) } });
     if (o.draft) jfLinkDraft(topic.id, line, r.tasks, picked);
-    else if (r.doc) { S.doc = Object.assign({}, S.doc, r.doc); render({ peek: false }); }
+    else if (r.doc) { S.doc = Object.assign({}, S.doc, r.doc); docRemember(S.doc); render({ peek: false }); }
   });
 }
 /** Before "Übernehmen": the form keeps the task links (saved with the minutes, so nothing is made twice). */

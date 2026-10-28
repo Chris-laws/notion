@@ -41,7 +41,8 @@ const Docs = {
     const m = Shared.protoFromText(content);
     if (!m) return {};
     const carry = Shared.protoCarry(m);
-    return { people: JSON.stringify({ present: m.present, absent: m.absent }), openItems: carry.open, pinnedTopics: carry.pinned };
+    // by and topics: shown in the jour fixe rows without reading the file
+    return { people: JSON.stringify({ present: m.present, absent: m.absent, by: m.minuteTaker, topics: m.topics.length }), openItems: carry.open, pinnedTopics: carry.pinned };
   },
   /** File text: from the script cache, a save Drive does not have yet, or the file. */
   read_(doc) {
@@ -335,13 +336,19 @@ const Jf = {
   },
   overview_(ctx, projectId) {
     const sees = pid => (projectId ? pid === projectId : ctx.admin || ctx.projectIds[pid]);
+    const docs = Db.all('Docs').filter(d => d.kind === 'jf' && sees(d.projectId));
+    // the carry-over of the last minutes: the page builds the next meeting's draft itself (no call when opening)
+    const last = {};
+    docs.forEach(d => { if (!last[d.seriesId] || last[d.seriesId].date < d.date) last[d.seriesId] = d; });
     return {
-      series: Db.all('JfSeries').filter(s => Jf.active_(s) && sees(s.projectId)),
-      minutes: Db.all('Docs').filter(d => d.kind === 'jf' && sees(d.projectId)).map(d => {
+      series: Db.all('JfSeries').filter(s => Jf.active_(s) && sees(s.projectId)).map(s => Object.assign({}, s, {
+        carryFrom: last[s.id] ? last[s.id].date : '',
+        carry: { open: last[s.id] ? last[s.id].openItems || [] : [], pinned: last[s.id] ? last[s.id].pinnedTopics || [] : [] } })),
+      minutes: docs.map(d => {
         const m = Docs.meta_(d);
         return { id: m.id, projectId: m.projectId, seriesId: m.seriesId, date: m.date, title: m.title, version: m.version,
           updatedAt: m.updatedAt, updatedBy: m.updatedBy, lockBy: m.lockBy, people: m.people,
-          openCount: (d.openItems || []).length + (d.pinnedTopics || []).reduce((n, t) => n + (t.items || []).length, 0) };
+          openCount: (d.openItems || []).length + (d.pinnedTopics || []).reduce((n, t) => n + (t.items || []).length, 0), pinnedCount: (d.pinnedTopics || []).length };
       }).sort((a, b) => (a.date < b.date ? 1 : -1)),
     };
   },
@@ -415,14 +422,7 @@ const Jf = {
   title_(s, date) { return s.title + ' · ' + date; },
 
   /** Minutes template: header from the series; open action items of the last meeting as the first topic. */
-  template_(s, date, carry, me) {
-    const open = carry ? carry.open : [];
-    const pinned = carry ? carry.pinned : [];
-    return Shared.protoToText({
-      title: s.title, date: date, minuteTaker: me, present: s.attendees || [], absent: [],
-      topics: (open.length ? [{ id: 'carry', title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : []).concat(pinned),
-    });
-  },
+  template_(s, date, carry, me) { return Shared.jfTemplate(s, date, carry, me); },
 
   /** First save of a meeting's minutes: the file in Jour Fixe/<series> and the row (inside the transaction of Docs.save). */
   createMinutes_(p, v, ctx) {

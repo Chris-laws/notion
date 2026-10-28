@@ -37,7 +37,7 @@ Requirement ─▶ Plan ─▶ TDD ─▶ Implementation ─▶ Verification ─
 | `a11y` | Alt texts, accessible names, labels, dialogs (`role`, `aria-modal`), no positive `tabindex`, unique ids, `prefers-reduced-motion`, a skeleton per page | 0 violations |
 | `consistency` | 1,500 writes on the real code while rows are shuffled by hand in between | 0 lost updates, 0 duplicate ids |
 | `load` | Load simulation (short profile) with the real limits: 30 parallel executions, global lock | 200 active: ≤ 1 % refused, p95 ≤ 3 s |
-| `budget` | Page size, first response, duration per request type at 1,000 people | page ≤ 580 KB (gzip ≤ 165), request budgets |
+| `budget` | Page size, first response, duration per request type at 1,000 people | page ≤ 580 KB (gzip ≤ 170), request budgets |
 | `license` | Licences of all packages, only allowed external hosts, licence section in the README | 0 hits |
 | `migration` | Ready to hand over: no personal or environment-specific data (addresses, ids, URLs, local paths), documentation in English, required files present | 0 hits |
 

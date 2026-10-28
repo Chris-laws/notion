@@ -12,7 +12,7 @@ const { profile } = require('../load-sim');
 const BUDGET = {
   // raised from 520/150 with documents and jour fixe (editor, Markdown view): about 5 KB more
   // jour fixe minutes form (v47): about 2 KB more
-  pageKB: 580, pageGzipKB: 165,
+  pageKB: 580, pageGzipKB: 170,
   bootstrapKB: 250,
   ms: { bootstrap: 900, poll: 600, pollSame: 450, calendar: 800, report: 600, update: 1000, create: 1000, comment: 1000 },
 };

@@ -45,6 +45,19 @@ describe('recurrence', () => {
   });
 });
 
+describe('jour fixe template', () => {
+  const s = { title: 'Weekly', attendees: ['a@x.de', 'b@x.de'] };
+  test('header from the series; open actions first, then anchored topics', () => {
+    const m = S.protoFromText(S.jfTemplate(s, '2030-01-14', { open: [{ id: 'o1', type: 'A', text: 'Offen' }], pinned: [{ id: 'p', title: 'Dauer', pinned: true, items: [] }] }, 'a@x.de'));
+    assert.deepEqual(plain([m.title, m.date, m.minuteTaker, m.present, m.absent]), ['Weekly', '2030-01-14', 'a@x.de', ['a@x.de', 'b@x.de'], []]);
+    assert.deepEqual(plain(m.topics.map(t => [t.id, t.title, t.items.length])), [['carry', 'Offene Punkte aus dem letzten Jour Fixe', 1], ['p', 'Dauer', 0]]);
+  });
+  test('nothing to carry: no topics', () => {
+    assert.deepEqual(plain(S.protoFromText(S.jfTemplate(s, '2030-01-14', null, 'a@x.de')).topics), []);
+    assert.deepEqual(plain(S.protoFromText(S.jfTemplate({ title: 'W' }, '2030-01-14', { open: [], pinned: [] }, '')).present), []);
+  });
+});
+
 describe('links', () => {
   test('the kind of a link: mail, Drive, Meet, Snowflake, Databricks, other web pages', () => {
     assert.deepEqual([

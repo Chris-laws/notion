@@ -367,6 +367,16 @@ function SharedFactory() {
   const PROJECT_COLORS = ['default', 'gray'].concat(PROJECT_PALETTE);
 
   /** Colour -> project name for the projects of a team (except one), so no colour is used twice in a team. */
+  /** Minutes of a new meeting: header from the series; open actions of the last meeting first, then its anchored topics. */
+  function jfTemplate(s, date, carry, me) {
+    const open = carry ? carry.open || [] : [];
+    const pinned = carry ? carry.pinned || [] : [];
+    return protoToText({
+      title: s.title, date: date, minuteTaker: me, present: s.attendees || [], absent: [],
+      topics: (open.length ? [{ id: 'carry', title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : []).concat(pinned),
+    });
+  }
+
   // ---------------------------------------------------------------- links
   const LINK_RE = /(?:https?:\/\/|mailto:)[^\s<>"']+/g;
   /** What a link points to, for its icon and label: mail (Gmail, mailto), drive, meet, snowflake, databricks or web. */
@@ -647,7 +657,7 @@ function SharedFactory() {
 
   return {
     jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoCarry, protoMerge, protoDiff,
-    linkKind, cleanLinks, findLinks, teamLeads, projectLeads, QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
+    jfTemplate, linkKind, cleanLinks, findLinks, teamLeads, projectLeads, QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,
     endOfMonth, nextOccurrence, parse, norm,

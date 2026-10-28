@@ -39,7 +39,7 @@ describe('jour fixe overview', () => {
     const missing = w.eval(`jfMissing(${JSON.stringify(pid)}).map(x => x.date)`);
     assert.equal(top.length, 1 + missing.length);
     assert.doesNotMatch($('#view').textContent, /noch kein Protokoll/);
-    assert.equal(top[0].querySelectorAll('.avatar').length, 3, 'everybody invited');
+    assert.equal(top[0].querySelectorAll('.jf-ppl .avatar').length, 3, 'everybody invited');
   });
   test('bottom: the archive is collapsed, opens on click (remembered) and lists minutes newest first with who missed them', async () => {
     const toggle = $('[data-action="jf-archive"]');
@@ -52,7 +52,7 @@ describe('jour fixe overview', () => {
     assert.equal(w.eval("store.get('jfArchive', false)"), true, 'remembered in the browser');
     const rows = $$('.jf-archive .jf-row');
     assert.match(rows[0].textContent, /Gefehlt:/);
-    assert.equal(rows[0].querySelectorAll('.avatar').length, 1);
+    assert.equal(rows[0].querySelectorAll('.jf-ppl .avatar').length, 1);
     const dates = w.eval(`jfArchiveRows(${JSON.stringify(pid)}).map(m => m.date)`);
     assert.deepEqual(JSON.parse(JSON.stringify(dates)), JSON.parse(JSON.stringify(dates)).slice().sort().reverse(), 'newest first');
   });
@@ -302,5 +302,54 @@ describe('tasks from the minutes in a form (v57)', () => {
     }
     const k = w.eval("Shared.protoFromText(S.doc.content).topics.findIndex(t => t.title === 'Go-Live')");
     assert.equal($('.pt [data-action="proto-topic-task"][data-t="' + k + '"]'), null);
+  });
+});
+
+describe('opening a jour fixe (v58)', () => {
+  // records "method" or "method id"
+  const spy = () => w.eval(`window.__calls = []; if (!window.__spied) { const oc = call; call = function (m, p) { window.__calls.push(m + (p && p.id ? ' ' + p.id : '')); return oc.apply(null, arguments); }; window.__spied = true; }`);
+  const calls = () => JSON.parse(w.eval('JSON.stringify(window.__calls)'));
+  async function tab() {
+    w.eval(`S.doc = null; S.protoEdit = null; S.projTab = 'jf'; go('project', ${JSON.stringify(pid)})`);
+    await until(() => $('.jf-active .jf-row'));
+  }
+  test('every row shows how to open it: a button that says what happens, time and facts in the middle', async () => {
+    await tab();
+    const next = $('.jf-active .jf-row.next');
+    const cta = next.querySelector('.jf-cta');
+    assert.ok(cta, 'a visible button');
+    assert.match(cta.textContent, /Protokoll (vorbereiten|öffnen)/);
+    assert.ok(cta.querySelector('svg'), 'with a chevron');
+    const hit = next.querySelector('.jf-hit');
+    assert.match(hit.getAttribute('aria-label'), /^Protokoll (vorbereiten|öffnen): Team-JF, Nächster: /, 'the name says what a click does');
+    assert.equal(hit.getAttribute('tabindex'), '0');
+    assert.match(next.querySelector('.jf-mid').textContent, /\d\d:\d\d–\d\d:\d\d/, 'weekday and time in the middle');
+    w.eval("store.set('jfArchive', true); render()");
+    await until(() => $('.jf-archive .jf-row'));
+    assert.match($('.jf-archive .jf-cta').textContent, /Protokoll öffnen/);
+  });
+  test('the next meeting opens at once, without asking the server', async () => {
+    await tab();
+    spy();
+    const before = Date.now();
+    click($('.jf-active .jf-row.next .jf-hit'));
+    assert.ok($('.proto-edit') || $('.doc-view'), 'shown in the same moment');
+    assert.ok(Date.now() - before < 200);
+    assert.deepEqual(calls().filter(m => m !== 'docs.lock'), [], 'no call to open it');
+    if ($('[data-action="proto-discard"]')) click($('[data-action="proto-discard"]'));
+  });
+  test('saved minutes show at once and need at most one call; the second time none', async () => {
+    await tab();
+    const m = w.eval(`jfData().minutes.find(x => x.projectId === ${JSON.stringify(pid)})`);
+    w.eval(`delete DOC_TEXT[${JSON.stringify(m.id)}]`);
+    spy();
+    w.eval(`jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
+    assert.ok($('.doc-view'), 'the page switches at once (a skeleton until the text is there)');
+    await until(() => $('.doc-view .pt'));
+    assert.deepEqual(calls().filter(c => c.indexOf(m.id) > 0), ['docs.get ' + m.id], 'one call for these minutes (others may load ahead)');
+    spy();
+    w.eval(`S.doc = null; render(); jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
+    assert.ok($('.doc-view .pt'), 'from the page cache');
+    assert.deepEqual(calls().filter(c => c.indexOf(m.id) > 0), []);
   });
 });
