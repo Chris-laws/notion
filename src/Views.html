@@ -771,7 +771,7 @@ function monthHtml(o) {
       }
       const items = [];
       if (show.events) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d).forEach(e => {
-        items.push('<div class="ev event' + (e.type === 'milestone' ? ' milestone' : '') + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(e.title) + '"><span>' + esc(e.title) + '</span></div>');
+        items.push('<div class="ev event' + (e.type === 'milestone' ? ' milestone' : '') + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '"><span>' + esc(evLabel(e)) + '</span></div>');
       });
       if (show.tasks) (o.tasks || []).filter(t => t.dueDate === d).sort((a, b) => rankPrio(a) - rankPrio(b)).forEach(t => {
         items.push('<div class="ev task' + (isDone(t) ? ' done' : '') + '" draggable="true" data-drag-id="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" title="' + esc(t.title) + '">' +
@@ -988,7 +988,7 @@ function agendaHtml(data, from, n, o) {
     const rows = [];
     if (show.events) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d && (e.startDate === d || i === 0)).forEach(e =>
       rows.push('<div class="ag2-row event" data-action="event-edit" data-id="' + esc(e.id) + '">' + icon(e.type === 'milestone' ? 'flag' : 'calendar', 'sm') +
-        '<span class="tt">' + esc(e.title) + '</span>' + (e.endDate && e.endDate !== e.startDate ? '<span class="meta">' + esc(fmtRange(e.startDate, e.endDate)) + '</span>' : '') + '</div>'));
+        '<span class="tt">' + esc(evLabel(e)) + '</span>' + (e.endDate && e.endDate !== e.startDate ? '<span class="meta">' + esc(fmtRange(e.startDate, e.endDate)) + '</span>' : '') + '</div>'));
     if (show.tasks) tasks.filter(t => t.dueDate === d).sort(byPrio).forEach(t => rows.push(taskRow(t, false)));
     if (!lines.length && !rows.length) continue;
     const m = d.slice(0, 7);
@@ -1032,8 +1032,8 @@ function weekGlanceCard(t, people) {
     const warn = (data.warnings || []).filter(w => w.date === d && myTeamIds.indexOf(w.teamId) >= 0);
     const due = mine.filter(x => x.dueDate === d).length;
     const lines = [];
-    events.slice(0, 2).forEach(e => lines.push('<div class="wg-ev' + (e.type === 'milestone' ? ' ms' : '') + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(e.title) + '">' +
-      icon(e.type === 'milestone' ? 'flag' : 'calendar', 'sm') + '<span>' + esc(e.title) + '</span></div>'));
+    events.slice(0, 2).forEach(e => lines.push('<div class="wg-ev' + (e.type === 'milestone' ? ' ms' : '') + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '">' +
+      icon(e.type === 'milestone' ? 'flag' : 'calendar', 'sm') + '<span>' + esc(evLabel(e)) + '</span></div>'));
     if (events.length > 2) lines.push('<div class="wg-more">+ ' + (events.length - 2) + ' weitere</div>');
     hol.slice(0, 1).forEach(h => lines.push('<div class="wg-hol" title="' + esc(hol.map(x => holName(x) + ' (' + x.country + ')').join(', ')) + '">' + flag(h.country) + '<span>' + esc(holName(h)) + '</span></div>'));
     if (away.length) lines.push('<div class="wg-away" title="' + esc(away.map(e => user(e).name).join(', ')) + '"><span class="lbl">' + L('Weg', 'Away') + '</span>' + avatars(away, 4) + '</div>');
@@ -1388,7 +1388,7 @@ function timeGridHtml(days, o) {
   const allday = days.map(d => {
     const items = [];
     if (o.show.events && data) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d).forEach(e =>
-      items.push('<div class="wk-chip event" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(e.title) + '">' + esc(e.title) + '</div>'));
+      items.push('<div class="wk-chip event" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '">' + esc(evLabel(e)) + '</div>'));
     if (o.show.tasks) o.tasks.filter(t => t.dueDate === d && t.planDate !== d && !isDone(t) && inScope(t)).forEach(t =>
       items.push('<div class="wk-chip" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" title="Auf die Zeitleiste ziehen, um zu planen">' + glyph(t.status) + '<span>' + esc(t.title) + '</span></div>'));
     return '<div class="wk-a' + (d === today ? ' today' : '') + '" data-drop-date="' + d + '">' + items.slice(0, 4).join('') + (items.length > 4 ? '<div class="wk-more">+' + (items.length - 4) + ' weitere</div>' : '') + '</div>';
@@ -1615,8 +1615,7 @@ function projectPage(p) {
 }
 A['proj-tab'] = el => {
   // leaving the editor with unsaved text: the draft stays in the browser and comes back next time
-  if (S.docEdit) docEndEdit();
-  if (S.protoEdit && S.protoEdit.id) docEndEdit();
+  if (S.protoEdit) docEndEdit();
   S.protoEdit = null;
   S.doc = null;
   S.projTab = el.dataset.v;

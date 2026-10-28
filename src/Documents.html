@@ -1,335 +1,92 @@
 <script>
 /* ==========================================================================
-   Documents and jour fixe of a project: list, viewer, in-app editor (Markdown
-   subset with live preview), versions, conflicts, action items as tasks.
-   The text lives in Drive (server: Docs.js); this file only shows and edits it.
+   Jour fixe of a project: meetings in rows, minutes as a form (header, numbered
+   topics, lines I/A/B/N). Series and the list of minutes come with the app start
+   (S.jf); the minutes text is stored in Drive (server: Docs.js, Drive.js).
    ========================================================================== */
 
-/* ---------------- Markdown subset, rendered safely ---------------- */
-// Everything is escaped first; only the few marks below become markup. Links: http(s) only.
-function mdInline(s) {
-  return esc(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/(^|[\s(])_([^_]+)_(?=[\s).,!?]|$)/g, '$1<i>$2</i>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)"]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-    .replace(/(^|\s)@([^\s@]+@[^\s@]+\.[^\s@<]+)/g, (m, sp, e) => sp + '<span class="md-at">@' + esc(user(e).name) + '</span>')
-    .replace(/(^|\s)!(\d{4}-\d{2}-\d{2})(?=\s|$)/g, (m, sp, d) => sp + '<span class="md-due">' + icon('calendar', 'sm') + esc(fmtDate(d, { absolute: true })) + '</span>');
-}
-/** One action item line; o.actions: a button "Als Aufgabe" on open items (needs o.docId). */
-function mdItem(item, o) {
-  const extra = (item.assignee ? ' @' + item.assignee : '') + (item.due ? ' !' + item.due : '');
-  const task = item.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(item.taskId) + '">' + icon('check', 'sm') + 'Aufgabe</button>'
-    : o.actions && !item.done && item.text ? ' <button class="md-mk" data-action="doc-to-task" data-id="' + esc(o.docId) + '" data-text="' + esc(item.text) + '">' + icon('plus', 'sm') + 'Als Aufgabe</button>' : '';
-  return '<li class="md-ai' + (item.done ? ' done' : '') + '"><span class="md-box" aria-hidden="true">' + (item.done ? icon('check', 'sm') : '') + '</span><span>' +
-    mdInline(item.text + extra) + task + '</span></li>';
-}
-function mdTable(rows) {
-  const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
-  const body = rows.filter(r => !/^\s*\|[\s:|-]+\|?\s*$/.test(r));
-  return '<div class="md-tw"><table class="md-t">' + body.map((r, k) => '<tr>' + cells(r).map(c => (k ? '<td>' : '<th>') + mdInline(c) + (k ? '</td>' : '</th>')).join('') + '</tr>').join('') + '</table></div>';
-}
-/** List lines: [tag, html] or null. */
-function mdListLine(line, o) {
-  const item = Shared.parseActionItem(line);
-  if (item) return ['ul', mdItem(item, o)];
-  const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
-  if (bullet) return ['ul', '<li>' + mdInline(bullet[1]) + '</li>'];
-  const num = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-  return num ? ['ol', '<li>' + mdInline(num[1]) + '</li>'] : null;
-}
-/** Other lines: heading, quote or paragraph. */
-function mdBlock(line) {
-  const h = /^(#{1,3})\s+(.*)$/.exec(line);
-  if (h) return '<h' + (h[1].length + 1) + ' class="md-h">' + mdInline(h[2]) + '</h' + (h[1].length + 1) + '>';
-  const q = /^>\s?(.*)$/.exec(line);
-  if (q) return '<blockquote class="md-q">' + mdInline(q[1]) + '</blockquote>';
-  return line.trim() ? '<p>' + mdInline(line) + '</p>' : '';
-}
-/** Markdown subset as HTML. o.actions: "Als Aufgabe" buttons on open action items (needs o.docId). */
-function mdRender(text, o) {
-  o = o || {};
-  const lines = String(text || '').split('\n');
-  const out = [];
-  let list = null;
-  const close = () => { if (list) out.push('</' + list + '>'); list = null; };
-  for (let i = 0; i < lines.length; i++) {
-    const li = /^#{1,3}\s/.test(lines[i]) ? null : mdListLine(lines[i], o);
-    if (li) {
-      if (list !== li[0]) { close(); out.push('<' + li[0] + ' class="md-list">'); list = li[0]; }
-      out.push(li[1]);
-      continue;
-    }
-    close();
-    if (/^\s*\|/.test(lines[i])) {
-      const rows = [];
-      for (; i < lines.length && /^\s*\|/.test(lines[i]); i++) rows.push(lines[i]);
-      i--;
-      out.push(mdTable(rows));
-    } else out.push(mdBlock(lines[i]));
-  }
-  close();
-  return '<div class="md">' + out.join('') + '</div>';
-}
-
-/* ---------------- state ---------------- */
-// S.docs[projectId]: list; S.jfs[projectId]: { series, meetings }; S.doc: open document { ..., content }
-// S.docEdit: { id, projectId, title, content, base, kind } while editing
-/** Documents of the project: part of the one call that loads the jour fixe tab. */
-function docsOf(pid) {
-  const j = jfOf(pid);
-  return j && !j.error ? j.docs : j;
-}
-function jfOf(pid) {
-  if (S.jfs[pid] === undefined) {
-    S.jfs[pid] = null;
-    call('jf.list', { projectId: pid }).then(l => { S.jfs[pid] = l; render({ peek: false }); }).catch(err => { S.jfs[pid] = { error: friendlyError(err.message) }; render({ peek: false }); });
-  }
-  return S.jfs[pid];
-}
-function docsReload(pid) { delete S.jfs[pid]; }
-const draftKey = id => 'draft:doc:' + (id || 'new');
 const RHYTHMS = () => [{ key: 'weekly', label: L('Wöchentlich', 'Weekly') }, { key: 'biweekly', label: L('Alle 2 Wochen', 'Every 2 weeks') }, { key: 'monthly', label: L('Monatlich', 'Monthly') }];
 const WEEKDAYS = () => [1, 2, 3, 4, 5, 6, 0].map(d => ({ key: String(d), label: DOW_LONG[d] }));
-
-/* ---------------- documents (a section of the jour fixe tab) ---------------- */
-function docsSection(p) {
-  const list = docsOf(p.id);
-  const head = '<div class="docs-head"><div><h3>' + icon('text', 'sm') + 'Dokumente</h3><p class="hint">Weitere Unterlagen des Projekts: Konzepte, Notizen, Anleitungen.</p></div>' +
-    '<button class="btn" data-action="doc-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neues Dokument</button></div>';
-  if (!list) return head + skRows(2);
-  if (!list.length) return head + '<div class="empty-mini">Noch keine Dokumente.</div>';
-  return head + '<div class="docs-list">' + list.map(docCard).join('') + '</div>';
-}
-function docCard(d) {
-  return '<button class="doc-card" data-action="doc-open" data-id="' + esc(d.id) + '">' + icon('text') +
-    '<span class="dc-main"><b>' + esc(d.title) + '</b><small>' + esc(d.preview || '') + '</small></span>' +
-    '<span class="dc-meta">' + (d.lockBy ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + '</span>' : '') +
-    avatar(d.updatedBy) + '<small>' + esc(timeAgo(d.updatedAt)) + '</small></span></button>';
-}
-function docViewer(p) {
-  const d = S.doc;
-  if (!d.content && d.content !== '') return skLines(6);
-  return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close" data-v="jf" title="Zurück" aria-label="Zurück">' + icon('back') + '</button>' +
-    '<div class="dv-t"><h2>' + esc(d.title) + '</h2><small>' + esc(L('Version ', 'Version ') + d.version + ' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) + '</small></div>' +
-    (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') +
-    (d.canWrite ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' +
-      '<button class="btn sm danger" data-action="doc-remove" data-id="' + esc(d.id) + '">' + icon('trash', 'sm') + 'Löschen</button>' +
-      '<button class="btn sm primary" data-action="doc-edit">' + icon('text', 'sm') + 'Bearbeiten</button>' : '') + '</div>' +
-    mdRender(d.content, { actions: d.canWrite && d.kind === 'jf', docId: d.id }) + '</div>';
-}
-
-/* ---------------- editor ---------------- */
-function docEditor() {
-  const e = S.docEdit;
-  const other = S.doc && S.doc.id === e.id && S.doc.lockBy && S.doc.lockBy !== S.me.email ? S.doc.lockBy : '';
-  const dirty = docDirty();
-  return '<div class="doc-edit card-w">' +
-    (other ? '<div class="banner warn">' + icon('lock') + '<div><b>' + esc(user(other).name) + ' bearbeitet dieses Dokument gerade.</b> Beim Speichern prüft die App, ob jemand anderes inzwischen gespeichert hat – überschrieben wird nichts.</div></div>' : '') +
-    '<input class="input de-title" data-on-input="doc-title" value="' + esc(e.title) + '" placeholder="Titel" aria-label="Titel des Dokuments" maxlength="120">' +
-    '<div class="ed-tools de-tools" role="toolbar" aria-label="Formatierung">' +
-    [['h', 'Überschrift', 'H'], ['b', 'Fett', '<b>B</b>'], ['i', 'Kursiv', '<i>I</i>'], ['ul', 'Liste', icon('list', 'sm')], ['ai', 'Action Item', icon('checksq', 'sm')],
-      ['link', 'Link', icon('open', 'sm')], ['at', 'Person erwähnen', '@'], ['tbl', 'Tabelle', icon('table', 'sm')], ['due', 'Fälligkeit', icon('calendar', 'sm')]]
-      .map(t => '<button type="button" data-action="de-fmt" data-k="' + t[0] + '"' + labelled(t[1]) + '>' + t[2] + '</button>').join('') + '</div>' +
-    '<div class="de-split"><textarea class="textarea de-text" data-on-input="doc-text" aria-label="Text des Dokuments" spellcheck="true">' + esc(e.content) + '</textarea>' +
-    '<div class="de-preview" aria-label="Vorschau">' + mdRender(e.content) + '</div></div>' +
-    '<p class="hint">Markdown: # Überschrift · **fett** · _kursiv_ · - Liste · - [ ] Action Item @person@firma.de !2026-11-03 · [Text](Link) · | Tabelle |</p>' +
-    '<div class="peek-commit doc-commit' + (dirty ? '' : ' clean') + '" role="status">' + icon('text', 'sm') +
-    '<span class="grow">' + (dirty ? 'Ungespeicherte Änderungen (als Entwurf im Browser gesichert)' : 'Keine Änderungen') + '</span>' +
-    '<button type="button" class="btn sm" data-action="doc-discard">' + (dirty ? 'Verwerfen' : 'Schließen') + '</button>' +
-    '<button type="button" class="btn sm primary" data-action="doc-save"' + (dirty ? '' : ' disabled') + '>Übernehmen</button></div></div>';
-}
-function docDirty() {
-  const e = S.docEdit;
-  return !!e && (e.content !== e.savedContent || e.title !== e.savedTitle);
-}
-/** Live preview and the save bar without a full render (the textarea keeps focus and caret). */
-function docRefreshPreview() {
-  const e = S.docEdit;
-  const dirty = docDirty();
-  const pv = $('.de-preview');
-  if (pv) pv.innerHTML = mdRender(e.content);
-  const bar = $('.doc-commit');
-  if (bar) {
-    bar.classList.toggle('clean', !dirty);
-    $('.grow', bar).textContent = dirty ? 'Ungespeicherte Änderungen (als Entwurf im Browser gesichert)' : 'Keine Änderungen';
-    $('[data-action="doc-save"]', bar).disabled = !dirty;
-    $('[data-action="doc-discard"]', bar).textContent = dirty ? 'Verwerfen' : 'Schließen';
-  }
-  store.set(draftKey(e.id), dirty ? { title: e.title, content: e.content, base: e.base } : null);
-}
-ON.input['doc-text'] = el => { S.docEdit.content = el.value; docPreviewSoon(); };
-ON.input['doc-title'] = el => { S.docEdit.title = el.value; docPreviewSoon(); };
-const docPreviewSoon = debounce(() => { if (S.docEdit) docRefreshPreview(); }, 150);
-
-function docStartEdit(d, projectId) {
-  const e = { id: d ? d.id : null, projectId: projectId, kind: d ? d.kind : 'doc', title: d ? d.title : '', content: d ? d.content : '',
-    base: d ? d.version : 0, savedTitle: d ? d.title : '', savedContent: d ? d.content : '' };
-  const draft = store.get(draftKey(e.id), null);
-  if (draft && (draft.content !== e.content || draft.title !== e.title)) {
-    e.title = draft.title;
-    e.content = draft.content;
-    toast(L('Dein ungespeicherter Entwurf wurde wiederhergestellt.', 'Your unsaved draft was restored.'));
-  }
-  S.docEdit = e;
-  if (e.id) docLock(e.id);
-  render({ peek: false });
-  const ta = $('.de-text');
-  if (ta) ta.focus();
-}
-let docLockTimer = null;
-function docLock(id) {
-  clearInterval(docLockTimer);
-  call('docs.lock', { id: id }, { quiet: true }).catch(() => {});
-  // renewed while the editor is open (the lock runs out after 5 minutes on its own)
-  docLockTimer = setInterval(() => { if (S.docEdit && S.docEdit.id === id) call('docs.lock', { id: id }, { quiet: true }).catch(() => {}); else clearInterval(docLockTimer); }, 4 * 60000);
-}
-function docEndEdit() {
-  const e = S.docEdit;
-  clearInterval(docLockTimer);
-  if (e && e.id) call('docs.unlock', { id: e.id }, { quiet: true }).catch(() => {});
-  S.docEdit = null;
-}
-
-A['doc-new'] = el => { S.doc = null; docStartEdit(null, el.dataset.id); };
-A['doc-open'] = el => docOpen(el.dataset.id);
-function docOpen(id) {
-  S.doc = { id: id, projectId: S.route.id, kind: (S.jfs[S.route.id] && S.jfs[S.route.id].meetings || []).some(m => m.id === id) ? 'jf' : 'doc' };
-  render({ peek: false });
-  return call('docs.get', { id: id }).then(d => { S.doc = d; render({ peek: false }); }).catch(err => { S.doc = null; render({ peek: false }); fail(err); });
-}
-A['doc-close'] = el => { S.doc = null; S.projTab = el.dataset.v || 'docs'; render({ peek: false }); };
-A['doc-edit'] = () => docStartEdit(S.doc, S.doc.projectId);
-A['doc-discard'] = () => {
-  const e = S.docEdit;
-  store.set(draftKey(e.id), null);
-  docEndEdit();
-  render({ peek: false });
-};
-A['doc-save'] = () => docSave(false);
-function docSave(force) {
-  const e = S.docEdit;
-  const payload = e.id ? { id: e.id, title: e.title, content: e.content, baseVersion: e.base } : { projectId: e.projectId, title: e.title, content: e.content };
-  return call('docs.save', payload).then(r => {
-    if (r.conflict && !force) return docConflict(r.current);
-    if (r.conflict) { e.base = r.current.version; return docSave(false); }
-    store.set(draftKey(e.id), null);
-    docEndEdit();
-    docsReload(e.projectId);
-    toast(L('Gespeichert in Google Drive', 'Saved to Google Drive'));
-    return docOpen(r.id);
-  }).catch(fail);
-}
+const PROTO_LABELS = () => ({ I: L('Info', 'Info'), A: L('Aufgabe', 'Action'), B: L('Beschluss', 'Decision'), N: L('Nachtrag', 'Note') });
 const END_BTN = '</button></div>';
 const hintP = t => '<p class="hint">' + esc(t) + '</p>';
 const labelled = t => ' title="' + esc(t) + '" aria-label="' + esc(t) + '"';
-/**
- * Someone saved in between (documents and minutes): keep mine (on top of theirs) or take theirs.
- * Nothing is lost silently; o.mine saves mine, o.theirs drops mine.
- */
-function conflictModal(cur, o) {
-  openModal({
-    title: L('Inzwischen geändert', 'Changed in the meantime'),
-    body: '<p style="margin:0 0 8px">' + esc(L(user(cur.updatedBy).name + ' hat gespeichert, während du bearbeitet hast.', user(cur.updatedBy).name + ' saved while you were editing.')) + '</p>' +
-      hintP(L('Deine Fassung bleibt als Entwurf im Browser erhalten. Ihre Fassung siehst du unten.', 'Your version stays as a draft in this browser. Theirs is shown below.')) +
-      '<div class="de-preview conflict">' + docPreview(cur.content) + '</div>',
-    submitLabel: L('Meine Fassung speichern', 'Save my version'),
-    danger: { label: L('Ihre Fassung übernehmen', 'Take their version'), onClick: () => { closeModal(); o.theirs(); } },
-    onSubmit: () => { closeModal(); return o.mine(); },
-  });
-}
-function docConflict(cur) {
-  conflictModal(cur, {
-    mine: () => { S.docEdit.base = cur.version; return docSave(true); },
-    theirs: () => { const e = S.docEdit; store.set(draftKey(e.id), null); docEndEdit(); docOpen(e.id); },
-  });
-}
-A['doc-remove'] = el => {
-  const d = S.doc;
-  confirmDelete(L('„' + d.title + '“ löschen? Die Datei kommt in den Google-Drive-Papierkorb.', 'Delete “' + d.title + '”? The file goes to the Google Drive trash.'),
-    () => call('docs.remove', { id: el.dataset.id }).then(() => { docsReload(d.projectId); S.doc = null; render({ peek: false }); toast(L('Gelöscht', 'Deleted')); }));
-};
-A['doc-versions'] = el => {
-  const id = el.dataset.id;
-  call('docs.versions', { id: id }).then(list => openModal({
-    title: L('Versionen', 'Versions'),
-    body: list.length ? '<div class="list-plain">' + list.map(v => '<div class="li"><span class="grow"><b>' + esc(L('Version ', 'Version ') + v.version) + '</b> <span class="faint">' +
-      esc(user(v.by).name + ' · ' + timeAgo(v.at)) + '</span></span><button type="button" class="btn sm" data-action="doc-restore" data-id="' + esc(id) + '" data-v="' + v.version + '">' +
-      esc(L('Wiederherstellen', 'Restore')) + END_BTN).join('') + '</div>' : hintP(L('Noch keine älteren Versionen.', 'No earlier versions yet.')),
-    submitLabel: L('Schließen', 'Close'),
-    onSubmit: () => closeModal(),
-  })).catch(fail);
-};
-A['doc-restore'] = el => call('docs.restore', { id: el.dataset.id, version: Number(el.dataset.v) })
-  .then(() => { closeModal(); toast(L('Version wiederhergestellt', 'Version restored')); return docOpen(el.dataset.id); }).catch(fail);
+const whoName = e => (e ? user(e).name : '');
+const draftKey = id => 'draft:doc:' + (id || 'new');
 
-/** Toolbar: inserts the mark at the caret (or around the selection). */
-A['de-fmt'] = el => {
-  const ta = $('.de-text');
-  if (!ta) return;
-  const k = el.dataset.k;
-  if (k === 'at') {
-    return peopleModal({ title: L('Person erwähnen', 'Mention someone'), single: true, selected: [], prefer: (S.users || []).map(u => u.email),
-      onChange: list => deInsert(ta, '@' + list[0] + ' ', '') });
-  }
-  const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
-  const wrap = { b: ['**', '**'], i: ['_', '_'], link: ['[', '](https://)'] }[k];
-  if (wrap) return deInsert(ta, wrap[0] + (sel || L('Text', 'text')) + wrap[1], '', true);
-  const block = { h: '\n## ', ul: '\n- ', ai: '\n- [ ] ', tbl: '\n| Spalte | Spalte |\n|---|---|\n| | |\n', due: ' !' + TODAY() }[k];
-  deInsert(ta, block, '');
-};
-function deInsert(ta, text, after, replace) {
-  const a = ta.selectionStart;
-  const b = replace ? ta.selectionEnd : a;
-  ta.value = ta.value.slice(0, a) + text + after + ta.value.slice(b);
-  ta.selectionStart = ta.selectionEnd = a + text.length;
-  ta.focus();
-  S.docEdit.content = ta.value;
-  docRefreshPreview();
+/** Series and minutes of the projects the person sees (from the app start; refreshed after changes). */
+function jfData() { return S.jf || { series: [], minutes: [] }; }
+function jfReload() {
+  return call('jf.list', {}, { quiet: true }).then(d => { S.jf = d; render({ peek: false }); }).catch(() => {});
 }
+/** "Weekly · Team / Projekt": what a jour fixe entry is called in calendars and the overview. */
+function jfName(seriesTitle, projectId) {
+  const p = project(projectId);
+  const t = p && team(p.teamId);
+  return seriesTitle + (p ? ' · ' + (t ? t.name + ' / ' : '') + p.name : '');
+}
+/** Calendar and overview label of an event (jour fixe with team and project). */
+function evLabel(e) { return e.type === 'jf' ? jfName(e.title, e.projectId) : e.title; }
 
-/* ---------------- jour fixe tab ---------------- */
+/* ---------------- the tab: one row per meeting ---------------- */
 function jfTab(p) {
-  if (S.protoEdit && S.protoEdit.projectId === p.id) return protoEditor(p);
-  if (S.docEdit && S.docEdit.projectId === p.id) return docEditor(p);
-  if (S.doc && S.doc.projectId === p.id) return S.doc.kind === 'jf' ? protoViewer(p) : docViewer(p);
-  const jf = jfOf(p.id);
-  const head = '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3><p class="hint">Regelmäßige Termine mit Protokoll. Offene Aufgaben wandern ins nächste Protokoll.</p></div>' +
-    '<button class="btn primary" data-action="jf-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button></div>';
-  if (jf === null) return head + skRows(3) + skRows(2);
-  if (jf.error) return head + '<div class="notice">' + esc(jf.error) + '</div>';
-  const series = jf.series.length ? '<div class="jf-list">' + jf.series.map(s => jfCard(s)).join('') + '</div>'
-    : '<div class="empty-mini">Noch kein Jour Fixe. Lege eine Serie an, z. B. jeden Montag 9:00.</div>';
-  const archive = jf.meetings.length ? '<div class="h2">' + icon('inbox') + 'Protokolle</div><div class="docs-list">' + jf.meetings.map(docCard).join('') + '</div>' : '';
-  return head + series + archive + '<div class="h2-gap"></div>' + docsSection(p);
+  if (S.protoEdit && S.protoEdit.projectId === p.id) return protoEditor();
+  if (S.doc && S.doc.projectId === p.id) return protoViewer();
+  const data = jfData();
+  const today = TODAY();
+  const series = data.series.filter(s => s.projectId === p.id);
+  const minutes = data.minutes.filter(m => m.projectId === p.id);
+  // next meeting of every series, then the minutes of past meetings (newest first)
+  const upcoming = series.map(s => ({ s: s, date: Shared.jfDates(s, today, Shared.addDays(today, 62))[0] })).filter(x => x.date)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const past = minutes.filter(m => !upcoming.some(u => u.s.id === m.seriesId && u.date === m.date));
+  const byId = id => series.find(s => s.id === id) || { id: id, title: (minutes.find(m => m.seriesId === id) || {}).title || 'Jour Fixe', attendees: [] };
+  const rows = upcoming.map(u => jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true))
+    .concat(past.map(m => jfRow(byId(m.seriesId), m.date, m, false)));
+  return '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3>' +
+    hintP(L('Regelmäßige Termine mit Protokoll. Offene Aufgaben wandern ins nächste Protokoll.', 'Regular meetings with minutes. Open actions move on to the next minutes.')) + '</div>' +
+    '<button class="btn primary" data-action="jf-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button></div>' +
+    (rows.length ? '<div class="jf-rows" role="list">' + rows.join('') + '</div>'
+      : '<div class="empty-mini">' + esc(L('Noch kein Jour Fixe. Lege eine Serie an, z. B. jeden Montag 9:00.', 'No jour fixe yet. Create a series, e.g. every Monday 9:00.')) + '</div>');
 }
-function jfCard(s) {
-  const next = Shared.jfDates(s, TODAY(), Shared.addDays(TODAY(), 62))[0];
-  const last = Shared.jfDates(s, Shared.addDays(TODAY(), -62), TODAY()).pop();
-  const rh = (RHYTHMS().find(r => r.key === s.rhythm) || RHYTHMS()[0]).label;
-  return '<div class="card-w jf-card"><div class="jf-top"><b>' + esc(s.title) + '</b><span class="chip soft">' + esc(rh + ' · ' + DOW_LONG[s.weekday] + ' ' + s.time) + '</span>' +
-    '<span class="grow"></span>' + avatars(s.attendees || [], 5) +
-    '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '" title="Bearbeiten" aria-label="Jour Fixe bearbeiten">' + icon('settings', 'sm') + END_BTN +
-    '<div class="jf-acts">' +
-    (last ? '<button class="btn sm" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + last + '">' + icon('text', 'sm') + esc(L('Letzter: ', 'Last: ') + fmtDate(last, { absolute: true })) + '</button>' : '') +
-    (next ? '<button class="btn sm primary" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + next + '">' + icon('text', 'sm') + esc(L('Nächster: ', 'Next: ') + fmtDate(next, { absolute: true })) + '</button>' : '') +
-    (s.meetLink ? '<a class="btn sm" href="' + esc(s.meetLink) + '" target="_blank" rel="noopener noreferrer">' + icon('open', 'sm') + 'Meet</a>' : '') + '</div></div>';
+/**
+ * One meeting: series, date ("Nächster: …" ahead, the plain date afterwards) and people:
+ * before the meeting everybody invited, afterwards only who missed it (they should read the minutes).
+ */
+function jfRow(s, date, minutes, upcoming) {
+  const absent = minutes && minutes.people ? minutes.people.absent || [] : [];
+  const people = upcoming ? s.attendees || [] : absent;
+  const label = upcoming ? L('Nächster: ', 'Next: ') + fmtDate(date, { absolute: true }) : fmtDate(date, { absolute: true });
+  return '<div class="jf-row' + (upcoming ? ' next' : '') + '" role="listitem"><div class="jf-hit" role="button" tabindex="0" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(date) + '" ' +
+    'data-on-keydown="jf-row-key" aria-label="' + esc(s.title + ', ' + label) + '">' +
+    '<b class="jf-t">' + esc(s.title) + '</b><span class="jf-d' + (upcoming ? ' next' : '') + '">' + esc(label) + '</span>' + jfBadges(minutes, upcoming) +
+    '<span class="grow"></span>' +
+    (people.length ? (upcoming ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 6) : '') +
+    icon('right', 'sm faint') + '</div>' +
+    (upcoming && s.projectId ? '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '"' + labelled(L('Jour Fixe bearbeiten', 'Edit jour fixe')) + '>' + icon('settings', 'sm') + '</button>' : '') +
+    '</div>';
 }
+/** "noch kein Protokoll" for the next meeting, "2 offen" when action items are still open. */
+function jfBadges(minutes, upcoming) {
+  if (!minutes) return upcoming ? '<span class="chip soft">' + esc(L('noch kein Protokoll', 'no minutes yet')) + '</span>' : '';
+  return minutes.openCount ? '<span class="chip warn">' + esc(minutes.openCount + L(' offen', ' open')) + '</span>' : '';
+}
+ON.keydown['jf-row-key'] = (el, e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); A['jf-open'](el); } };
 A['jf-open'] = el => jfOpen(el.dataset.id, el.dataset.v);
+/** One call: saved minutes with their text, or a draft from the template (nothing is written before "Übernehmen"). */
 function jfOpen(seriesId, date) {
+  S.jfOpening = true;
   return call('jf.meeting', { seriesId: seriesId, date: date, lang: LANG }).then(m => {
+    S.jfOpening = false;
     S.projTab = 'jf';
     if (S.route.view !== 'project' || S.route.id !== m.projectId) go('project', m.projectId);
     S.doc = m;
     if (m.draft && m.canWrite) return protoStartEdit(m);
     render({ peek: false });
-  }).catch(fail);
+  }).catch(err => { S.jfOpening = false; fail(err); });
 }
 A['jf-new'] = el => jfModal(null, el.dataset.id);
-A['jf-edit'] = el => {
-  const s = Object.values(S.jfs).filter(Boolean).flatMap(x => x.series || []).find(x => x.id === el.dataset.id);
-  if (s) jfModal(s, s.projectId);
-};
+A['jf-edit'] = el => { const s = jfData().series.find(x => x.id === el.dataset.id); if (s) jfModal(s, s.projectId); };
 function jfModal(s, projectId) {
   const p = project(projectId);
   s = s || { title: 'Jour Fixe', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: TODAY(), attendees: p ? projectMembers(p) : [S.me.email] };
@@ -345,19 +102,13 @@ function jfModal(s, projectId) {
       field('Google-Meet-Link (optional)', '<input class="input" name="meetLink" placeholder="https://meet.google.com/…" value="' + esc(s.meetLink || '') + '">'),
     submitLabel: s.id ? 'Speichern' : L('Jour Fixe anlegen', 'Create jour fixe'),
     danger: s.id ? { label: L('Serie beenden', 'End series'), onClick: () => confirmDelete(L('Serie beenden? Alle Protokolle bleiben erhalten.', 'End the series? All minutes are kept.'),
-      () => call('jf.removeSeries', { id: s.id }).then(() => { delete S.jfs[projectId]; calReload(); })) } : null,
+      () => call('jf.removeSeries', { id: s.id }).then(() => { calReload(); return jfReload(); })) } : null,
     onSubmit: v => call('jf.saveSeries', Object.assign({ id: s.id, projectId: projectId }, v, { weekday: Number(v.weekday), attendees: collectPeople(v, 'attendees') }))
-      .then(() => { delete S.jfs[projectId]; closeModal(); calReload(); toast(L('Jour Fixe gespeichert', 'Jour fixe saved')); }),
+      .then(() => { closeModal(); calReload(); toast(L('Jour Fixe gespeichert', 'Jour fixe saved')); return jfReload(); }),
   });
 }
-/* ---------------- jour fixe minutes: view and form ---------------- */
-const PROTO_LABELS = () => ({ I: L('Info', 'Info'), A: L('Aufgabe', 'Action'), B: L('Beschluss', 'Decision'), N: L('Nachtrag', 'Note') });
-/** Text of a document for previews: minutes as their table, anything else as Markdown. */
-function docPreview(text) {
-  const m = Shared.protoFromText(text);
-  return m ? protoTable(m, {}) : mdRender(text);
-}
-const whoName = e => (e ? user(e).name : '');
+
+/* ---------------- minutes: view ---------------- */
 /** The minutes table: numbered topics with their lines (Art, Thema, Verantwortlich, Termin). */
 function protoTable(m, o) {
   const rows = [];
@@ -374,6 +125,11 @@ function protoTable(m, o) {
     L('Verantwortlich', 'Responsible') + '</th><th>' + L('Termin', 'Due') + '</th></tr></thead><tbody>' +
     (rows.join('') || '<tr><td colspan="5" class="faint">' + L('Noch keine Themen.', 'No topics yet.') + '</td></tr>') + '</tbody></table></div>';
 }
+/** Minutes as a table; any other text (older files) as plain text. */
+function docPreview(text) {
+  const m = Shared.protoFromText(text);
+  return m ? protoTable(m, {}) : '<pre class="pt-plain">' + esc(text) + '</pre>';
+}
 function protoHead(m, version) {
   const people = list => (list.length ? list.map(e => '<span class="pt-p">' + avatar(e) + esc(whoName(e)) + '</span>').join('') : '<span class="faint">–</span>');
   return '<dl class="pt-head"><dt>' + L('Datum', 'Date') + '</dt><dd>' + esc(fmtDate(m.date, { absolute: true })) + (version ? ' · Rev. ' + version : '') + '</dd>' +
@@ -383,21 +139,51 @@ function protoHead(m, version) {
 }
 function protoViewer() {
   const d = S.doc;
-  const m = d.content !== undefined ? Shared.protoFromText(d.content) : null;
-  if (!m) return d.content !== undefined ? docViewer() : skLines(6);
-  return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close" data-v="jf" title="Zurück" aria-label="Zurück">' + icon('back') + '</button>' +
-    '<div class="dv-t"><h2>' + esc(m.title) + '</h2><small>' + esc(L('Jour-Fixe-Protokoll', 'Jour fixe minutes')) + (d.updatedBy ? esc(' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) : '') + '</small></div>' +
+  if (d.content === undefined) return skLines(6);
+  const m = Shared.protoFromText(d.content) || Shared.protoClean({ title: d.title, date: d.date });
+  return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close"' + labelled(L('Zurück', 'Back')) + '>' + icon('back') + '</button>' +
+    '<div class="dv-t"><h2>' + esc(jfName(m.title || d.title, d.projectId)) + '</h2><small>' + esc(L('Jour-Fixe-Protokoll', 'Jour fixe minutes')) +
+    (d.updatedBy ? esc(' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) : '') + '</small></div>' +
     (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') +
     (d.canWrite && d.id ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' : '') +
-    (d.canWrite ? '<button class="btn sm primary" data-action="proto-edit">' + icon('text', 'sm') + 'Bearbeiten</button>' : '') + '</div>' +
+    (d.canWrite ? '<button class="btn sm primary" data-action="proto-edit">' + L('Bearbeiten', 'Edit') + '</button>' : '') + '</div>' +
     protoHead(m, d.version) + protoTable(m, { actions: d.canWrite && d.id, docId: d.id }) + '</div>';
 }
+A['doc-close'] = () => { S.doc = null; S.projTab = 'jf'; render({ peek: false }); };
+A['doc-versions'] = el => {
+  const id = el.dataset.id;
+  call('docs.versions', { id: id }).then(list => openModal({
+    title: L('Versionen', 'Versions'),
+    body: list.length ? '<div class="list-plain">' + list.map(v => '<div class="li"><span class="grow"><b>' + esc(L('Version ', 'Version ') + v.version) + '</b> <span class="faint">' +
+      esc(user(v.by).name + ' · ' + timeAgo(v.at)) + '</span></span><button type="button" class="btn sm" data-action="doc-restore" data-id="' + esc(id) + '" data-v="' + v.version + '">' +
+      esc(L('Wiederherstellen', 'Restore')) + END_BTN).join('') + '</div>' : hintP(L('Noch keine älteren Versionen.', 'No earlier versions yet.')),
+    submitLabel: L('Schließen', 'Close'),
+    onSubmit: () => closeModal(),
+  })).catch(fail);
+};
+A['doc-restore'] = el => call('docs.restore', { id: el.dataset.id, version: Number(el.dataset.v) })
+  .then(() => { closeModal(); toast(L('Version wiederhergestellt', 'Version restored')); return protoReopen(el.dataset.id); }).catch(fail);
+function protoReopen(id) {
+  return call('docs.get', { id: id }).then(d => { S.doc = d; render({ peek: false }); return jfReload(); });
+}
 
-/* the form: S.protoEdit = { doc fields, model, saved } while editing */
+/* ---------------- minutes: the form ---------------- */
+let docLockTimer = null;
+/** "Wird gerade bearbeitet": set while the form is open, renewed every 4 minutes (runs out after 5 on its own). */
+function docLock(id) {
+  clearInterval(docLockTimer);
+  call('docs.lock', { id: id }, { quiet: true }).catch(() => {});
+  docLockTimer = setInterval(() => { if (S.protoEdit && S.protoEdit.id === id) call('docs.lock', { id: id }, { quiet: true }).catch(() => {}); else clearInterval(docLockTimer); }, 4 * 60000);
+}
+function docEndEdit() {
+  const e = S.protoEdit;
+  clearInterval(docLockTimer);
+  if (e && e.id) call('docs.unlock', { id: e.id }, { quiet: true }).catch(() => {});
+}
 const protoKey = e => draftKey('jf:' + e.seriesId + ':' + e.date);
 function protoStartEdit(d) {
   const model = Shared.protoFromText(d.content) || Shared.protoClean({ date: d.date, topics: [] });
-  const e = { id: d.id || '', projectId: d.projectId, seriesId: d.seriesId, date: d.date, title: d.title, base: d.version || 0, model: model, saved: Shared.protoToText(model) };
+  const e = { id: d.id || '', projectId: d.projectId, seriesId: d.seriesId, date: d.date, title: d.title, base: d.version || 0, model: model, saved: Shared.protoToText(model), sizes: {} };
   const draft = store.get(protoKey(e), null);
   if (draft && draft.base === e.base && Shared.protoToText(draft.model) !== e.saved) {
     e.model = Shared.protoClean(draft.model);
@@ -408,49 +194,58 @@ function protoStartEdit(d) {
   render({ peek: false });
 }
 const protoDirty = () => !!S.protoEdit && Shared.protoToText(S.protoEdit.model) !== S.protoEdit.saved;
+/** Re-renders the form; text fields someone dragged larger keep their size. */
+function protoRender() {
+  const sizes = S.protoEdit.sizes;
+  $$('.proto-edit textarea[data-path]').forEach(t => { if (t.style.height) sizes[t.dataset.path] = t.style.height; });
+  render({ peek: false });
+  $$('.proto-edit textarea[data-path]').forEach(t => { if (sizes[t.dataset.path]) t.style.height = sizes[t.dataset.path]; });
+}
 /** People to pick from: attendees, the project's people, then everybody else. */
 function protoPeople() {
   const e = S.protoEdit;
   const p = project(e.projectId);
-  const first = e.model.present.concat(p ? projectMembers(p) : []);
-  const all = first.concat(S.users.map(u => u.email)).filter((x, i, a) => x && a.indexOf(x) === i);
-  return all;
+  return e.model.present.concat(p ? projectMembers(p) : [], S.users.map(u => u.email)).filter((x, i, a) => x && a.indexOf(x) === i);
 }
 function personSelect(path, value) {
   return '<select class="select sm" data-on-change="proto-field" data-path="' + path + '" aria-label="' + esc(L('Verantwortlich', 'Responsible')) + '"><option value="">–</option>' +
     protoPeople().map(x => '<option value="' + esc(x) + '"' + (x === value ? ' selected' : '') + '>' + esc(user(x).name) + '</option>').join('') + '</select>';
 }
+function protoLine(i, k, n) {
+  const at = 'topics.' + k + '.items.' + n;
+  return '<div class="pe-line">' +
+    '<select class="select sm pe-type" data-on-change="proto-field" data-path="' + at + '.type" aria-label="' + esc(L('Art', 'Type')) + '">' +
+    Shared.PROTO_TYPES.map(ty => '<option value="' + ty + '"' + (ty === i.type ? ' selected' : '') + '>' + ty + ' · ' + esc(PROTO_LABELS()[ty]) + '</option>').join('') + '</select>' +
+    '<textarea class="textarea pe-text" rows="1" data-on-input="proto-field" data-path="' + at + '.text" aria-label="Text">' + esc(i.text) + '</textarea>' +
+    personSelect(at + '.owner', i.owner) +
+    '<input class="input sm" type="date" data-on-change="proto-field" data-path="' + at + '.due" value="' + esc(i.due) + '" aria-label="' + esc(L('Termin', 'Due')) + '">' +
+    (i.type === 'A' ? '<label class="pe-done"><input type="checkbox" data-on-change="proto-field" data-path="' + at + '.done"' + (i.done ? ' checked' : '') + '> ' + esc(L('erledigt', 'done')) + '</label>' : '<span class="pe-done"></span>') +
+    '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '" data-i="' + n + '"' + labelled(L('Zeile löschen', 'Delete line')) + '>' + icon('x', 'sm') + END_BTN;
+}
 function protoEditor() {
   const e = S.protoEdit;
   const m = e.model;
   const dirty = protoDirty();
-  const chips = (list, key) => list.map(x => '<span class="nt-chip">' + avatar(x) + '<span>' + esc(user(x).name) + '</span><button type="button" class="nt-x" data-action="proto-unperson" data-k="' + key + '" data-v="' + esc(x) + '" aria-label="Entfernen" title="Entfernen">' + icon('x', 'sm') + '</button></span>').join('');
+  const chips = (list, key) => list.map(x => '<span class="nt-chip">' + avatar(x) + '<span>' + esc(user(x).name) + '</span><button type="button" class="nt-x" data-action="proto-unperson" data-k="' + key + '" data-v="' + esc(x) + '"' + labelled(L('Entfernen', 'Remove')) + '>' + icon('x', 'sm') + '</button></span>').join('');
   const topics = m.topics.map((t, k) =>
     '<div class="pe-topic card-w"><div class="pe-th"><span class="pe-no">' + (k + 1) + '.</span>' +
     '<input class="input" data-on-input="proto-field" data-path="topics.' + k + '.title" value="' + esc(t.title) + '" placeholder="' + esc(L('Thema', 'Topic')) + '" aria-label="' + esc(L('Thema', 'Topic')) + '">' +
     personSelect('topics.' + k + '.owner', t.owner) +
     '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '"' + labelled(L('Thema löschen', 'Delete topic')) + '>' + icon('trash', 'sm') + END_BTN +
-    t.items.map((i, n) => '<div class="pe-line">' +
-      '<select class="select sm pe-type" data-on-change="proto-field" data-path="topics.' + k + '.items.' + n + '.type" aria-label="' + esc(L('Art', 'Type')) + '">' +
-      Shared.PROTO_TYPES.map(ty => '<option value="' + ty + '"' + (ty === i.type ? ' selected' : '') + '>' + ty + ' · ' + esc(PROTO_LABELS()[ty]) + '</option>').join('') + '</select>' +
-      '<textarea class="textarea pe-text" rows="1" data-on-input="proto-field" data-path="topics.' + k + '.items.' + n + '.text" aria-label="Text">' + esc(i.text) + '</textarea>' +
-      personSelect('topics.' + k + '.items.' + n + '.owner', i.owner) +
-      '<input class="input sm" type="date" data-on-change="proto-field" data-path="topics.' + k + '.items.' + n + '.due" value="' + esc(i.due) + '" aria-label="' + esc(L('Termin', 'Due')) + '">' +
-      (i.type === 'A' ? '<label class="pe-done"><input type="checkbox" data-on-change="proto-field" data-path="topics.' + k + '.items.' + n + '.done"' + (i.done ? ' checked' : '') + '> ' + esc(L('erledigt', 'done')) + '</label>' : '<span class="pe-done"></span>') +
-      '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '" data-i="' + n + '"' + labelled(L('Zeile löschen', 'Delete line')) + '>' + icon('x', 'sm') + END_BTN).join('') +
-    '<button type="button" class="btn sm outline" data-action="proto-add-line" data-t="' + k + '">' + icon('plus', 'sm') + L('Zeile', 'Line') + END_BTN).join('');
-  return '<div class="doc-edit card-w proto-edit"><div class="dv-head"><div class="dv-t"><h2>' + esc(m.title || e.title) + '</h2><small>' + esc(fmtDate(e.date, { absolute: true })) + '</small></div></div>' +
+    t.items.map((i, n) => protoLine(i, k, n)).join('') +
+    '<button type="button" class="btn sm outline" data-action="proto-add-line" data-t="' + k + '">' + icon('plus', 'sm') + L('Zeile', 'Line') + '</button></div>').join('');
+  return '<div class="doc-edit card-w proto-edit"><div class="dv-head"><div class="dv-t"><h2>' + esc(jfName(m.title || e.title, e.projectId)) + '</h2><small>' + esc(fmtDate(e.date, { absolute: true })) + '</small></div></div>' +
     '<div class="pe-head"><label class="field"><span>' + L('Protokoll', 'Minutes by') + '</span>' + personSelect('minuteTaker', m.minuteTaker) + '</label>' +
     '<div class="field"><span>' + L('Anwesend', 'Present') + '</span><div class="nt-people">' + chips(m.present, 'present') + '<button type="button" class="nt-add" data-action="proto-person" data-k="present">' + icon('plus', 'sm') + L('Personen', 'People') + '</button></div></div>' +
     '<div class="field"><span>' + L('Abwesend', 'Absent') + '</span><div class="nt-people">' + chips(m.absent, 'absent') + '<button type="button" class="nt-add" data-action="proto-person" data-k="absent">' + icon('plus', 'sm') + L('Personen', 'People') + '</button></div></div></div>' +
-    '<p class="hint">' + L('Art: I = Info · A = Aufgabe (mit Verantwortlich und Termin, wird zur Projektaufgabe) · B = Beschluss · N = Nachtrag', 'Type: I = info · A = action (with responsible and due date, becomes a project task) · B = decision · N = note') + '</p>' +
+    hintP(L('Art: I = Info · A = Aufgabe (mit Verantwortlich und Termin, wird zur Projektaufgabe) · B = Beschluss · N = Nachtrag', 'Type: I = info · A = action (with responsible and due date, becomes a project task) · B = decision · N = note')) +
     topics + '<button type="button" class="btn" data-action="proto-add-topic">' + icon('plus', 'sm') + L('Thema hinzufügen', 'Add topic') + '</button>' +
-    '<div class="peek-commit doc-commit' + (dirty ? '' : ' clean') + '" role="status">' + icon('text', 'sm') +
+    '<div class="peek-commit doc-commit' + (dirty ? '' : ' clean') + '" role="status">' +
     '<span class="grow">' + (dirty ? L('Ungespeicherte Änderungen (als Entwurf im Browser gesichert)', 'Unsaved changes (kept as a draft in this browser)') : L('Keine Änderungen', 'No changes')) + '</span>' +
     '<button type="button" class="btn sm" data-action="proto-discard">' + (dirty ? L('Verwerfen', 'Discard') : L('Schließen', 'Close')) + '</button>' +
     '<button type="button" class="btn sm primary" data-action="proto-save"' + (dirty ? '' : ' disabled') + '>' + L('Übernehmen', 'Apply') + '</button></div></div>';
 }
-/** Sets model[path] ("topics.0.items.2.text"); structural changes re-render, typing only updates the bar. */
+/** Sets model[path] ("topics.0.items.2.text") and keeps a draft in the browser. */
 function protoSet(path, value) {
   const keys = path.split('.');
   let o = S.protoEdit.model;
@@ -459,33 +254,35 @@ function protoSet(path, value) {
   store.set(protoKey(S.protoEdit), { base: S.protoEdit.base, model: S.protoEdit.model });
 }
 ON.input['proto-field'] = el => { protoSet(el.dataset.path, el.value); protoBarSoon(); };
-ON.change['proto-field'] = el => { protoSet(el.dataset.path, el.type === 'checkbox' ? el.checked : el.value); render({ peek: false }); };
+ON.change['proto-field'] = el => { protoSet(el.dataset.path, el.type === 'checkbox' ? el.checked : el.value); protoRender(); };
 const protoBarSoon = debounce(() => {
   const bar = $('.proto-edit .doc-commit');
   if (!bar || !S.protoEdit) return;
   const dirty = protoDirty();
   bar.classList.toggle('clean', !dirty);
+  $('.grow', bar).textContent = dirty ? L('Ungespeicherte Änderungen (als Entwurf im Browser gesichert)', 'Unsaved changes (kept as a draft in this browser)') : L('Keine Änderungen', 'No changes');
   $('[data-action="proto-save"]', bar).disabled = !dirty;
 }, 150);
-A['proto-add-topic'] = () => { S.protoEdit.model.topics.push({ title: '', owner: S.me.email, items: [{ type: 'I', text: '', owner: '', due: '', done: false, taskId: '' }] }); render({ peek: false }); };
-A['proto-add-line'] = el => { S.protoEdit.model.topics[Number(el.dataset.t)].items.push({ type: 'I', text: '', owner: '', due: '', done: false, taskId: '' }); render({ peek: false }); };
+const newLine = () => ({ type: 'I', text: '', owner: '', due: '', done: false, taskId: '' });
+A['proto-add-topic'] = () => { S.protoEdit.model.topics.push({ title: '', owner: S.me.email, items: [newLine()] }); protoRender(); };
+A['proto-add-line'] = el => { S.protoEdit.model.topics[Number(el.dataset.t)].items.push(newLine()); protoRender(); };
 A['proto-del'] = el => {
   const t = S.protoEdit.model.topics;
   if (el.dataset.i === undefined) t.splice(Number(el.dataset.t), 1);
   else t[Number(el.dataset.t)].items.splice(Number(el.dataset.i), 1);
-  render({ peek: false });
+  protoRender();
 };
 A['proto-person'] = el => {
   const k = el.dataset.k;
   peopleModal({ title: k === 'present' ? L('Anwesend', 'Present') : L('Abwesend', 'Absent'), selected: S.protoEdit.model[k].slice(), prefer: protoPeople(),
-    onChange: list => { S.protoEdit.model[k] = list; render({ peek: false }); } });
+    onChange: list => { S.protoEdit.model[k] = list; protoRender(); } });
 };
-A['proto-unperson'] = el => { const k = el.dataset.k; S.protoEdit.model[k] = S.protoEdit.model[k].filter(x => x !== el.dataset.v); render({ peek: false }); };
+A['proto-unperson'] = el => { const k = el.dataset.k; S.protoEdit.model[k] = S.protoEdit.model[k].filter(x => x !== el.dataset.v); protoRender(); };
 A['proto-edit'] = () => protoStartEdit(S.doc);
 A['proto-discard'] = () => {
   const e = S.protoEdit;
   store.set(protoKey(e), null);
-  if (e.id) docEndEdit();
+  docEndEdit();
   S.protoEdit = null;
   if (!e.id) S.doc = null;
   render({ peek: false });
@@ -500,30 +297,38 @@ function protoSave(force) {
     if (r.conflict && !force) return protoConflict(r.current);
     if (r.conflict) { e.id = r.current.id; e.base = r.current.version; return protoSave(false); }
     store.set(protoKey(e), null);
-    if (e.id) docEndEdit();
+    docEndEdit();
     S.protoEdit = null;
-    docsReload(e.projectId);
     toast(L('Protokoll gespeichert', 'Minutes saved'));
-    return call('docs.get', { id: r.id }).then(d => { S.doc = d; render({ peek: false }); });
+    S.doc = Object.assign({}, r, { content: content, canWrite: true });
+    render({ peek: false });
+    return jfReload();
   }).catch(fail);
 }
+/** Someone saved in between: keep mine (on top of theirs) or take theirs. Nothing is lost silently. */
 function protoConflict(cur) {
-  conflictModal(cur, {
-    mine: () => protoSave(true),
-    theirs: () => {
+  openModal({
+    title: L('Inzwischen geändert', 'Changed in the meantime'),
+    body: '<p style="margin:0 0 8px">' + esc(L(user(cur.updatedBy).name + ' hat gespeichert, während du bearbeitet hast.', user(cur.updatedBy).name + ' saved while you were editing.')) + '</p>' +
+      hintP(L('Deine Fassung bleibt als Entwurf im Browser erhalten. Ihre Fassung siehst du unten.', 'Your version stays as a draft in this browser. Theirs is shown below.')) +
+      '<div class="de-preview conflict">' + docPreview(cur.content) + '</div>',
+    submitLabel: L('Meine Fassung speichern', 'Save my version'),
+    danger: { label: L('Ihre Fassung übernehmen', 'Take their version'), onClick: () => {
+      closeModal();
       const e = S.protoEdit;
       store.set(protoKey(e), null);
-      if (e.id) docEndEdit();
+      docEndEdit();
       S.protoEdit = null;
       S.doc = cur;
       render({ peek: false });
-    },
+    } },
+    onSubmit: () => { closeModal(); return protoSave(true); },
   });
 }
 A['proto-task'] = el => call('jf.actionToTask', { docId: el.dataset.id, topic: Number(el.dataset.t), item: Number(el.dataset.i) }).then(r => {
   applyTasks([r.task]);
   toast(L('Aufgabe angelegt: ', 'Task created: ') + r.task.title, { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.task.id) } });
-  return call('docs.get', { id: el.dataset.id }).then(d => { S.doc = d; render({ peek: false }); });
+  return protoReopen(el.dataset.id);
 }).catch(fail);
 
 /* ---------------- admin: storage links ---------------- */
@@ -536,9 +341,9 @@ function storageBox() {
   if (!l) return skLines(1);
   if (l.error) return '<div class="notice">' + esc(l.error) + '</div>';
   const link = (href, label, ic) => (href ? '<a class="btn sm" href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + icon(ic, 'sm') + esc(label) + '</a>' : '');
-  return '<p class="hint">' + esc(L('Alles liegt im Google Drive des App-Kontos: Datenbank, Backups und der Ordner LidlFlow mit Dokumenten und Jour-Fixe-Protokollen.',
-    'Everything lives in the Google Drive of the app account: the database, the backups and the LidlFlow folder with documents and jour fixe minutes.')) + '</p>' +
+  return hintP(L('Alles liegt im Google Drive des App-Kontos: Datenbank, Backups und der Ordner LidlFlow mit den Jour-Fixe-Protokollen.',
+    'Everything lives in the Google Drive of the app account: the database, the backups and the LidlFlow folder with the jour fixe minutes.')) +
     '<div class="row-btns">' + link(l.database, L('Datenbank öffnen', 'Open database'), 'table') + link(l.backups, L('Backups öffnen', 'Open backups'), 'layers') +
-    link(l.drive, L('Drive-Ordner öffnen', 'Open Drive folder'), 'folder') + (l.drive ? '' : '<span class="faint">' + esc(L('Der Drive-Ordner entsteht mit dem ersten Dokument.', 'The Drive folder appears with the first document.')) + '</span>') + '</div>';
+    link(l.drive, L('Drive-Ordner öffnen', 'Open Drive folder'), 'folder') + (l.drive ? '' : '<span class="faint">' + esc(L('Der Drive-Ordner entsteht mit dem ersten Protokoll.', 'The Drive folder appears with the first minutes.')) + '</span>') + '</div>';
 }
 </script>

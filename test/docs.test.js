@@ -109,12 +109,12 @@ describe('documents', () => {
     const d = app.call('docs.save', { projectId: project.id, title: 'A', content: 'x' });
     app.call('docs.remove', { id: d.id });
     assert.equal(D(app).getFileById(d.fileId).isTrashed(), true);
-    assert.equal(app.call('docs.list', { projectId: project.id }).length, 0);
+    assert.ok(app.error('docs.get', { id: d.id }), 'the entry is gone');
   });
   test('people outside the project can neither list, read, write nor delete', () => {
     const { app, project } = world();
     const d = app.call('docs.save', { projectId: project.id, title: 'Intern', content: 'vertraulich' });
-    for (const [r, p] of [['docs.list', { projectId: project.id }], ['docs.get', { id: d.id }], ['docs.versions', { id: d.id }],
+    for (const [r, p] of [['docs.get', { id: d.id }], ['docs.versions', { id: d.id }],
       ['docs.save', { id: d.id, title: 'x', content: 'x', baseVersion: 1 }], ['docs.save', { projectId: project.id, title: 'x', content: 'x' }],
       ['docs.remove', { id: d.id }], ['docs.restore', { id: d.id, version: 1 }], ['docs.lock', { id: d.id }]]) {
       const res = app.as(OUT).raw(r, p);
@@ -182,7 +182,7 @@ describe('jour fixe', () => {
     const again = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
     assert.equal(again.id, saved.id);
     assert.equal(S(app).protoFromText(again.content).topics[0].title, 'Budget');
-    assert.equal(app.call('jf.list', { projectId: project.id }).meetings.length, 1);
+    assert.equal(app.call('jf.list', { projectId: project.id }).minutes.length, 1);
   });
   test('two people saving the same new meeting never create two files', () => {
     const { app, project } = world();
@@ -190,7 +190,7 @@ describe('jour fixe', () => {
     saveMeeting(app, s, '2026-11-02');
     const r = app.as(ANNA).call('docs.save', { projectId: project.id, seriesId: s.id, date: '2026-11-02', title: 'x', content: 'x' });
     assert.equal(r.conflict, true);
-    assert.equal(app.call('jf.list', { projectId: project.id }).meetings.length, 1);
+    assert.equal(app.call('jf.list', { projectId: project.id }).minutes.length, 1);
   });
   test('open action items of the last meeting are carried over, done ones are not', () => {
     const { app, project } = world();
@@ -221,7 +221,7 @@ describe('jour fixe', () => {
     assert.ok(app.as(OUT).error('jf.list', { projectId: project.id }));
     assert.ok(app.as(OUT).error('docs.save', { projectId: project.id, seriesId: s.id, date: '2026-11-02', title: 'x', content: 'x' }));
   });
-  test('the tab loads series, minutes and documents in one call without touching Drive', () => {
+  test('the tab loads series and minutes in one call without touching Drive', () => {
     const { app, project } = world();
     const s = series(app, project);
     saveMeeting(app, s, '2026-11-02');
@@ -231,8 +231,7 @@ describe('jour fixe', () => {
     const m = app.measure(() => { r = app.call('jf.list', { projectId: project.id }); });
     assert.ok(!m.driveRead && !m.driveWrite, 'no Drive call: ' + JSON.stringify(m));
     assert.equal(r.series.length, 1);
-    assert.equal(r.meetings.length, 1);
-    assert.equal(r.docs.length, 1);
+    assert.equal(r.minutes.length, 1);
   });
   test('without the Drive permission the message says what to do', () => {
     const { app, project } = world();
@@ -248,5 +247,53 @@ describe('jour fixe', () => {
     app.call('jf.removeSeries', { id: s.id });
     assert.equal(app.call('docs.get', { id: d.id }).id, d.id);
     assert.equal(app.call('calendar.range', { from: '2026-11-02', to: '2026-11-15' }).events.filter(e => e.type === 'jf').length, 0);
+  });
+});
+
+describe('jour fixe: fast and complete (v48)', () => {
+  function series(app, project, extra) {
+    return app.call('jf.saveSeries', Object.assign({ projectId: project.id, title: 'Weekly', rhythm: 'weekly', weekday: 1, time: '09:00',
+      duration: 30, startDate: '2026-11-02', attendees: [ME, ANNA, LEA] }, extra || {}));
+  }
+  const S = app => app.x.Shared;
+  const plain = v => JSON.parse(JSON.stringify(v));
+  function saveMeeting(app, s, date, edit) {
+    const m = app.call('jf.meeting', { seriesId: s.id, date: date });
+    const model = S(app).protoFromText(m.content);
+    if (edit) edit(model);
+    return app.call('docs.save', { projectId: m.projectId, seriesId: s.id, date: date, title: m.title, content: S(app).protoToText(model) });
+  }
+  test('the app start brings the series and the minutes list along: the tab needs no call of its own', () => {
+    const { app, project } = world();
+    const s = series(app, project);
+    saveMeeting(app, s, '2026-11-02', m => { m.present = [ME]; m.absent = [ANNA]; });
+    const b = app.call('bootstrap');
+    assert.equal(b.jf.series.length, 1);
+    assert.equal(b.jf.minutes.length, 1);
+    assert.deepEqual(plain(b.jf.minutes[0].people), { present: [ME], absent: [ANNA] }, 'who was there and who missed it, without opening the file');
+    assert.equal(app.as(OUT).call('bootstrap').jf.series.length, 0, 'only series of visible projects');
+  });
+  test('a new meeting opens without reading any file: open items of the last meeting come from the table', () => {
+    const { app, project } = world();
+    const s = series(app, project);
+    saveMeeting(app, s, '2026-11-02', m => m.topics.push({ title: 'Angebote', items: [{ type: 'A', text: 'Angebot einholen', owner: ANNA }] }));
+    app.x.Db.reset();
+    let next;
+    const m = app.measure(() => { next = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-09' }); });
+    assert.ok(!m.driveRead && !m.driveWrite, 'no Drive: ' + JSON.stringify(m));
+    assert.deepEqual(plain(S(app).protoFromText(next.content).topics[0].items.map(i => i.text)), ['Angebot einholen']);
+  });
+  test('saved minutes are read from Drive once, then from the cache until they change', () => {
+    const { app, project } = world();
+    const s = series(app, project);
+    saveMeeting(app, s, '2026-11-02');
+    app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    app.x.Db.reset();
+    const m = app.measure(() => app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' }));
+    assert.ok(!m.driveRead, 'second open from the cache: ' + JSON.stringify(m));
+  });
+  test('plain documents are gone from the API; minutes keep working', () => {
+    const { app } = world();
+    assert.match(app.error('docs.list', {}), /Unbekannte Aktion/);
   });
 });

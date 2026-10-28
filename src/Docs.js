@@ -32,8 +32,30 @@ const Docs = {
   /** What lists show: no content, the lock only while it lasts. */
   meta_(d) {
     const locked = d.lockBy && String(d.lockUntil) > new Date().toISOString();
-    return Object.assign({}, d, { lockBy: locked ? d.lockBy : '', lockUntil: locked ? d.lockUntil : '' });
+    let people = { present: [], absent: [] };
+    try { if (d.people) people = typeof d.people === 'string' ? JSON.parse(d.people) : d.people; } catch (e) { /* older rows */ }
+    return Object.assign({}, d, { lockBy: locked ? d.lockBy : '', lockUntil: locked ? d.lockUntil : '', people: people });
   },
+  /** For minutes: attendance and open action items, kept in the row (lists and the next meeting read no file). */
+  summary_(content) {
+    const m = Shared.protoFromText(content);
+    return m ? { people: JSON.stringify({ present: m.present, absent: m.absent }), openItems: Shared.protoOpenActions(m) } : {};
+  },
+  /** File text, from the script cache while the version is unchanged (saves a Drive call per open). */
+  read_(doc) {
+    const key = 'docv:' + doc.id + ':' + doc.version;
+    const c = CacheService.getScriptCache();
+    const hit = Docs.safeGet_(c, key);
+    if (hit !== null) return hit;
+    const text = Store.read(doc.fileId);
+    Docs.remember_(doc, text);
+    return text;
+  },
+  remember_(doc, text) {
+    // the cache holds at most 100 KB per value; longer texts are simply read from Drive
+    if (text.length < 90000) { try { CacheService.getScriptCache().put('docv:' + doc.id + ':' + doc.version, text, 21600); } catch (e) { /* optional */ } }
+  },
+  safeGet_(c, key) { try { return c.get(key); } catch (e) { return null; } },
   preview_(text) {
     const minutes = Shared.protoFromText(text);
     if (minutes) return minutes.topics.map(t => t.title).filter(Boolean).join(' · ').slice(0, 280);
@@ -50,16 +72,9 @@ const Docs = {
     return { title: t, content: c };
   },
 
-  list(p) {
-    const ctx = Docs.ctx_();
-    const project = Docs.project_(p.projectId, ctx, false);
-    return Db.all('Docs').filter(d => d.projectId === project.id && d.kind !== 'jf').map(Docs.meta_)
-      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-  },
-
   get(p) {
     const x = Docs.doc_(p.id, Docs.ctx_(), false);
-    return Object.assign(Docs.meta_(x.doc), { content: Store.read(x.doc.fileId), canWrite: Access.canManageProject(x.project, Docs.ctx_()) });
+    return Object.assign(Docs.meta_(x.doc), { content: Docs.read_(x.doc), canWrite: Access.canManageProject(x.project, Docs.ctx_()) });
   },
 
   save(p) {
@@ -78,17 +93,19 @@ const Docs = {
     const fileId = Gdrive.createFile(folderId, Docs.fileName_(fileTitle || v.title, extra.date), v.content);
     const now = new Date().toISOString();
     const me = Auth.email();
-    return Db.insert('Docs', Object.assign({
+    const row = Db.insert('Docs', Object.assign({
       id: Util.uid('dc_'), projectId: project.id, kind: 'doc', seriesId: '', date: '', title: v.title, fileId: fileId,
       version: 1, size: v.content.length, preview: Docs.preview_(v.content), updatedAt: now, updatedBy: me, createdBy: me, createdAt: now,
-      lockBy: '', lockUntil: '',
-    }, extra));
+      lockBy: '', lockUntil: '', people: '', openItems: [],
+    }, Docs.summary_(v.content), extra));
+    Docs.remember_(row, v.content);
+    return row;
   },
 
   /** Writes a new version unless someone saved after `base` (inside a transaction). */
   update_(x, v, base) {
     const doc = x.doc;
-    const before = Gdrive.read(doc.fileId);
+    const before = Docs.read_(doc);
     if (base !== Number(doc.version)) {
       return { conflict: true, current: Object.assign(Docs.meta_(doc), { content: before }) };
     }
@@ -97,10 +114,12 @@ const Docs = {
     try {
       if (v.title !== doc.title && doc.kind !== 'jf') Gdrive.rename(doc.fileId, Docs.fileName_(v.title, doc.date));
       const me = Auth.email();
-      return Db.update('Docs', doc.id, {
+      const row = Db.update('Docs', doc.id, Object.assign({
         title: v.title, version: Number(doc.version) + 1, size: v.content.length, preview: Docs.preview_(v.content),
         updatedAt: new Date().toISOString(), updatedBy: me, lockBy: doc.lockBy === me ? '' : doc.lockBy, lockUntil: doc.lockBy === me ? '' : doc.lockUntil,
-      });
+      }, Docs.summary_(v.content)));
+      Docs.remember_(row, v.content);
+      return Docs.meta_(row);
     } catch (e) {
       // the database did not take the new version: the file goes back to what it was
       Gdrive.write(doc.fileId, before);
@@ -184,16 +203,21 @@ const Jf = {
   },
   active_(s) { return s.active === true || String(s.active).toLowerCase() === 'true'; },
 
-  /** Everything the tab shows, from the tables only (no Drive call): series, minutes, documents. */
+  /** Series and minutes (metadata only, no Drive call) of one project or of all projects the person sees. */
   list(p) {
     const ctx = Docs.ctx_();
-    const project = Docs.project_(p.projectId, ctx, false);
-    const docs = Db.all('Docs').filter(d => d.projectId === project.id).map(Docs.meta_);
+    const one = p && p.projectId ? Docs.project_(p.projectId, ctx, false).id : '';
+    return Jf.overview_(ctx, one);
+  },
+  overview_(ctx, projectId) {
+    const sees = pid => (projectId ? pid === projectId : ctx.admin || ctx.projectIds[pid]);
     return {
-      series: Db.all('JfSeries').filter(s => s.projectId === project.id && Jf.active_(s)),
-      meetings: docs.filter(d => d.kind === 'jf').sort((a, b) => (a.date < b.date ? 1 : -1)),
-      docs: docs.filter(d => d.kind !== 'jf').sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
-      canWrite: Access.canManageProject(project, ctx),
+      series: Db.all('JfSeries').filter(s => Jf.active_(s) && sees(s.projectId)),
+      minutes: Db.all('Docs').filter(d => d.kind === 'jf' && sees(d.projectId)).map(d => {
+        const m = Docs.meta_(d);
+        return { id: m.id, projectId: m.projectId, seriesId: m.seriesId, date: m.date, title: m.title, version: m.version,
+          updatedAt: m.updatedAt, updatedBy: m.updatedBy, lockBy: m.lockBy, people: m.people, openCount: (d.openItems || []).length };
+      }).sort((a, b) => (a.date < b.date ? 1 : -1)),
     };
   },
 
@@ -255,19 +279,18 @@ const Jf = {
     const x = Jf.series_(p.seriesId, ctx, false);
     const canWrite = Access.canManageProject(x.project, ctx);
     const found = Db.all('Docs').find(d => d.seriesId === x.series.id && d.date === p.date);
-    if (found) return Object.assign(Docs.meta_(found), { content: Store.read(found.fileId), canWrite: canWrite });
+    if (found) return Object.assign(Docs.meta_(found), { content: Docs.read_(found), canWrite: canWrite });
     const prev = Db.all('Docs').filter(d => d.seriesId === x.series.id && d.date < p.date).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
     return {
       id: '', draft: true, kind: 'jf', projectId: x.project.id, seriesId: x.series.id, date: p.date, version: 0,
       title: Jf.title_(x.series, p.date), canWrite: canWrite,
-      content: Jf.template_(x.series, p.date, prev ? Shared.protoFromText(Store.read(prev.fileId)) : null, ctx.email),
+      content: Jf.template_(x.series, p.date, prev ? prev.openItems || [] : [], ctx.email),
     };
   },
   title_(s, date) { return s.title + ' · ' + date; },
 
   /** Minutes template: header from the series; open action items of the last meeting as the first topic. */
-  template_(s, date, prev, me) {
-    const open = prev ? Shared.protoOpenActions(prev) : [];
+  template_(s, date, open, me) {
     return Shared.protoToText({
       title: s.title, date: date, minuteTaker: me, present: s.attendees || [], absent: [],
       topics: open.length ? [{ title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : [],
@@ -280,7 +303,7 @@ const Jf = {
     if (!Shared.isDate(p.date)) throw new Error('Bitte ein Datum angeben.');
     const found = Db.all('Docs').find(d => d.seriesId === x.series.id && d.date === p.date);
     // saved by someone else in the meantime: never a second file, show theirs instead
-    if (found) return { conflict: true, current: Object.assign(Docs.meta_(found), { content: Store.read(found.fileId) }) };
+    if (found) return { conflict: true, current: Object.assign(Docs.meta_(found), { content: Docs.read_(found) }) };
     return Docs.create_(x.project, { title: Jf.title_(x.series, p.date), content: v.content },
       { kind: 'jf', seriesId: x.series.id, date: p.date }, Store.series(x.series, x.project), x.series.title);
   },
@@ -290,7 +313,7 @@ const Jf = {
     const ctx = Docs.ctx_();
     return Db.tx(() => {
       const x = Docs.doc_(p.docId, ctx, true);
-      const model = Shared.protoFromText(Store.read(x.doc.fileId));
+      const model = Shared.protoFromText(Docs.read_(x.doc));
       const topic = model && model.topics[Number(p.topic)];
       const line = topic && topic.items[Number(p.item)];
       if (!line || line.type !== 'A' || line.taskId) throw new Error('Punkt nicht gefunden oder schon als Aufgabe angelegt.');

@@ -53,7 +53,10 @@ const SCHEMA = {
   // documents and jour fixe minutes: the text is a Markdown file in Drive (fileId), this is the metadata
   Docs: {
     cols: ['id', 'projectId', 'kind', 'seriesId', 'date', 'title', 'fileId', 'version', 'size', 'preview',
-      'updatedAt', 'updatedBy', 'createdBy', 'createdAt', 'lockBy', 'lockUntil'],
+      'updatedAt', 'updatedBy', 'createdBy', 'createdAt', 'lockBy', 'lockUntil', 'people', 'openItems'],
+    // minutes: who was there ({ present, absent }) and the open action items, so lists and the
+    // next meeting need no file read
+    json: ['openItems'],
     num: ['version', 'size'],
   },
   // earlier versions of a document (files in the project's .versions folder)

@@ -52,7 +52,6 @@ const ROUTES = {
   'ai.suggestAssignee': p => Ai.suggestAssignee(p),
   'ai.breakdown': p => Ai.breakdown(p),
   'ai.briefing': p => Ai.briefing(p),
-  'docs.list': p => Docs.list(p),
   'docs.get': p => Docs.get(p),
   'docs.save': p => Docs.save(p),
   'docs.versions': p => Docs.versions(p),
@@ -105,6 +104,7 @@ const App = {
       projects: Db.all('Projects'),
       tasks: list.tasks,
       companyHolidays: Db.all('CompanyHolidays'),
+      jf: Jf.overview_(ctx, ''),
       ai: Ai.status(),
     };
   },
