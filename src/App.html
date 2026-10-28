@@ -123,8 +123,13 @@ const statusOf = k => Shared.STATUSES.find(s => s.key === k) || Shared.STATUSES[
 const prioOf = k => Shared.PRIORITIES.find(p => p.key === k);
 const isDone = t => t.status === 'done';
 const isMine = t => t.assignees.indexOf(S.me.email) >= 0 || (!t.assignees.length && t.createdBy === S.me.email);
-const myTeams = () => S.teams.filter(t => t.lead === S.me.email || t.members.indexOf(S.me.email) >= 0);
-const teamMembers = t => [t.lead].concat(t.members).filter((e, i, a) => e && a.indexOf(e) === i);
+const teamLeads = t => Shared.teamLeads(t);
+const projectLeads = p => Shared.projectLeads(p);
+const teamMembers = t => teamLeads(t).concat(t.members || []).filter((e, i, a) => e && a.indexOf(e) === i);
+const myTeams = () => S.teams.filter(t => teamMembers(t).indexOf(S.me.email) >= 0);
+/** Like Access.canSetTeamRoles / canSetProjectRoles on the server (which checks again). */
+const canSetTeamRoles = t => !!(S.me.admin || teamLeads(t).indexOf(S.me.email) >= 0);
+const canSetProjectRoles = p => !!(S.me.admin || projectLeads(p).indexOf(S.me.email) >= 0 || (team(p.teamId) && teamLeads(team(p.teamId)).indexOf(S.me.email) >= 0));
 const projectMembers = p => (p.members && p.members.length ? p.members : (team(p.teamId) ? teamMembers(team(p.teamId)) : []));
 /** Like Access.canManageProject on the server (which checks again): admin, creator, team or project member. */
 const canEditProject = p => !!(S.me.admin || p.createdBy === S.me.email || (team(p.teamId) && teamMembers(team(p.teamId)).indexOf(S.me.email) >= 0) || (p.members || []).indexOf(S.me.email) >= 0);
@@ -827,7 +832,7 @@ function refresh() {
     if (S.tasks.some(t => PENDING[t.id])) return;
     const known = {};
     S.teams.forEach(t => { known[t.id] = true; });
-    const joined = (res.teams || []).filter(t => !known[t.id] && (t.lead === S.me.email || (t.members || []).indexOf(S.me.email) >= 0));
+    const joined = (res.teams || []).filter(t => !known[t.id] && teamMembers(t).indexOf(S.me.email) >= 0);
     // Only redraw when someone else actually changed something.
     const before = JSON.stringify([S.tasks, S.teams, S.projects, S.jf]);
     S.tasks = res.tasks;

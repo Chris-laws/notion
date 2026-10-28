@@ -17,6 +17,12 @@ const Teams = {
       members: members,
     };
     return Db.tx(() => {
+      // leads stay members: leaving someone out of the list does not drop a lead (demote first)
+      const old = p.id ? Db.get('Teams', p.id) : null;
+      const leads = old ? Shared.teamLeads(old) : [lead];
+      leads.forEach(e => { if (members.indexOf(e) < 0) members.push(e); });
+      data.leads = leads;
+      data.lead = leads[0];
       // at most 8 teams per person
       const others = Db.all('Teams').filter(t => t.id !== p.id);
       members.forEach(e => {
@@ -39,17 +45,38 @@ const Teams = {
         if (p.icon === undefined) delete data.icon;
         Users.ensure(members);
         if (team.name !== data.name) Store.rename('team:' + p.id, data.name);
-        return Db.update('Teams', p.id, data);
+        return Teams.out_(Db.update('Teams', p.id, data));
       }
       Users.ensure(members);
-      return Db.insert('Teams', Object.assign(data, {
+      return Teams.out_(Db.insert('Teams', Object.assign(data, {
         id: Util.uid('tm_'), createdBy: me.email, createdAt: new Date().toISOString(),
-      }));
+      })));
+    });
+  },
+
+  /** A team for the client: always with its list of leads. */
+  out_(t) {
+    return Object.assign({}, t, { leads: Shared.teamLeads(t) });
+  },
+  list_() {
+    return Db.all('Teams').map(Teams.out_);
+  },
+
+  /** Makes a member lead or takes the role away. Leads (and admins) only; one lead always stays. */
+  setRole(p) {
+    const ctx = Access.context(Auth.currentUser());
+    const email = String(p.email || '').trim().toLowerCase();
+    return Db.tx(() => {
+      const team = Db.get('Teams', p.teamId);
+      if (!team || !(ctx.admin || ctx.teamIds[team.id])) throw new Error('Team nicht gefunden.');
+      if (!Access.canSetTeamRoles(team, ctx)) throw new Error('Nur ein Lead kann Leads ernennen oder die Rolle entziehen.');
+      const leads = setLead_(Shared.teamLeads(team), email, !!p.lead, Teams.people_(team));
+      return Teams.out_(Db.update('Teams', team.id, { leads: leads, lead: leads[0] }));
     });
   },
 
   people_(t) {
-    return [t.lead].concat(t.members || []).filter(Boolean);
+    return Shared.teamLeads(t).concat(t.members || []).filter(Boolean);
   },
 
   /** Colour -> team name, for teams (other than teamId) that share at least one person with `people`. */
@@ -132,16 +159,42 @@ const Projects = {
         if (project.teamId !== team.id && !mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
         if (p.icon === undefined) delete data.icon;
         data.color = Projects.color_(p.color === undefined ? project.color : p.color, team.id, p.id);
+        // a project with its own people keeps its leads among them
+        if (data.members.length) Shared.projectLeads(project).forEach(e => { if (data.members.indexOf(e) < 0) data.members.push(e); });
         Users.ensure(data.members);
         if (project.name !== data.name) Store.rename('project:' + p.id, data.name);
-        return Db.update('Projects', p.id, data);
+        return Projects.out_(Db.update('Projects', p.id, data));
       }
       if (!mayUseTeam) throw new Error('Nur Mitglieder von „' + team.name + '“ können dort Projekte anlegen.');
       data.color = Projects.color_(p.color, team.id, '');
+      data.leads = [me.email];
+      if (data.members.length && data.members.indexOf(me.email) < 0) data.members.push(me.email);
       Users.ensure(data.members);
-      return Db.insert('Projects', Object.assign(data, {
+      return Projects.out_(Db.insert('Projects', Object.assign(data, {
         id: Util.uid('pr_'), createdBy: me.email, createdAt: new Date().toISOString(),
-      }));
+      })));
+    });
+  },
+
+  out_(p) {
+    return Object.assign({}, p, { leads: Shared.projectLeads(p) });
+  },
+  list_() {
+    return Db.all('Projects').map(Projects.out_);
+  },
+
+  /** Project leads, team leads and admins appoint and demote project leads; one lead always stays. */
+  setRole(p) {
+    const ctx = Access.context(Auth.currentUser());
+    const email = String(p.email || '').trim().toLowerCase();
+    return Db.tx(() => {
+      const project = Db.get('Projects', p.projectId);
+      if (!project || !(ctx.admin || ctx.projectIds[project.id])) throw new Error('Projekt nicht gefunden.');
+      if (!Access.canSetProjectRoles(project, ctx)) throw new Error('Nur ein Lead kann Leads ernennen oder die Rolle entziehen.');
+      const team = Db.get('Teams', project.teamId);
+      const people = project.members && project.members.length ? project.members : team ? Teams.people_(team) : [];
+      const leads = setLead_(Shared.projectLeads(project), email, !!p.lead, people);
+      return Projects.out_(Db.update('Projects', project.id, { leads: leads }));
     });
   },
 
@@ -189,7 +242,7 @@ const Projects = {
       const project = Db.get('Projects', id);
       if (!project) return false;
       const team = Db.get('Teams', project.teamId);
-      if (!(ctx.admin || project.createdBy === me.email || (team && team.lead === me.email))) {
+      if (!(ctx.admin || project.createdBy === me.email || (team && Shared.teamLeads(team).indexOf(me.email) >= 0))) {
         throw new Error('Nur die Person, die das Projekt angelegt hat, Team-Leads oder Admins können es löschen.');
       }
       return Projects.removeInternal_(id);
@@ -202,6 +255,17 @@ const Projects = {
     return Db.remove('Projects', id);
   },
 };
+
+/** The new list of leads: only members become lead, the last lead stays. */
+function setLead_(leads, email, lead, people) {
+  if (lead) {
+    if (people.indexOf(email) < 0) throw new Error('Nur Mitglieder können Lead werden.');
+    return leads.indexOf(email) >= 0 ? leads : leads.concat([email]);
+  }
+  const rest = leads.filter(e => e !== email);
+  if (!rest.length) throw new Error('Es muss mindestens ein Lead bleiben. Ernenne zuerst eine andere Person zum Lead.');
+  return rest;
+}
 
 function cleanEmails_(list) {
   const arr = Array.isArray(list) ? list : String(list || '').split(/[,;\s]+/);

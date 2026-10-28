@@ -142,7 +142,8 @@ function openMenu(anchor, items, opts) {
  * invite by e-mail. Opens above other dialogs (own layer), Esc closes it first.
  * o: {
  *   title, sub, selected: [emails], onChange(list) (called once with the result on "Übernehmen"),
- *   single: pick exactly one (closes on pick), roles: email => label, keep: email that cannot be removed,
+ *   single: pick exactly one (closes on pick), roles: email => label, keep: email (or list) that cannot be removed,
+ *   lead: { is(email), can, set(email, on) -> Promise } a "Lead" / "Mitglied" chip for saved members, a switch if can,
  *   prefer: [emails] suggested first, all: { label, people } (empty list = all of these),
  *   extra: [{ value, name, icon }] special entries (filters), min: 1 = at least one person,
  *   addLabel, emptyText, invite (default true)
@@ -186,12 +187,34 @@ function pmName(e) {
   const x = (PM.o.extra || []).find(i => i.value === e);
   return x ? x.name : user(e).name;
 }
+/** The role of a member: "Lead" / "Mitglied" (a switch for leads), otherwise the label from o.roles. */
+function pmRole(e, kind, x) {
+  const o = PM.o;
+  if (x) return '';
+  // only people already saved (for "ganzes Team" the whole team) can change their role right away
+  const saved = !PM.orig.length && o.all ? o.all.people : PM.orig;
+  if (kind === 'member' && o.lead && saved.indexOf(e) >= 0) return pmLeadChip(e, o.lead);
+  const role = o.roles ? o.roles(e) : '';
+  return role ? '<span class="chip soft pm-role">' + esc(role) + '</span>' : '';
+}
+function pmLeadChip(e, lr) {
+  const on = lr.is(e);
+  const label = on ? 'Lead' : L('Mitglied', 'Member');
+  if (!lr.can) return '<span class="chip soft pm-role' + (on ? ' on' : '') + '">' + label + '</span>';
+  return '<button type="button" class="chip soft pm-role pm-lead' + (on ? ' on' : '') + '" data-action="pm-role" data-v="' + esc(e) + '" aria-pressed="' + on + '"' +
+    ' title="' + esc(on ? L('Lead-Rolle entziehen', 'Take the lead role away') : L('Zum Lead machen', 'Make lead')) + '">' + label + '</button>';
+}
+A['pm-role'] = el => {
+  const lr = PM && PM.o.lead;
+  if (!lr) return;
+  el.disabled = true;
+  lr.set(el.dataset.v, !lr.is(el.dataset.v)).then(() => pmDraw()).catch(err => { el.disabled = false; fail(err); });
+};
 function pmRow(e, kind) {
   const o = PM.o;
   const x = (o.extra || []).find(i => i.value === e);
   const u = user(e);
   const known = x || S.users.some(v => v.email === e);
-  const role = !x && o.roles ? o.roles(e) : '';
   const mine = pmEffective().indexOf(e) >= 0;
   const av = x ? '<span class="pm-xic">' + icon(x.icon || 'user', 'sm') + '</span>' : avatar(e);
   const text = '<span class="pm-who"><b>' + esc(x ? x.name : u.name) + (e === S.me.email ? ' <span class="faint">(ich)</span>' : '') + '</b>' +
@@ -199,7 +222,7 @@ function pmRow(e, kind) {
   let btn;
   if (kind === 'member') {
     btn = o.single ? '<span class="chip soft">Ausgewählt</span>'
-      : o.keep === e ? '<span class="pm-keep" title="' + esc(o.keepHint || 'Kann nicht entfernt werden') + '">' + icon('lock', 'sm') + '</span>'
+      : [].concat(o.keep || []).indexOf(e) >= 0 ? '<span class="pm-keep" title="' + esc(o.keepHint || 'Kann nicht entfernt werden') + '">' + icon('lock', 'sm') + '</span>'
       : '<button type="button" class="icon-btn pm-del" data-action="pm-remove" data-v="' + esc(e) + '" title="Entfernen" aria-label="' + esc(pmName(e) + ' entfernen') + '">' + icon('trash', 'sm') + '</button>';
   } else if (mine) {
     btn = '<span class="pm-in">' + icon('check', 'sm') + (o.single ? 'Ausgewählt' : 'Dabei') + '</span>';
@@ -207,8 +230,7 @@ function pmRow(e, kind) {
     btn = '<button type="button" class="btn sm ' + (kind === 'invite' ? 'outline' : 'primary') + '" data-action="pm-add" data-v="' + esc(e) + '">' +
       icon(kind === 'invite' ? 'mail' : o.single ? 'check' : 'plus', 'sm') + (kind === 'invite' ? 'Einladen' : o.single ? 'Auswählen' : (o.addLabel || 'Hinzufügen')) + '</button>';
   }
-  return '<div class="pm-row' + (kind !== 'member' ? ' pm-hit' : '') + '" role="listitem">' + av + text +
-    (role ? '<span class="chip soft pm-role">' + esc(role) + '</span>' : '') + btn + '</div>';
+  return '<div class="pm-row' + (kind !== 'member' ? ' pm-hit' : '') + '" role="listitem">' + av + text + pmRole(e, kind, x) + btn + '</div>';
 }
 function pmDraw() {
   if (!PM) return;
@@ -614,12 +636,12 @@ function teamModal(t) {
       divField('Farbe', colorField(t.color, { palette: Shared.TEAM_COLORS, taken: taken }) +
         '<div class="hint" style="margin-top:6px">Jedes Team hat eine eigene Farbe. Durchgestrichene Farben gehören schon zu Teams mit denselben Personen (höchstens ' + Shared.MAX_TEAMS + ' Teams pro Person).</div>') +
       field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(t.description || '') + '</textarea>') +
-      divField('Team-Lead', peoplePicker('lead', [t.lead || S.me.email], { single: true })) +
+      (t.id ? '' : divField('Team-Lead', peoplePicker('lead', [S.me.email], { single: true }))) +
       divField('Mitglieder', peoplePicker('members', t.members, { add: 'Personen hinzufügen' })),
     submitLabel: t.id ? 'Speichern' : 'Team anlegen',
     danger: t.id ? { label: 'Team löschen', onClick: () => confirmDelete('Team „' + t.name + '“ löschen? Projekte werden entfernt, Aufgaben bleiben erhalten.', () =>
       call('teams.remove', { id: t.id }).then(() => reloadAll()).then(() => go('home'))) } : null,
-    onSubmit: v => call('teams.save', Object.assign({ id: t.id }, v, { lead: collectPeople(v, 'lead')[0] || S.me.email, members: collectPeople(v, 'members') }))
+    onSubmit: v => call('teams.save', Object.assign({ id: t.id }, v, { lead: collectPeople(v, 'lead')[0] || t.lead || S.me.email, members: collectPeople(v, 'members') }))
       .then(saved => reloadAll().then(() => go('team', saved.id))),
   });
 }
@@ -629,8 +651,10 @@ A['team-members'] = el => {
   const t = team(el.dataset.id);
   if (!t) return;
   peopleModal({
-    title: 'Mitglieder verwalten', sub: 'Team ' + t.name, selected: t.members.slice(), keep: t.lead, keepHint: 'Der Team-Lead bleibt Mitglied. Lead ändern: Team bearbeiten.',
-    roles: e => (e === t.lead ? 'Team-Lead' : 'Mitglied'),
+    title: 'Mitglieder verwalten', sub: 'Team ' + t.name, selected: teamMembers(t), keep: teamLeads(t),
+    keepHint: L('Leads bleiben Mitglied. Zum Entfernen zuerst die Lead-Rolle entziehen.', 'Leads stay members. To remove one, take the lead role away first.'),
+    lead: { is: e => teamLeads(t).indexOf(e) >= 0, can: canSetTeamRoles(t),
+      set: (e, on) => call('teams.setRole', { teamId: t.id, email: e, lead: on }).then(saved => { Object.assign(t, saved); PM.o.keep = teamLeads(t); render(); }) },
     onChange: members => {
       const before = t.members;
       t.members = members;
@@ -689,7 +713,9 @@ A['project-members'] = el => {
   peopleModal({
     title: 'Mitglieder verwalten', sub: 'Projekt ' + p.name, selected: p.members.slice(), prefer: crew,
     all: { label: 'Ganzes Team' + (t ? ' ' + t.name : ''), people: crew },
-    roles: e => (t && e === t.lead ? 'Team-Lead' : crew.indexOf(e) >= 0 ? 'Teammitglied' : 'Gast'),
+    roles: e => (t && teamLeads(t).indexOf(e) >= 0 ? 'Team-Lead' : crew.indexOf(e) >= 0 ? 'Teammitglied' : 'Gast'),
+    lead: { is: e => projectLeads(p).indexOf(e) >= 0, can: canSetProjectRoles(p),
+      set: (e, on) => call('projects.setRole', { projectId: p.id, email: e, lead: on }).then(saved => { Object.assign(p, saved); render(); }) },
     onChange: members => saveProjectMembers(p, members),
   });
 };

@@ -19,12 +19,12 @@ const SCHEMA = {
     num: ['hoursPerWeek'],
   },
   Teams: {
-    cols: ['id', 'name', 'icon', 'color', 'description', 'lead', 'members', 'createdBy', 'createdAt'],
-    json: ['members'],
+    cols: ['id', 'name', 'icon', 'color', 'description', 'lead', 'members', 'createdBy', 'createdAt', 'leads'],
+    json: ['members', 'leads'],
   },
   Projects: {
-    cols: ['id', 'teamId', 'name', 'icon', 'color', 'description', 'status', 'members', 'startDate', 'endDate', 'createdBy', 'createdAt'],
-    json: ['members'],
+    cols: ['id', 'teamId', 'name', 'icon', 'color', 'description', 'status', 'members', 'startDate', 'endDate', 'createdBy', 'createdAt', 'leads'],
+    json: ['members', 'leads'],
   },
   Tasks: {
     cols: ['id', 'title', 'description', 'status', 'priority', 'projectId', 'teams', 'assignees', 'tags',

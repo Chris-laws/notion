@@ -32,6 +32,7 @@ describe('dates', () => {
   test('isDate rejects impossible dates', () => {
     assert.equal(S.isDate('2026-02-30'), false);
     assert.equal(S.isDate('2026-02-28'), true);
+    assert.deepEqual(['2026-00-10', '2026-13-01', '2026-04-31'].map(S.isDate), [false, false, false]);
   });
 });
 
@@ -41,6 +42,20 @@ describe('recurrence', () => {
   });
   test('monthly keeps the end of the month', () => {
     assert.equal(S.nextOccurrence('2026-01-31', 'monthly'), '2026-02-28');
+  });
+});
+
+describe('lead roles', () => {
+  test('a team has its list of leads, older teams their one lead', () => {
+    assert.deepEqual(plain(S.teamLeads({ lead: 'a@x.de', leads: ['b@x.de', 'c@x.de'] })), ['b@x.de', 'c@x.de']);
+    assert.deepEqual(plain(S.teamLeads({ lead: 'a@x.de', leads: [] })), ['a@x.de']);
+    assert.deepEqual(plain(S.teamLeads({ lead: 'a@x.de' })), ['a@x.de']);
+    assert.deepEqual(plain(S.teamLeads(null)), []);
+  });
+  test('a project has its list of leads, otherwise the person who created it', () => {
+    assert.deepEqual(plain(S.projectLeads({ createdBy: 'a@x.de', leads: ['b@x.de'] })), ['b@x.de']);
+    assert.deepEqual(plain(S.projectLeads({ createdBy: 'a@x.de', leads: [] })), ['a@x.de']);
+    assert.deepEqual(plain(S.projectLeads({ createdBy: '' })), []);
   });
 });
 
@@ -72,6 +87,15 @@ describe('quick-add parser', () => {
   test('a team or tag given twice is taken once', () => {
     const r = plain(S.parse('Plan +marketing +marketing #q4 #q4', ctx));
     assert.deepEqual([r.teams, r.tags], [['tm1'], ['q4']]);
+  });
+  test('a person named twice is assigned once; p1 to p4 are the priorities', () => {
+    assert.deepEqual(plain(S.parse('Termin @anna @anna', ctx)).assignees, ['anna.schmidt@firma.de']);
+    assert.deepEqual(['p1', 'p2', 'p3', 'p4'].map(k => S.parse('A ' + k + ' x', ctx).priority), ['urgent', 'high', 'medium', 'low']);
+  });
+  test('German dates: impossible days and months are no date, two digit years are 20xx', () => {
+    assert.deepEqual(['32.1.', '1.13.', '0.5.', '5.0.', '1.2.100'].map(d => S.parse('Bericht ' + d + ' fertig', ctx).dueDate || ''), ['', '', '', '', '']);
+    assert.equal(S.parse('Bericht 1.2.27 fertig', ctx).dueDate, '2027-02-01');
+    assert.equal(S.parse('Bericht 31.12. fertig', ctx).dueDate, '2026-12-31');
   });
   test('one bang is high, two bangs are urgent', () => {
     assert.equal(S.parse('A !', ctx).priority, 'high');

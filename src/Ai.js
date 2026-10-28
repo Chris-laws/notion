@@ -160,7 +160,7 @@ const Ai = {
     const teamIds = (task.teams || []).concat(project ? [project.teamId] : []);
     teamIds.forEach(id => {
       const t = Db.get('Teams', id);
-      if (t) emails = emails.concat([t.lead], t.members || []);
+      if (t) emails = emails.concat(Teams.people_(t));
     });
     let users = Users.list();
     if (emails.length) users = users.filter(u => emails.indexOf(u.email) >= 0);

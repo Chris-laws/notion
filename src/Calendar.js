@@ -28,7 +28,7 @@ const Calendar = {
     if (!teamId) return Users.list();
     const team = Db.get('Teams', teamId);
     if (!team) throw new Error('Team nicht gefunden.');
-    const emails = [team.lead].concat(team.members || []);
+    const emails = Teams.people_(team);
     return Users.list().filter(u => emails.indexOf(u.email) >= 0);
   },
 
@@ -93,7 +93,7 @@ const Calendar = {
         saved = Db.insert('Absences', Object.assign(data, { id: Util.uid('ab_'), createdAt: new Date().toISOString() }));
       }
       // Tell the person right away if their absence pushes a team to the warning level.
-      const teamIds = Db.all('Teams').filter(t => t.lead === email || (t.members || []).indexOf(email) >= 0).map(t => t.id);
+      const teamIds = Db.all('Teams').filter(t => Teams.people_(t).indexOf(email) >= 0).map(t => t.id);
       const warnings = teamIds.length
         ? Availability.warnings(saved.startDate, saved.endDate, teamIds, { email: me.email, admin: Auth.isAdmin(me) }).filter(w => w.people.some(x => x.email === email))
         : [];

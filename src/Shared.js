@@ -367,6 +367,15 @@ function SharedFactory() {
   const PROJECT_COLORS = ['default', 'gray'].concat(PROJECT_PALETTE);
 
   /** Colour -> project name for the projects of a team (except one), so no colour is used twice in a team. */
+  /** Leads of a team: the list, or the one lead of teams from before there were several. */
+  function teamLeads(t) {
+    return (t && Array.isArray(t.leads) && t.leads.length ? t.leads : [t && t.lead]).filter(Boolean);
+  }
+  /** Leads of a project: the list, or the person who created it. */
+  function projectLeads(p) {
+    return (p && Array.isArray(p.leads) && p.leads.length ? p.leads : [p && p.createdBy]).filter(Boolean);
+  }
+
   function takenProjectColors(projects, teamId, exceptId) {
     const taken = {};
     projects.forEach(p => {
@@ -604,7 +613,7 @@ function SharedFactory() {
 
   return {
     jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoCarry, protoMerge, protoDiff,
-    QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
+    teamLeads, projectLeads, QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,
     endOfMonth, nextOccurrence, parse, norm,

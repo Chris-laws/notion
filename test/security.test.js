@@ -34,6 +34,8 @@ const ATTEMPTS = w => ({
   'comments.add': { taskId: w.task.id, body: 'x' },
   'teams.save': { id: w.team.id, name: 'Gehackt' },
   'teams.remove': { id: w.team.id },
+  'teams.setRole': { teamId: w.team.id, email: OUTSIDER, lead: true },
+  'projects.setRole': { projectId: w.project.id, email: OUTSIDER, lead: true },
   'projects.save': { id: w.project.id, teamId: w.team.id, name: 'Gehackt' },
   'projects.remove': { id: w.project.id },
   'events.save': { id: w.ev.id, title: 'Gehackt', startDate: '2030-02-01' },

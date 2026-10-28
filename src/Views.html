@@ -1522,7 +1522,7 @@ function teamPage(t) {
     const u = user(e);
     const open = S.tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
     return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:500">' + esc(u.name) +
-      (e === t.lead ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
+      (teamLeads(t).indexOf(e) >= 0 ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
       '<span class="col2">' + flag(u.country) + ' ' + esc(u.region || '') + '</span>' +
       '<span class="col2 num">' + (u.hoursPerWeek || 0) + ' h/Woche</span>' +
       '<span class="col2 num">' + open + ' offen</span></div>';
@@ -1533,7 +1533,7 @@ function teamPage(t) {
       '<button class="btn outline" data-action="team-calendar" data-id="' + esc(t.id) + '">' + icon('calendar', 'sm') + 'Kalender</button>' +
       '<button class="icon-btn" data-action="team-edit" data-id="' + esc(t.id) + '" title="Team bearbeiten">' + icon('settings') + '</button>') +
     '<div class="page-meta">' + avatars(members, 6) + '<span>' + members.length + ' Mitglieder</span><span class="sep"></span>' +
-    '<span>Lead: ' + esc(user(t.lead).name) + '</span><span class="sep"></span><span>' + projects.length + ' Projekte</span></div>' +
+    '<span>Lead: ' + esc(teamLeads(t).map(e => user(e).name).join(', ')) + '</span><span class="sep"></span><span>' + projects.length + ' Projekte</span></div>' +
     teamWarningsBanner(t.id) +
     '<div class="db-bar"><div class="tabs">' +
     [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length],
@@ -1610,7 +1610,7 @@ function projectPage(p) {
       '<div class="card-w"><div class="members-list">' + (members.length ? members.map(e => {
         const u = user(e);
         const open = tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
-        return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:600">' + esc(u.name) + (t && e === t.lead ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
+        return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:600">' + esc(u.name) + (projectLeads(p).indexOf(e) >= 0 ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
           '<span class="col2">' + flag(u.country) + ' ' + esc(u.region || '') + '</span><span class="col2 num">' + open + ' offen im Projekt</span>' +
           '<button class="icon-btn" data-action="project-unmember" data-id="' + esc(p.id) + '" data-v="' + esc(e) + '" title="Aus dem Projekt entfernen" aria-label="Aus dem Projekt entfernen">' + icon('x', 'sm') + '</button></div>';
       }).join('') : '<div class="empty-mini">Noch niemand im Projekt. Füge Personen hinzu.</div>') + '</div></div>';

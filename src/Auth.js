@@ -46,7 +46,7 @@ const Access = {
     const email = user.email;
     const teamIds = {};
     Db.all('Teams').forEach(t => {
-      if (t.lead === email || (t.members || []).indexOf(email) >= 0) teamIds[t.id] = true;
+      if (Shared.teamLeads(t).indexOf(email) >= 0 || (t.members || []).indexOf(email) >= 0) teamIds[t.id] = true;
     });
     const projectIds = {};
     Db.all('Projects').forEach(p => {
@@ -68,12 +68,22 @@ const Access = {
     const teamIds = (t.teams || []).concat(project ? [project.teamId] : []);
     return teamIds.some(id => {
       const team = Db.get('Teams', id);
-      return team && team.lead === ctx.email;
+      return team && Shared.teamLeads(team).indexOf(ctx.email) >= 0;
     });
   },
 
   canManageTeam(team, ctx) {
-    return ctx.admin || team.lead === ctx.email || team.createdBy === ctx.email;
+    return ctx.admin || Shared.teamLeads(team).indexOf(ctx.email) >= 0 || team.createdBy === ctx.email;
+  },
+
+  /** Who may appoint and demote leads: admins and the leads themselves (of a project also the team leads). */
+  canSetTeamRoles(team, ctx) {
+    return ctx.admin || Shared.teamLeads(team).indexOf(ctx.email) >= 0;
+  },
+  canSetProjectRoles(project, ctx) {
+    if (ctx.admin || Shared.projectLeads(project).indexOf(ctx.email) >= 0) return true;
+    const team = Db.get('Teams', project.teamId);
+    return !!team && Shared.teamLeads(team).indexOf(ctx.email) >= 0;
   },
 
   canManageProject(project, ctx) {

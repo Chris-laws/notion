@@ -14,7 +14,7 @@ const Tasks = {
     if (!versioned) return tasks;
     // the background refresh (full) also brings teams, projects, people and jour fixe: new members see
     // their team without reloading; unchanged data still costs only the version check above
-    return p.full ? { ver: ver, tasks: tasks, teams: Db.all('Teams'), projects: Db.all('Projects'), users: Users.list(), jf: Jf.overview_(ctx, '') }
+    return p.full ? { ver: ver, tasks: tasks, teams: Teams.list_(), projects: Projects.list_(), users: Users.list(), jf: Jf.overview_(ctx, '') }
       : { ver: ver, tasks: tasks };
   },
   /** Taken before reading, so a write that lands meanwhile shows up next time. */

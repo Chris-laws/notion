@@ -1522,6 +1522,10 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .pm-who b { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pm-who small { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pm-role { flex: none; }
+.pm-role.on { background: var(--accent-soft); color: var(--accent-text); }
+.pm-lead { cursor: pointer; border: 1px solid transparent; }
+.pm-lead:hover { border-color: var(--border-strong); }
+.pm-lead:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pm-row .btn.sm { flex: none; }
 .pm-del { flex: none; color: var(--text-3); }
 .pm-del:hover { color: var(--danger-text); background: var(--danger-soft); }
@@ -1653,7 +1657,7 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 @media (max-width: 600px) {
   .pm-bg { padding: 0; place-items: end stretch; }
   .pm { max-width: none; height: 92vh; border-radius: 20px 20px 0 0; }
-  .pm-role { display: none; }
+  .pm-role:not(.pm-lead) { display: none; }
 }
 
 /* agenda v2: day blocks with a clear header; colours only through the semantic tokens */
