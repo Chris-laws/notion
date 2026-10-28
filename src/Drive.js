@@ -24,16 +24,23 @@ const Gdrive = {
     if (body !== undefined) { opts.payload = body; opts.contentType = contentType || 'application/json'; }
     const res = UrlFetchApp.fetch(url, opts);
     const code = res.getResponseCode();
+    if (code >= 300) console.error('Drive ' + method + ' ' + url.split('?')[0] + ' -> ' + code + ': ' + res.getContentText().slice(0, 500));
     // 403 also means "too many requests" or "storage full": that is no missing permission
     if ((code === 403 || code === 429) && /rateLimit|userRateLimit|quotaExceeded|storageQuota/i.test(res.getContentText())) {
       throw new Error('Google Drive ist gerade ausgelastet oder der Speicher ist voll. Bitte gleich noch einmal versuchen.');
     }
     if (code === 401 || code === 403) {
-      throw new Error('Die App darf noch nicht in Google Drive speichern. Bitte im Apps-Script-Editor einmal „setup“ ausführen und die Berechtigung zulassen.');
+      throw new Error('Die App darf noch nicht in Google Drive speichern. Bitte im Apps-Script-Editor einmal „setup“ ausführen und die Berechtigung zulassen.' + Gdrive.why_(code, res.getContentText()));
     }
     if (code === 404) throw new Error('Datei in Google Drive nicht gefunden.');
-    if (code >= 300) throw new Error('Google Drive antwortet mit ' + code + '.');
+    if (code >= 300) throw new Error('Google Drive antwortet mit ' + code + '.' + Gdrive.why_(code, res.getContentText()));
     return res.getContentText();
+  },
+  /** The reason Google gave, short (e.g. "Drive API has not been used in project …"), for the message and the log. */
+  why_(code, text) {
+    let reason = '';
+    try { reason = JSON.parse(text).error.message; } catch (e) { reason = String(text || ''); }
+    return reason ? ' (Google ' + code + ': ' + String(reason).replace(/\s+/g, ' ').slice(0, 200) + ')' : '';
   },
   json_(method, url, body) {
     const text = Gdrive.call_(method, url, body === undefined ? undefined : JSON.stringify(body));
@@ -47,9 +54,11 @@ const Gdrive = {
   run_(fn) {
     try { return fn(); } catch (e) {
       const msg = String(e && e.message);
+      console.error('Drive service: ' + msg);
+      const why = ' (Google: ' + msg.replace(/\s+/g, ' ').slice(0, 200) + ')';
       if (/not found/i.test(msg)) throw new Error('Datei in Google Drive nicht gefunden.');
       if (/rateLimit|quotaExceeded|storageQuota/i.test(msg)) throw new Error('Google Drive ist gerade ausgelastet oder der Speicher ist voll. Bitte gleich noch einmal versuchen.');
-      if (/permission|insufficient|authoriz/i.test(msg)) throw new Error('Die App darf noch nicht in Google Drive speichern. Bitte im Apps-Script-Editor einmal „setup“ ausführen und die Berechtigung zulassen.');
+      if (/permission|insufficient|authoriz/i.test(msg)) throw new Error('Die App darf noch nicht in Google Drive speichern. Bitte im Apps-Script-Editor einmal „setup“ ausführen und die Berechtigung zulassen.' + why);
       throw e;
     }
   },

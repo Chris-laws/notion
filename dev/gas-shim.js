@@ -249,7 +249,7 @@
     },
   });
   root.__driveRest = (url, opts) => {
-    if (root.__DRIVE_DENIED__) return reply(403, { error: { message: 'Insufficient Permission' } });
+    if (root.__DRIVE_DENIED__) return reply(403, { error: { message: root.__DRIVE_DENIED__ === true ? 'Insufficient Permission' : root.__DRIVE_DENIED__ } });
     // no URL class in the test context: path and query parameters by hand
     const query = {};
     String(url.split('?')[1] || '').split('&').filter(Boolean).forEach(kv => { const i = kv.indexOf('='); query[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, ' ')); });

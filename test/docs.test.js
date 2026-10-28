@@ -460,3 +460,14 @@ describe('Drive through the built-in Drive service (no UrlFetchApp)', () => {
     try { assert.match(app.error('docs.save', { projectId: project.id, title: 'A', content: 'x' }), /setup/); } finally { delete app.ctx.Drive; }
   });
 });
+
+describe('Drive errors say what Google answered', () => {
+  test('the reason from Google (e.g. Drive API not enabled) is part of the message', () => {
+    const { app, project } = world();
+    app.ctx.__DRIVE_DENIED__ = 'Google Drive API has not been used in project 123 before or it is disabled.';
+    let err;
+    try { err = app.error('docs.save', { projectId: project.id, title: 'A', content: 'x' }); } finally { app.ctx.__DRIVE_DENIED__ = false; }
+    assert.match(err, /setup/);
+    assert.match(err, /Google 403: Google Drive API has not been used/);
+  });
+});
