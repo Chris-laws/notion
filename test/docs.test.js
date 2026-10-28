@@ -435,3 +435,28 @@ describe('jour fixe: review findings (v49)', () => {
     assert.equal(r.current.canWrite, true);
   });
 });
+
+describe('Drive through the built-in Drive service (no UrlFetchApp)', () => {
+  test('minutes are created, read, updated and trashed through Drive.Files when that service is on', () => {
+    const { app, project } = world();
+    app.ctx.Drive = app.ctx.__driveAdvanced();
+    app.ctx.__DRIVE_DENIED__ = true; // external requests blocked: only the Drive service may work
+    try {
+      const d = app.call('docs.save', { projectId: project.id, title: 'A', content: 'eins' });
+      assert.equal(pathOf(app, d.fileId), 'LidlFlow/Projects/Forecast/Exception Handling/Documents/A.md');
+      app.x.Db.reset();
+      app.ctx.CacheService.getScriptCache().remove('docv:' + d.id + ':1');
+      assert.equal(app.call('docs.get', { id: d.id }).content, 'eins');
+      app.call('docs.save', { id: d.id, title: 'A', content: 'zwei', baseVersion: 1 });
+      assert.equal(D(app).getFileById(d.fileId).getBlob().getDataAsString(), 'zwei');
+      app.call('docs.remove', { id: d.id });
+      assert.equal(D(app).getFileById(d.fileId).isTrashed(), true);
+    } finally { app.ctx.__DRIVE_DENIED__ = false; delete app.ctx.Drive; }
+  });
+  test('a permission error of the Drive service says to run setup', () => {
+    const { app, project } = world();
+    const denied = () => { throw new Error('API call to drive.files failed with error: Insufficient Permission'); };
+    app.ctx.Drive = { Files: { list: denied, get: denied, create: denied, update: denied } };
+    try { assert.match(app.error('docs.save', { projectId: project.id, title: 'A', content: 'x' }), /setup/); } finally { delete app.ctx.Drive; }
+  });
+});

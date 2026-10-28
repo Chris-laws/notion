@@ -219,6 +219,35 @@
   // Drive REST API (v3) on top of the in-memory Drive: what Drive.js calls with UrlFetchApp
   const reply = (code, body) => ({ getResponseCode: () => code, getContentText: () => (typeof body === 'string' ? body : JSON.stringify(body)) });
   const listOf = it => { const a = []; while (it.hasNext()) a.push(it.next()); return a; };
+  // the built-in Drive service (Drive API v3) on top of the same in-memory Drive
+  root.__driveAdvanced = () => ({
+    Files: {
+      list: o => {
+        const name = ((/name = '((?:[^'\\]|\\.)*)'/.exec(o.q) || [])[1] || '').replace(/\\(.)/g, '$1');
+        const parent = (/'([^']+)' in parents/.exec(o.q) || [])[1];
+        const pool = parent ? (drive[parent] ? listOf(drive[parent].getFolders()) : []) : tops.filter(f => !f.isTrashed());
+        return { files: pool.filter(f => f.getName() === name).map(f => ({ id: f.getId() })) };
+      },
+      create: (meta, blob) => {
+        const parent = meta.parents && drive[meta.parents[0]];
+        if (blob) return { id: parent.createFile(meta.name, blob.getDataAsString(), meta.mimeType).getId() };
+        return { id: (parent ? parent.createFolder(meta.name) : root.DriveApp.createFolder(meta.name)).getId() };
+      },
+      get: (id, o) => {
+        const item = drive[id];
+        if (!item) throw new Error('API call to drive.files.get failed with error: File not found: ' + id);
+        return o && o.alt === 'media' ? item.getBlob().getDataAsString() : { id: id, trashed: item.isTrashed() };
+      },
+      update: (meta, id, blob) => {
+        const item = drive[id];
+        if (!item) throw new Error('API call to drive.files.update failed with error: File not found: ' + id);
+        if (blob) item.setContent(blob.getDataAsString());
+        if (meta && meta.name !== undefined) item.setName(meta.name);
+        if (meta && meta.trashed !== undefined) item.setTrashed(meta.trashed);
+        return { id: id };
+      },
+    },
+  });
   root.__driveRest = (url, opts) => {
     if (root.__DRIVE_DENIED__) return reply(403, { error: { message: 'Insufficient Permission' } });
     // no URL class in the test context: path and query parameters by hand

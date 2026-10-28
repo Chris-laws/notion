@@ -1,7 +1,8 @@
 /**
- * Folders and files in the owner's Drive, through the Drive REST API with the app's own token.
- * Scope drive.file: the app only sees the files and folders it created itself (DriveApp would need
- * access to the whole Drive, so it is not used).
+ * Folders and files in the owner's Drive. Scope drive.file: the app only sees the files and folders it
+ * created itself (DriveApp would need access to the whole Drive, so it is not used). Two ways in, same
+ * result: the built-in Drive service (Drive API v3, enabled in appsscript.json; needs no external
+ * requests, so it works where an organisation blocks UrlFetchApp), else the REST API with the app's token.
  *
  *   LidlFlow/                        root, id in the script property DRIVE_ROOT_FOLDER_ID
  *     Projects/<team>/<project>/
@@ -40,30 +41,75 @@ const Gdrive = {
   },
   q_(s) { return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"; },
 
+  /** The built-in Drive service (Drive API v3) when it is switched on: works without external requests. */
+  svc_() { return typeof Drive !== 'undefined' && Drive && Drive.Files ? Drive.Files : null; },
+  /** Runs a call of the Drive service; its permission errors get the same message as the REST path. */
+  run_(fn) {
+    try { return fn(); } catch (e) {
+      const msg = String(e && e.message);
+      if (/not found/i.test(msg)) throw new Error('Datei in Google Drive nicht gefunden.');
+      if (/rateLimit|quotaExceeded|storageQuota/i.test(msg)) throw new Error('Google Drive ist gerade ausgelastet oder der Speicher ist voll. Bitte gleich noch einmal versuchen.');
+      if (/permission|insufficient|authoriz/i.test(msg)) throw new Error('Die App darf noch nicht in Google Drive speichern. Bitte im Apps-Script-Editor einmal „setup“ ausführen und die Berechtigung zulassen.');
+      throw e;
+    }
+  },
+  blob_(content) { return Utilities.newBlob(String(content), 'text/plain'); },
+
   /** Folder `name` inside parentId (or at the top of My Drive): found or created. */
   folder(name, parentId) {
     const q = 'name = ' + Gdrive.q_(name) + " and mimeType = '" + Gdrive.FOLDER + "' and trashed = false" + (parentId ? ' and ' + Gdrive.q_(parentId) + ' in parents' : '');
+    const meta = Object.assign({ name: name, mimeType: Gdrive.FOLDER }, parentId ? { parents: [parentId] } : {});
+    const svc = Gdrive.svc_();
+    if (svc) {
+      return Gdrive.run_(() => {
+        const found = svc.list({ q: q, fields: 'files(id)' }).files || [];
+        return found.length ? found[0].id : svc.create(meta).id;
+      });
+    }
     const found = Gdrive.json_('get', Gdrive.API + '?fields=files(id)&q=' + encodeURIComponent(q)).files || [];
     if (found.length) return found[0].id;
-    return Gdrive.json_('post', Gdrive.API + '?fields=id', Object.assign({ name: name, mimeType: Gdrive.FOLDER }, parentId ? { parents: [parentId] } : {})).id;
+    return Gdrive.json_('post', Gdrive.API + '?fields=id', meta).id;
   },
   exists(id) {
-    try { return !Gdrive.json_('get', Gdrive.API + '/' + encodeURIComponent(id) + '?fields=trashed').trashed; } catch (e) {
+    try {
+      const svc = Gdrive.svc_();
+      const f = svc ? Gdrive.run_(() => svc.get(id, { fields: 'trashed' })) : Gdrive.json_('get', Gdrive.API + '/' + encodeURIComponent(id) + '?fields=trashed');
+      return !f.trashed;
+    } catch (e) {
       if (/nicht gefunden/.test(e.message)) return false;
       throw e;
     }
   },
   createFile(parentId, name, content) {
+    const svc = Gdrive.svc_();
+    if (svc) return Gdrive.run_(() => svc.create({ name: name, parents: [parentId], mimeType: 'text/plain' }, Gdrive.blob_(content)).id);
     const b = 'lidlflow' + Date.now().toString(36);
     const body = '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify({ name: name, parents: [parentId], mimeType: 'text/plain' }) +
       '\r\n--' + b + '\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n' + content + '\r\n--' + b + '--';
     return JSON.parse(Gdrive.call_('post', Gdrive.UPLOAD + '?uploadType=multipart&fields=id', body, 'multipart/related; boundary=' + b)).id;
   },
-  read(id) { return Gdrive.call_('get', Gdrive.API + '/' + encodeURIComponent(id) + '?alt=media'); },
-  write(id, content) { Gdrive.call_('patch', Gdrive.UPLOAD + '/' + encodeURIComponent(id) + '?uploadType=media', content, 'text/plain; charset=UTF-8'); },
-  rename(id, name) { Gdrive.json_('patch', Gdrive.API + '/' + encodeURIComponent(id) + '?fields=id', { name: name }); },
+  read(id) {
+    const svc = Gdrive.svc_();
+    if (!svc) return Gdrive.call_('get', Gdrive.API + '/' + encodeURIComponent(id) + '?alt=media');
+    const r = Gdrive.run_(() => svc.get(id, { alt: 'media' }));
+    // the service hands back text, a blob or bytes depending on the runtime
+    if (typeof r === 'string') return r;
+    if (r && typeof r.getDataAsString === 'function') return r.getDataAsString();
+    return Utilities.newBlob(r).getDataAsString();
+  },
+  write(id, content) {
+    const svc = Gdrive.svc_();
+    if (svc) { Gdrive.run_(() => svc.update({}, id, Gdrive.blob_(content))); return; }
+    Gdrive.call_('patch', Gdrive.UPLOAD + '/' + encodeURIComponent(id) + '?uploadType=media', content, 'text/plain; charset=UTF-8');
+  },
+  patch_(id, meta) {
+    const svc = Gdrive.svc_();
+    if (svc) { Gdrive.run_(() => svc.update(meta, id)); return; }
+    Gdrive.json_('patch', Gdrive.API + '/' + encodeURIComponent(id) + '?fields=id', meta);
+  },
+  rename(id, name) { Gdrive.patch_(id, { name: name }); },
   /** To the Drive trash (restorable there for 30 days), never deleted for good. */
-  trash(id) { Gdrive.json_('patch', Gdrive.API + '/' + encodeURIComponent(id) + '?fields=id', { trashed: true }); },
+  trash(id) { Gdrive.patch_(id, { trashed: true }); },
 };
 
 const Store = {
