@@ -910,10 +910,11 @@ function taskCalendarHtml(tasks, opts) {
 }
 
 /* ---------------- pages ---------------- */
-function pageHead(title, sub, lead, actions) {
+/** extra: more of the header under the subtitle (e.g. the absence warning of a team). */
+function pageHead(title, sub, lead, actions, extra) {
   return '<header class="ph"><div class="page-head">' + (lead || '') + '<h1 class="page-title">' + esc(title) + '</h1>' +
     (actions ? '<div class="page-actions">' + actions + '</div>' : '') + '</div>' +
-    (sub ? '<p class="page-sub">' + sub + '</p>' : '') + '</header>';
+    (sub ? '<p class="page-sub">' + sub + '</p>' : '') + (extra || '') + '</header>';
 }
 function stat(label, val, warn, sub) {
   return '<div class="stat' + (warn ? ' warn' : '') + '"><div class="lbl">' + esc(label) + '</div><div class="val">' + val + '</div>' +
@@ -1499,15 +1500,30 @@ function teamTasks(t) {
   const pids = S.projects.filter(p => p.teamId === t.id).map(p => p.id);
   return S.tasks.filter(x => x.teams.indexOf(t.id) >= 0 || pids.indexOf(x.projectId) >= 0);
 }
-function teamWarningsBanner(teamId) {
+/**
+ * Absence warning of a team (days in the next 4 weeks with at least the threshold away): one line in the
+ * header; "Details" opens the days with who is away, and the way to the availability page.
+ */
+function teamWarnLine(teamId) {
   const t = TODAY();
   const d = calEnsure(t, Shared.addDays(t, 27), teamId);
   if (!d || !d.warnings.length) return '';
-  return '<div class="banner danger">' + icon('alert') + '<div><b>' + d.warnings.length + ' Tag(e) mit ≥ ' + d.threshold + ' % Abwesenheit</b> in den nächsten 4 Wochen ' +
-    '(Urlaub, Krankheit und Feiertage eingerechnet).<div class="days-list">' + d.warnings.slice(0, 10).map(w =>
-      '<span class="chip danger">' + esc(DOW[Shared.weekday(w.date)] + ' ' + fmtDate(w.date, { absolute: true }) + ' · ' + w.absent + '/' + w.total) + '</span>').join('') +
-    '<button class="btn sm outline" data-action="warn-open" data-team="' + esc(teamId) + '">Verfügbarkeit ansehen</button></div></div></div>';
+  const open = !!(S.twOpen && S.twOpen[teamId]);
+  const n = d.warnings.length;
+  return '<div class="tw-line" role="status">' + icon('alert', 'sm') +
+    '<span><b>' + esc(L(n + (n === 1 ? ' Tag' : ' Tage') + ' mit ≥ ' + d.threshold + ' % abwesend', n + (n === 1 ? ' day' : ' days') + ' with ≥ ' + d.threshold + ' % away')) + '</b> ' +
+    esc(L('in den nächsten 4 Wochen', 'in the next 4 weeks')) + '</span>' +
+    '<button type="button" class="linkbtn" data-action="tw-toggle" data-id="' + esc(teamId) + '" aria-expanded="' + open + '" aria-controls="tw-' + esc(teamId) + '">' +
+    esc(L('Details', 'Details')) + '</button></div>' + (open ? teamWarnDetails(teamId, d) : '');
 }
+function teamWarnDetails(teamId, d) {
+  return '<div class="tw-details" id="tw-' + esc(teamId) + '">' + d.warnings.slice(0, 20).map(w =>
+    '<div class="tw-day"><span class="chip danger">' + esc(DOW[Shared.weekday(w.date)] + ' ' + fmtDate(w.date, { absolute: true }) + ' · ' + w.absent + '/' + w.total) + '</span>' +
+    '<span class="tw-who">' + esc((w.people || []).map(e => user(e).name).join(', ')) + '</span></div>').join('') +
+    '<p class="hint">' + esc(L('Urlaub, Krankheit und Feiertage eingerechnet.', 'Holidays, sick leave and public holidays included.')) + '</p>' +
+    '<button type="button" class="btn sm outline" data-action="warn-open" data-team="' + esc(teamId) + '">' + esc(L('Verfügbarkeit ansehen', 'View availability')) + '</button></div>';
+}
+A['tw-toggle'] = el => { S.twOpen = Object.assign({}, S.twOpen, { [el.dataset.id]: !(S.twOpen && S.twOpen[el.dataset.id]) }); render(); };
 function teamPage(t) {
   const tab = S.teamTab || 'tasks';
   const members = teamMembers(t);
@@ -1531,10 +1547,9 @@ function teamPage(t) {
     pageHead(t.name, t.description ? linkify(t.description) : '', mark(t, 'lg'),
       '<button class="btn outline" data-action="team-capacity" data-id="' + esc(t.id) + '">' + icon('users', 'sm') + 'Verfügbarkeit</button>' +
       '<button class="btn outline" data-action="team-calendar" data-id="' + esc(t.id) + '">' + icon('calendar', 'sm') + 'Kalender</button>' +
-      '<button class="icon-btn" data-action="team-edit" data-id="' + esc(t.id) + '" title="Team bearbeiten">' + icon('settings') + '</button>') +
+      '<button class="icon-btn" data-action="team-edit" data-id="' + esc(t.id) + '" title="Team bearbeiten">' + icon('settings') + '</button>', teamWarnLine(t.id)) +
     '<div class="page-meta">' + avatars(members, 6) + '<span>' + members.length + ' Mitglieder</span><span class="sep"></span>' +
     '<span>Lead: ' + esc(teamLeads(t).map(e => user(e).name).join(', ')) + '</span><span class="sep"></span><span>' + projects.length + ' Projekte</span></div>' +
-    teamWarningsBanner(t.id) +
     '<div class="db-bar"><div class="tabs">' +
     [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length],
       ['jf', 'Jour Fixe', 'repeat', jfData().series.filter(s => projects.some(p => p.id === s.projectId)).length], ['members', 'Mitglieder', 'users', members.length]]
