@@ -200,6 +200,11 @@ function jfTasksGone(ids, deleted) {
     docFetch(d.id).then(full => { if (S.doc && S.doc.id === full.id && !S.protoEdit) { S.doc = full; render({ peek: false }); } }).catch(() => {});
   }
 }
+/** A linked action is done when its task is (the server says the same; here at once when the task changes). */
+function lineDone(i) {
+  const t = jfLive(i.taskId) ? task(i.taskId) : null;
+  return t ? isDone(t) : !!i.done;
+}
 /* texts of saved minutes the page has seen (by id and version): opening them again needs no call */
 const DOC_TEXT = {};
 const DOC_LOADING = {};
@@ -280,8 +285,8 @@ function protoTable(m, o) {
       '</td><td><b>' + linkify(t.title) + '</b>' + ttask + '</td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
     t.items.forEach((i, n) => {
       const task = jfLive(i.taskId) ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
-        : o.actions && i.type === 'A' && !i.done ? ' <button class="md-mk" data-action="proto-task" data-t="' + k + '" data-i="' + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
-      rows.push('<tr class="pt-line' + (i.done ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
+        : o.actions && i.type === 'A' && !lineDone(i) ? ' <button class="md-mk" data-action="proto-task" data-t="' + k + '" data-i="' + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
+      rows.push('<tr class="pt-line' + (lineDone(i) ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
         '<td>' + linkify(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
     });
   });
@@ -391,7 +396,9 @@ function protoStartEdit(d) {
 const protoDirty = () => !!S.protoEdit && Shared.protoToText(S.protoEdit.model) !== S.protoEdit.saved;
 /** Re-renders the form; text fields someone dragged larger keep their size. */
 function protoRender() {
-  const sizes = S.protoEdit.sizes;
+  const e = S.protoEdit;
+  store.set(protoKey(e), { base: e.base, baseText: e.saved, model: e.model });
+  const sizes = e.sizes;
   $$('.proto-edit textarea[data-path]').forEach(t => { if (t.style.height) sizes[t.dataset.path] = t.style.height; });
   render({ peek: false });
   $$('.proto-edit textarea[data-path]').forEach(t => { if (sizes[t.dataset.path]) t.style.height = sizes[t.dataset.path]; });
@@ -414,7 +421,8 @@ function protoLine(i, k, n) {
     '<textarea class="textarea pe-text" rows="1" data-on-input="proto-field" data-path="' + at + '.text" aria-label="Text">' + esc(i.text) + '</textarea>' +
     personSelect(at + '.owner', i.owner) +
     '<input class="input sm" type="date" data-on-change="proto-field" data-path="' + at + '.due" value="' + esc(i.due) + '" aria-label="' + esc(L('Termin', 'Due')) + '">' +
-    (i.type === 'A' ? '<label class="pe-done"><input type="checkbox" data-on-change="proto-field" data-path="' + at + '.done"' + (i.done ? ' checked' : '') + '> ' + esc(L('erledigt', 'done')) + '</label>' : '<span class="pe-done"></span>') +
+    (i.type === 'A' ? '<label class="pe-done"' + (jfLive(i.taskId) ? labelled(L('Kommt aus der Aufgabe: dort erledigen', 'Comes from the task: mark it done there')) : '') + '><input type="checkbox" data-on-change="proto-field" data-path="' + at + '.done"' +
+      (lineDone(i) ? ' checked' : '') + (jfLive(i.taskId) ? ' disabled' : '') + '> ' + esc(L('erledigt', 'done')) + '</label>' : '<span class="pe-done"></span>') +
     peTaskBtn(i.type === 'A' ? i : null, k, n) +
     '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '" data-i="' + n + '"' + labelled(L('Zeile löschen', 'Delete line')) + '>' + icon('x', 'sm') + END_BTN;
 }
@@ -556,7 +564,7 @@ function protoConflict(r) {
 /* ---------------- minutes: tasks from a topic or a line (a form; nothing is made before "Anlegen") ---------------- */
 /** The minutes the buttons belong to: the form (before "Übernehmen") or the saved minutes. */
 function jfTaskSource(draft) {
-  if (draft) { const e = S.protoEdit; return { model: e.model, projectId: e.projectId, docId: '', date: e.date, title: e.title }; }
+  if (draft) { const e = S.protoEdit; return { model: e.model, projectId: e.projectId, docId: e.id || '', date: e.date, title: e.title }; }
   const d = S.doc;
   return { model: Shared.protoFromText(d.content), projectId: d.projectId, docId: d.id, date: d.date, title: d.title };
 }
@@ -615,7 +623,7 @@ function jfMakeTasks(o, v) {
   const who = e => (e ? [e] : [S.me.email]);
   const from = L('Aus dem Jour Fixe „', 'From the jour fixe "') + src.title + (L('“', '"'));
   const picked = line ? [] : [].concat(v.pick || []);
-  const payload = { projectId: v.projectId, requestId: o.requestId, docId: src.docId, topicId: topic.id, item: !!line,
+  const payload = { projectId: v.projectId, requestId: o.requestId, docId: src.docId, draft: !!o.draft, topicId: topic.id, item: !!line,
     task: { title: v.title, assignees: who(v.owner), dueDate: v.due, description: from },
     items: line ? [{ itemId: line.id, title: v.title, assignees: who(v.owner), dueDate: v.due, description: from }]
       : picked.map(id => ({ itemId: id, title: v['t_' + id], assignees: who(v['o_' + id]), dueDate: v['d_' + id], description: from })) };
@@ -623,14 +631,17 @@ function jfMakeTasks(o, v) {
     applyTasks(r.tasks);
     toast(r.tasks.length > 1 ? L(r.tasks.length + ' Aufgaben angelegt', r.tasks.length + ' tasks created') : L('Aufgabe angelegt: ', 'Task created: ') + r.tasks[0].title,
       { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.tasks[0].id) } });
-    if (o.draft) jfLinkDraft(topic.id, line, r.tasks, picked);
-    else if (r.doc) { S.doc = Object.assign({}, S.doc, r.doc); docRemember(S.doc); render({ peek: false }); }
+    if (r.doc) { docRemember(r.doc); docFlush(r.doc.id); }
+    if (o.draft) jfLinkDraft(topic.id, line, r.tasks, picked, r.doc);
+    else if (r.doc) { S.doc = Object.assign({}, S.doc, r.doc); render({ peek: false }); }
   });
 }
 /** Before "Übernehmen": the form keeps the task links (saved with the minutes, so nothing is made twice). */
-function jfLinkDraft(topicId, line, tasks, picked) {
+function jfLinkDraft(topicId, line, tasks, picked, doc) {
   const e = S.protoEdit;
   if (!e) return;
+  // the server linked the saved minutes too: when that was the only change since I opened them, it is my new base
+  if (doc && e.id === doc.id && Number(doc.version) === Number(e.base) + 1) { e.base = doc.version; e.saved = doc.content; }
   const t = e.model.topics.find(x => x.id === topicId);
   if (!t) return;
   if (line) { const i = t.items.find(x => x.id === line.id); if (i) i.taskId = tasks[0].id; }

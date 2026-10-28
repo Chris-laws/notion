@@ -521,7 +521,7 @@ function deleteWithUndo(t) {
   render();
   const send = () => {
     delete PENDING_DELETES[t.id];
-    call('tasks.remove', { id: t.id }).catch(err => { S.tasks = S.tasks.concat(removed); render(); fail(err); });
+    call('tasks.remove', { id: t.id }).catch(err => { S.tasks = S.tasks.concat(removed); ids.forEach(id => { delete JF_DEAD[id]; }); render(); fail(err); });
   };
   const timer = setTimeout(send, 6000);
   PENDING_DELETES[t.id] = { timer: timer, send: send };

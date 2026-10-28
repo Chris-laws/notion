@@ -61,7 +61,7 @@ const SCHEMA = {
   },
   // saved texts Drive does not have yet (written by docs.flush right after the save); meta: the version before
   DocPending: {
-    cols: ['id', 'docId', 'version', 'content', 'meta', 'at'],
+    cols: ['id', 'docId', 'version', 'content', 'meta', 'at', 'claim'],
     json: ['meta'],
     num: ['version'],
   },

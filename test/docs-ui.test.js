@@ -65,7 +65,7 @@ describe('jour fixe overview', () => {
     assert.match($('.jf-archive').textContent, /Team-JF/);
     // a new series for the remaining tests
     await w.eval(`(async () => { await call('jf.saveSeries', { projectId: ${JSON.stringify(pid)}, title: 'Team-JF', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: '2026-01-05', attendees: S.users.slice(0, 3).map(u => u.email) }); S.jf = await call('jf.list', {}); render(); })()`);
-    await until(() => $$('.jf-active .jf-row').length === 1);
+    await until(() => $$('.jf-active .jf-row.next').length === 1);
   });
   test('the archive shows 50 minutes first and the rest on request (200+ minutes stay fast)', () => {
     const many = Array.from({ length: 230 }, (_, i) => ({ id: 'dc_' + i, projectId: pid, seriesId: 'jf_x', date: w.eval(`Shared.addDays('2020-01-06', ${i * 7})`), title: 'Alt', people: { present: [], absent: [] } }));
@@ -369,5 +369,63 @@ describe('minutes follow their tasks (v59)', () => {
     await until(() => $$('.pt .pt-line .md-task').length < before);
     assert.equal($('.pt .md-task[data-id="' + id + '"]'), null, 'no link to the deleted task');
     assert.ok($$('.pt [data-action="proto-task"]').length, 'the line can become a task again');
+  });
+});
+
+describe('simulation in the page: two people, drafts', () => {
+  /** Saves the open minutes as someone else (the server of the preview runs in the page). */
+  async function saveAs(email, fn) {
+    await w.eval(`(async () => {
+      const me = globalThis.__GAS_USER__;
+      globalThis.__GAS_USER__ = ${JSON.stringify(email)};
+      try {
+        const cur = await call('docs.get', { id: S.doc.id });
+        const m = Shared.protoFromText(cur.content);
+        (${fn})(m);
+        await call('docs.save', { id: cur.id, title: cur.title, content: Shared.protoToText(m), baseVersion: cur.version, baseContent: cur.content });
+      } finally { globalThis.__GAS_USER__ = me; }
+    })()`);
+  }
+  async function openSaved() {
+    w.eval(`S.doc = null; S.protoEdit = null; S.projTab = 'jf'; go('project', ${JSON.stringify(pid)})`);
+    await until(() => $('.jf-active .jf-row'));
+    const m = w.eval(`jfData().minutes.find(x => x.projectId === ${JSON.stringify(pid)})`);
+    await w.eval(`jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
+    await until(() => $('.doc-view .pt'));
+    click($('[data-action="proto-edit"]'));
+    await until(() => $('.proto-edit'));
+  }
+  test('someone saves another topic while I write: my save merges, no dialog', async () => {
+    await openSaved();
+    const other = w.eval('S.users.find(u => u.email !== S.me.email).email');
+    await saveAs(other, "m => { m.topics.push({ id: 'zz', title: 'Von nebenan', items: [] }); }");
+    w.eval("S.protoEdit.model.topics.push({ id: 'yy', title: 'Von mir', items: [] }); protoRender()");
+    click($('[data-action="proto-save"]'));
+    await until(() => $('.doc-view .pt') && !$('.proto-edit'));
+    assert.equal($('#modal-root form'), null, 'no conflict dialog');
+    assert.match($('.doc-view .pt').textContent, /Von nebenan/);
+    assert.match($('.doc-view .pt').textContent, /Von mir/);
+  });
+  test('someone changes the same topic title: the dialog shows theirs; "Meine Fassung speichern" keeps mine', async () => {
+    await openSaved();
+    const other = w.eval('S.users.find(u => u.email !== S.me.email).email');
+    await saveAs(other, "m => { m.topics[0].title = 'Titel von nebenan'; }");
+    w.eval("S.protoEdit.model.topics[0].title = 'Mein Titel'; protoRender()");
+    click($('[data-action="proto-save"]'));
+    await until(() => $('#modal-root .de-preview'));
+    assert.match($('#modal-root .de-preview').textContent, /Titel von nebenan/);
+    $('#modal-root form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await until(() => $('.doc-view .pt') && !$('.proto-edit'));
+    assert.match($('.doc-view .pt').textContent, /Mein Titel/);
+  });
+  test('an unsaved draft survives closing the page and comes back when the meeting is opened again', async () => {
+    await openSaved();
+    const title = $('.pe-topic input[data-path="topics.0.title"]');
+    title.value = 'Entwurf bleibt';
+    title.dispatchEvent(new w.Event('input', { bubbles: true }));
+    w.eval('S.protoEdit = null; S.doc = null; render()');
+    await openSaved();
+    assert.equal($('.pe-topic input[data-path="topics.0.title"]').value, 'Entwurf bleibt');
+    click($('[data-action="proto-discard"]'));
   });
 });

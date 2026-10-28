@@ -99,7 +99,7 @@ const Docs = {
 
   /**
    * Task links of minutes as they are now (on reading and saving): a link to a deleted task is dropped, so the
-   * topic or line can become a task again; an action whose task is done counts as done. Tasks the reader may
+   * topic or line can become a task again; a linked action is done exactly when its task is. Tasks the reader may
    * not see still exist here, so their links stay.
    */
   live_(text) {
@@ -115,7 +115,8 @@ const Docs = {
       check(tp);
       tp.items.forEach(i => {
         const t = check(i);
-        if (t && t.status === 'done' && i.type === 'A' && !i.done) { i.done = true; changed = true; }
+        // a linked action is as done as its task (both ways: a reopened task reopens the line)
+        if (t && i.type === 'A' && i.done !== (t.status === 'done')) { i.done = t.status === 'done'; changed = true; }
       });
     });
     return changed ? Shared.protoToText(m) : text;
@@ -157,57 +158,107 @@ const Docs = {
     }, Docs.summary_(v.content), extra));
     if (fast) Db.insert('DocPending', { id: Util.uid('dp_'), docId: row.id, version: 1, content: v.content, meta: { create: true }, at: now });
     Docs.remember_(row, v.content);
-    return row;
+    return Object.assign({}, row, { content: v.content });
   },
 
   /**
-   * Writes what was saved into Drive: creates the file, keeps the version before as a snapshot, writes
-   * the new text; in the order of the saves. A failed step stays pending and is tried again next time.
+   * Writes what was saved into Drive, in the order of the saves: creates the file, keeps the version before as
+   * a snapshot, writes the new text. Each step claims its row under the lock, talks to Drive outside it (others
+   * keep saving meanwhile) and records the result under the lock again. A failed step stays pending.
    */
+  CLAIM_MS: 120000,
   flush(p) {
     const ctx = Docs.ctx_();
     Docs.doc_(p.id, ctx, false);
-    return Db.tx(() => Docs.flushDoc_(p.id));
+    return Docs.flushDoc_(p.id);
   },
   flushDoc_(docId) {
-    const rows = Docs.pending_(docId);
-    for (let k = 0; k < rows.length; k++) {
-      const doc = Db.get('Docs', docId);
-      if (!doc) { Db.removeMany('DocPending', rows.map(r => r.id)); return { pending: 0 }; }
-      try { Docs.flushOne_(doc, rows[k]); } catch (e) {
+    for (let step = 0; step < 100; step++) {
+      let job;
+      // finding the folders can fail too (no Drive permission): the claim rolls back, the save stays pending
+      try { job = Db.tx(() => Docs.claim_(docId)); } catch (e) {
         console.error('flush ' + docId + ': ' + e.message);
-        return { pending: rows.length - k, error: e.message };
+        return { pending: Docs.pending_(docId).length, error: e.message };
       }
+      if (job.done) return { pending: 0 };
+      if (job.busy) return { pending: job.busy, busy: true };
+      let drive;
+      try { drive = Docs.driveStep_(job); } catch (e) {
+        Docs.release_(job.row.id);
+        console.error('flush ' + docId + ': ' + e.message);
+        return { pending: job.left, error: e.message };
+      }
+      let trash;
+      try { trash = Db.tx(() => Docs.commit_(job, drive)); } catch (e) {
+        // the database did not take it: what Drive made goes to the trash, the step is tried again later
+        Docs.trashAll_([drive.fileId, drive.snapId].filter(Boolean));
+        Docs.release_(job.row.id);
+        throw e;
+      }
+      Docs.trashAll_(trash);
     }
-    return { pending: 0 };
+    return { pending: Docs.pending_(docId).length };
   },
-  flushOne_(doc, row) {
+  release_(rowId) {
+    try { Db.tx(() => { if (Db.get('DocPending', rowId)) Db.update('DocPending', rowId, { claim: '' }); }); } catch (e) { /* runs out after CLAIM_MS anyway */ }
+  },
+  trashAll_(ids) { ids.forEach(id => { try { Store.trash(id); } catch (e) { console.error('trash ' + id + ': ' + e.message); } }); },
+  /** Under the lock: the next pending save of the document, marked as taken; folders found or made here (once). */
+  claim_(docId) {
+    const rows = Docs.pending_(docId);
+    const doc = Db.get('Docs', docId);
+    if (!rows.length) return { done: true };
+    if (!doc) { Db.removeMany('DocPending', rows.map(r => r.id)); return { done: true }; }
+    const row = rows[0];
+    if (row.claim && Date.now() - new Date(row.claim).getTime() < Docs.CLAIM_MS) return { busy: rows.length };
+    Db.update('DocPending', row.id, { claim: new Date().toISOString() });
     const project = Db.get('Projects', doc.projectId);
-    if (!doc.fileId) {
-      const series = doc.seriesId ? Db.get('JfSeries', doc.seriesId) : null;
-      const folder = series ? Store.series(series, project) : Store.documents(project);
-      const fileId = Gdrive.createFile(folder, Docs.fileName_(series ? series.title : doc.title, doc.date), String(row.content));
-      Db.update('Docs', doc.id, { fileId: fileId, fileVersion: row.version });
-    } else {
-      const m = row.meta || {};
-      const kept = Db.all('DocVersions').some(r => r.docId === doc.id && Number(r.version) === Number(m.version));
-      // the file still holds the version before this save: that text becomes the snapshot
-      if (m.version && !kept && Number(doc.fileVersion) === Number(m.version)) {
-        Docs.keepVersion_({ id: doc.id, version: m.version, updatedAt: m.at, updatedBy: m.by, change: m.change }, Store.read(doc.fileId), project);
-      }
-      Gdrive.write(doc.fileId, String(row.content));
-      Db.update('Docs', doc.id, { fileVersion: row.version });
+    const series = doc.seriesId ? Db.get('JfSeries', doc.seriesId) : null;
+    const m = row.meta || {};
+    // the file still holds the version before this save: that text becomes the snapshot (once)
+    const snap = !!doc.fileId && !!m.version && Number(doc.fileVersion) === Number(m.version) &&
+      !Db.all('DocVersions').some(r => r.docId === doc.id && Number(r.version) === Number(m.version));
+    return { doc: doc, row: row, meta: m, snap: snap, left: rows.length,
+      folder: doc.fileId ? '' : series ? Store.series(series, project) : Store.documents(project),
+      versions: snap ? Store.versions(project) : '', name: Docs.fileName_(series ? series.title : doc.title, doc.date) };
+  },
+  /** Outside the lock: only Drive. */
+  driveStep_(job) {
+    if (!job.doc.fileId) return { fileId: Gdrive.createFile(job.folder, job.name, String(job.row.content)) };
+    const out = {};
+    if (job.snap) out.snapId = Gdrive.createFile(job.versions, job.doc.id + '-v' + job.meta.version + '.md', Store.read(job.doc.fileId));
+    Gdrive.write(job.doc.fileId, String(job.row.content));
+    return out;
+  },
+  /** Under the lock: what Drive did goes into the database; returns files to trash (old versions, or all if the document is gone). */
+  commit_(job, drive) {
+    const doc = Db.get('Docs', job.doc.id);
+    if (!doc) {
+      Db.removeMany('DocPending', Docs.pending_(job.doc.id).map(r => r.id));
+      return [drive.fileId, drive.snapId].filter(Boolean);
     }
-    Db.remove('DocPending', row.id);
+    Db.update('Docs', doc.id, drive.fileId ? { fileId: drive.fileId, fileVersion: job.row.version } : { fileVersion: job.row.version });
+    let trash = [];
+    if (drive.snapId) {
+      const m = job.meta;
+      Db.insert('DocVersions', { id: Util.uid('dv_'), docId: doc.id, version: Number(m.version), fileId: drive.snapId, at: m.at, by: m.by, change: m.change || '' });
+      const old = Db.all('DocVersions').filter(r => r.docId === doc.id).sort((a, c) => c.version - a.version).slice(Docs.KEEP);
+      Db.removeMany('DocVersions', old.map(r => r.id));
+      trash = old.map(r => r.fileId);
+    }
+    Db.remove('DocPending', job.row.id);
+    return trash;
   },
   /** Everything still pending (from the daily backup): Drive catches up even if a page was closed. */
   flushAll_() {
-    Db.tx(() => Db.all('DocPending').map(r => r.docId).filter((id, i, a) => a.indexOf(id) === i).forEach(Docs.flushDoc_));
+    Db.all('DocPending').map(r => r.docId).filter((id, i, a) => a.indexOf(id) === i).forEach(id => {
+      try { Docs.flushDoc_(id); } catch (e) { console.error('flush ' + id + ': ' + e.message); }
+    });
   },
 
   /** Writes a new version unless someone saved after `base` (inside a transaction). */
   update_(x, v, base, baseContent) {
-    const doc = x.doc;
+    let doc = x.doc;
     const before = Docs.live_(Docs.read_(doc));
     v = { title: v.title, content: Docs.live_(v.content) };
     let merged = false;
@@ -225,13 +276,18 @@ const Docs = {
       merged = true;
     }
     if (Docs.fast_(v.content)) return Docs.updateFast_(x, v, before, merged);
+    // a text too big for the database goes to Drive at once: first what is still pending, so nothing newer is overwritten
+    if (Docs.pending_(doc.id).length) {
+      if (Docs.flushDoc_(doc.id).pending) throw new Error('Google Drive hat die letzte Fassung noch nicht übernommen. Bitte gleich noch einmal speichern.');
+      doc = Db.get('Docs', doc.id);
+    }
     Gdrive.write(doc.fileId, v.content);
     try {
       Docs.keepVersion_(doc, before, x.project);
       if (v.title !== doc.title && doc.kind !== 'jf') Gdrive.rename(doc.fileId, Docs.fileName_(v.title, doc.date));
       const me = Auth.email();
       const row = Db.update('Docs', doc.id, Object.assign({
-        change: Docs.change_(before, v.content), title: v.title, version: Number(doc.version) + 1, size: v.content.length, preview: Docs.preview_(v.content),
+        change: Docs.change_(before, v.content), title: v.title, version: Number(doc.version) + 1, fileVersion: Number(doc.version) + 1, size: v.content.length, preview: Docs.preview_(v.content),
         updatedAt: new Date().toISOString(), updatedBy: me, lockBy: doc.lockBy === me ? '' : doc.lockBy, lockUntil: doc.lockBy === me ? '' : doc.lockUntil,
       }, Docs.summary_(v.content)));
       Docs.remember_(row, v.content);
@@ -257,7 +313,7 @@ const Docs = {
       updatedAt: new Date().toISOString(), updatedBy: me, lockBy: doc.lockBy === me ? '' : doc.lockBy, lockUntil: doc.lockBy === me ? '' : doc.lockUntil,
     }, Docs.summary_(v.content)));
     Docs.remember_(row, v.content);
-    return merged ? Object.assign(Docs.meta_(row), { merged: true, mergedWith: doc.updatedBy, content: v.content }) : Docs.meta_(row);
+    return Object.assign(Docs.meta_(row), { content: v.content }, merged ? { merged: true, mergedWith: doc.updatedBy } : {});
   },
 
   /** Three-way merge of minutes (null when one of the texts is not minutes). */
@@ -486,11 +542,21 @@ const Jf = {
     const ctx = Docs.ctx_();
     const key = 'jfmk:' + ctx.email + ':' + String(p.requestId || '').slice(0, 60);
     const c = CacheService.getScriptCache();
-    const done = p.requestId ? Docs.safeGet_(c, key) : null;
-    if (done) return { tasks: JSON.parse(done).map(id => Db.get('Tasks', id)).filter(Boolean) };
-    const r = Db.tx(() => Jf.makeTasksTx_(p, ctx));
-    if (p.requestId) { try { c.put(key, JSON.stringify(r.tasks.map(t => t.id)), 21600); } catch (e) { /* optional */ } }
-    return r;
+    return Db.tx(() => {
+      // checked and noted under the lock: two sends at the same moment make the tasks once
+      const done = p.requestId ? Docs.safeGet_(c, key) : null;
+      if (done) {
+        const x = p.docId ? Docs.doc_(p.docId, ctx, true) : null;
+        return { tasks: JSON.parse(done).map(id => Db.get('Tasks', id)).filter(Boolean), doc: x ? Jf.docOut_(x.doc) : null };
+      }
+      const r = Jf.makeTasksTx_(p, ctx);
+      if (p.requestId) { try { c.put(key, JSON.stringify(r.tasks.map(t => t.id)), 21600); } catch (e) { /* optional */ } }
+      return r;
+    });
+  },
+  docOut_(doc) {
+    const row = Db.get('Docs', doc.id);
+    return Object.assign(Docs.meta_(row), { content: Docs.live_(Docs.read_(row)), canWrite: true });
   },
   /** A topic or line that has its task already gets no second one. */
   notTwice_(topic, p, lines) {
@@ -502,12 +568,20 @@ const Jf = {
     return { title: String(o.title || '').trim() || fallback, assignees: who.length ? who : [ctx.email],
       dueDate: Shared.isDate(o.dueDate) ? o.dueDate : '', description: String(o.description || '').slice(0, 20000) };
   },
-  makeTasksTx_(p, ctx) {
-    const target = Docs.project_(p.projectId, ctx, true);
+  /** The saved minutes and topic the tasks come from (none before the first save). */
+  taskSource_(p, ctx) {
     const x = p.docId ? Docs.doc_(p.docId, ctx, true) : null;
     const model = x ? Shared.protoFromText(Docs.live_(Docs.read_(x.doc))) : null;
     const topic = model ? model.topics.find(t => t.id === p.topicId) : null;
-    if (x && !topic) throw new Error('Thema nicht gefunden.');
+    if (!x || topic) return { x: x, model: model, topic: topic };
+    // from the form (p.draft): a topic not saved yet is linked by the form itself when the minutes are saved
+    if (p.draft) return { x: null, model: null, topic: null };
+    throw new Error('Thema nicht gefunden.');
+  },
+  makeTasksTx_(p, ctx) {
+    const target = Docs.project_(p.projectId, ctx, true);
+    const src = Jf.taskSource_(p, ctx);
+    const x = src.x, model = src.model, topic = src.topic;
     const items = (Array.isArray(p.items) ? p.items : []).slice(0, 50);
     const line = id => (topic && id ? topic.items.find(i => i.id === id) : null);
     Jf.notTwice_(topic, p, items.map(i => line(i.itemId)));
@@ -527,6 +601,6 @@ const Jf = {
       if (line(i.itemId)) line(i.itemId).taskId = t.id;
     });
     if (x) Docs.update_(x, { title: x.doc.title, content: Shared.protoToText(model) }, Number(x.doc.version));
-    return { tasks: tasks, doc: x ? Object.assign(Docs.meta_(Db.get('Docs', x.doc.id)), { content: Shared.protoToText(model), canWrite: true }) : null };
+    return { tasks: tasks, doc: x ? Jf.docOut_(x.doc) : null };
   },
 };
