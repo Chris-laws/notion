@@ -36,6 +36,7 @@ const ATTEMPTS = w => ({
   'teams.remove': { id: w.team.id },
   'teams.setRole': { teamId: w.team.id, email: OUTSIDER, lead: true },
   'projects.setRole': { projectId: w.project.id, email: OUTSIDER, lead: true },
+  'projects.setLinks': { projectId: w.project.id, links: [{ title: 'x', url: 'https://evil.example' }] },
   'projects.save': { id: w.project.id, teamId: w.team.id, name: 'Gehackt' },
   'projects.remove': { id: w.project.id },
   'events.save': { id: w.ev.id, title: 'Gehackt', startDate: '2030-02-01' },

@@ -62,6 +62,7 @@ const Tasks = {
         teams: [],
         assignees: [],
         tags: [],
+        links: [],
         startDate: '',
         dueDate: '',
         estimate: 0,
@@ -169,6 +170,7 @@ const Tasks = {
     const has = k => Object.prototype.hasOwnProperty.call(p, k);
     if (has('title')) f.title = String(p.title || '').replace(/\s+/g, ' ').trim().slice(0, 300) || 'Ohne Titel';
     if (has('description')) f.description = String(p.description || '').slice(0, 20000);
+    if (has('links')) f.links = Shared.cleanLinks(p.links);
     if (has('status')) {
       if (!Shared.STATUSES.some(s => s.key === p.status)) throw new Error('Unbekannter Status.');
       f.status = p.status;

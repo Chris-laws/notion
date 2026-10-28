@@ -45,6 +45,30 @@ describe('recurrence', () => {
   });
 });
 
+describe('links', () => {
+  test('the kind of a link: mail, Drive, Meet, Snowflake, Databricks, other web pages', () => {
+    assert.deepEqual([
+      'https://mail.google.com/mail/u/0/#inbox/FMfcgzQ', 'mailto:a@b.de', 'https://docs.google.com/document/d/1', 'https://drive.google.com/drive/folders/1',
+      'https://sheets.google.com/x', 'https://meet.google.com/abc-defg-hij', 'https://abc.eu-central-1.snowflakecomputing.com/x', 'https://app.snowflake.com/a/b',
+      'https://adb-1.2.azuredatabricks.net/?o=1', 'https://dbc-1.cloud.databricks.com/', 'https://example.org/mail.google.com', 'http://intranet/x', '',
+    ].map(S.linkKind), ['mail', 'mail', 'drive', 'drive', 'drive', 'meet', 'snowflake', 'snowflake', 'databricks', 'databricks', 'web', 'web', 'web']);
+  });
+  test('cleaning: only http, https and mailto; trimmed; no duplicates; titles up to 120; at most 30', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ title: 'L' + i, url: 'https://x.example/' + i }));
+    assert.equal(S.cleanLinks(many).length, 30);
+    assert.deepEqual(plain(S.cleanLinks([{ title: ' A ', url: ' https://a.example ' }, { url: 'https://a.example' }, { url: 'javascript:alert(1)' }, { url: 'data:text/html,x' },
+      { url: 'https://a b' }, null, 'https://plain.example', { title: 'x'.repeat(130), url: 'mailto:a@b.de' }, { url: 'https://' + 'y'.repeat(2100) }])),
+    [{ title: 'A', url: 'https://a.example' }, { title: '', url: 'https://plain.example' }, { title: 'x'.repeat(120), url: 'mailto:a@b.de' }]);
+    assert.deepEqual(plain(S.cleanLinks('nope')), []);
+  });
+  test('links in a text, without trailing punctuation, each once', () => {
+    assert.deepEqual(plain(S.findLinks('Siehe https://mail.google.com/mail/u/0/#inbox/AB12. Und (https://x.example/a), https://x.example/a; mailto:c@d.de!')),
+      ['https://mail.google.com/mail/u/0/#inbox/AB12', 'https://x.example/a', 'mailto:c@d.de']);
+    assert.deepEqual(plain(S.findLinks('')), []);
+    assert.deepEqual(plain(S.findLinks(null)), []);
+  });
+});
+
 describe('lead roles', () => {
   test('a team has its list of leads, older teams their one lead', () => {
     assert.deepEqual(plain(S.teamLeads({ lead: 'a@x.de', leads: ['b@x.de', 'c@x.de'] })), ['b@x.de', 'c@x.de']);

@@ -228,6 +228,7 @@ function renderPeek() {
       '<button data-action="ed-fmt" data-k="check" title="Checkliste">' + icon('checksq', 'sm') + '</button><button data-action="ed-fmt" data-k="date" title="Heutiges Datum einfügen">' + icon('calendar', 'sm') + '</button></div>' +
       '<textarea class="desc big" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
       '<div class="saved">' + icon('check', 'sm') + 'Alle Änderungen gespeichert</div></div>' +
+      '<div class="card-w"><h3>' + icon('link', 'sm') + L('Links & Anhänge', 'Links & attachments') + '</h3>' + taskLinksHtml(t) + '</div>' +
       '<div class="card-w"><h3>' + icon('sub', 'sm') + 'Unteraufgaben<span class="n">' + subs.filter(isDone).length + '/' + subs.length + ' erledigt</span></h3>' +
       '<p class="hint" style="margin:-6px 0 10px">Unteraufgaben sind vollwertige Aufgaben mit eigener Person, Fälligkeit und Status.</p>' + subsList + '</div>' +
       '</div><div class="dt-col">' + timeCardHtml(t) +
@@ -249,6 +250,7 @@ function renderPeek() {
     '<div class="props">' + props + '</div>' + timeCardHtml(t, true) + smart +
     '<div class="divider"></div>' +
     '<textarea class="desc" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
+    '<div class="section-label">' + icon('link', 'sm') + L('Links & Anhänge', 'Links & attachments') + '</div>' + taskLinksHtml(t) +
     '<div class="section-label">' + icon('sub', 'sm') + 'Unteraufgaben' + (subs.length ? ' <span class="faint">' + subs.filter(isDone).length + '/' + subs.length + '</span>' : '') + '</div>' + subsList +
     '<div class="section-label">' + icon('msg', 'sm') + 'Kommentare</div>' + commentsList + commentForm + foot +
     '</div></div>' + peekBar());
@@ -290,7 +292,17 @@ ON.input['peek-title'] = el => {
   const card = $('[data-drag-id="' + S.peekId + '"] .card-title span');
   if (card) card.textContent = el.value;
 };
-ON.input['peek-desc'] = el => { autosize(el); saveQuiet(S.peekId, { description: el.value }); };
+ON.input['peek-desc'] = el => {
+  autosize(el);
+  saveQuiet(S.peekId, { description: el.value });
+  // a pasted Gmail or document link shows as a chip right away
+  const box = $('#peek .lk-desc');
+  if (box) box.innerHTML = descLinksHtml(task(S.peekId));
+};
+/** The task's links, then the links found in its description (Gmail threads as "Mail öffnen"). */
+function taskLinksHtml(t) {
+  return '<div class="lk-row">' + linksHtml(t.links, 'task', t.id, true) + '</div><div class="lk-row lk-desc">' + descLinksHtml(t) + '</div>';
+}
 
 ON.keydown['add-subtask'] = (el, e) => {
   if (e.key !== 'Enter' || !el.value.trim()) return;

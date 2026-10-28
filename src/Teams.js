@@ -183,6 +183,17 @@ const Projects = {
     return Db.all('Projects').map(Projects.out_);
   },
 
+  /** The links in the project banner (Databricks, Snowflake, Drive …): everybody who may change the project. */
+  setLinks(p) {
+    const ctx = Access.context(Auth.currentUser());
+    return Db.tx(() => {
+      const project = Db.get('Projects', p.projectId);
+      if (!project || !(ctx.admin || ctx.projectIds[project.id])) throw new Error('Projekt nicht gefunden.');
+      if (!Access.canManageProject(project, ctx)) throw new Error('Keine Berechtigung für dieses Projekt.');
+      return Projects.out_(Db.update('Projects', project.id, { links: Shared.cleanLinks(p.links) }));
+    });
+  },
+
   /** Project leads, team leads and admins appoint and demote project leads; one lead always stays. */
   setRole(p) {
     const ctx = Access.context(Auth.currentUser());

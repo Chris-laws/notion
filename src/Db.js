@@ -23,14 +23,14 @@ const SCHEMA = {
     json: ['members', 'leads'],
   },
   Projects: {
-    cols: ['id', 'teamId', 'name', 'icon', 'color', 'description', 'status', 'members', 'startDate', 'endDate', 'createdBy', 'createdAt', 'leads'],
-    json: ['members', 'leads'],
+    cols: ['id', 'teamId', 'name', 'icon', 'color', 'description', 'status', 'members', 'startDate', 'endDate', 'createdBy', 'createdAt', 'leads', 'links'],
+    json: ['members', 'leads', 'links'],
   },
   Tasks: {
     cols: ['id', 'title', 'description', 'status', 'priority', 'projectId', 'teams', 'assignees', 'tags',
       'startDate', 'dueDate', 'estimate', 'parentId', 'recurrence', 'sort', 'createdBy', 'createdAt',
-      'updatedAt', 'completedAt', 'planDate', 'planStart', 'progress', 'spent', 'timerStart'],
-    json: ['teams', 'assignees', 'tags'],
+      'updatedAt', 'completedAt', 'planDate', 'planStart', 'progress', 'spent', 'timerStart', 'links'],
+    json: ['teams', 'assignees', 'tags', 'links'],
     num: ['estimate', 'sort', 'planStart', 'progress', 'spent'],
   },
   Comments: {

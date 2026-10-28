@@ -1639,6 +1639,23 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .pt .md-task { background: var(--success-soft); color: var(--success-text); }
 .pt .md-mk { background: var(--bg); color: var(--accent-text); }
 .jf-meet { flex: none; }
+/* links: chips with the icon of their kind */
+.lk-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.lk-row:empty { display: none; }
+.lk { display: inline-flex; align-items: center; border-radius: 999px; background: var(--bg-hover); max-width: 100%; }
+.lk-a { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--text); min-width: 0; }
+.lk-a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.lk-a:hover { background: var(--bg-active, var(--border)); }
+.lk-a.k-mail { color: var(--danger-text, #b3070f); }
+.lk-a.k-snowflake { color: #1a6fb0; }
+.lk-a.k-databricks { color: #c2410c; }
+.lk-x { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: 2px; border-radius: 50%; color: var(--text-2); }
+.lk-x:hover { background: var(--border); color: var(--text); }
+.lk-add { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1px dashed var(--border-strong); color: var(--text-2); }
+.lk-add:hover { color: var(--accent-text); border-color: var(--accent); }
+.pj-links .lk { background: rgba(255, 255, 255, .92); }
+.pj-links .lk-a { color: #1d2433; }
+.pj-links .lk-add { color: inherit; border-color: currentColor; opacity: .9; }
 .jf-groups { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; }
 .blk-p.blk-ev { background: var(--accent-soft); color: var(--accent-text); border-left-color: var(--accent); box-shadow: none; cursor: pointer; }
 .pe-no { font-weight: 700; color: var(--accent-text); }

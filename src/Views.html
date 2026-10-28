@@ -1618,6 +1618,7 @@ function projectPage(p) {
   return '<div class="page wide"><div class="pj-banner ' + inkClass(projectColorKey(p)) + '" style="--pc:' + pc + '">' +
     '<div class="pj-l">' + mark(p, 'lg') + '<div><div class="pj-t"><h1>' + esc(p.name) + '</h1><span class="pb-chip">' + esc(st.label) + '</span></div>' +
     '<p>' + (p.description ? linkify(p.description) : 'Keine Beschreibung.') + '</p>' +
+    ((p.links || []).length || canEditProject(p) ? '<div class="lk-row pj-links">' + linksHtml(p.links, 'project', p.id, canEditProject(p)) + '</div>' : '') +
     '<div class="pj-m">' + (t ? '<button data-action="nav" data-view="team" data-id="' + esc(t.id) + '">' + mark(t) + esc(t.name) + '</button>' : '') +
     (p.startDate || p.endDate ? '<span>' + icon('calendar', 'sm') + esc(fmtRange(p.startDate || p.endDate, p.endDate)) + '</span>' : '') +
     '<button class="pj-people" data-action="project-members" data-id="' + esc(p.id) + '" title="Personen hinzufügen oder entfernen">' + avatars(members, 5) +

@@ -619,6 +619,59 @@ A['pp-remove'] = el => {
 function collectPeople(v, name) {
   return String(v[name] || '').split(/[,;\s]+/).filter(Boolean);
 }
+/* Links (tasks and the project banner): one chip per link with the icon of its kind, opens in a new tab */
+const LINK_KINDS = () => ({ mail: ['mail', L('Mail öffnen', 'Open mail')], drive: ['folder', 'Google Drive'], meet: ['video', 'Google Meet'],
+  snowflake: ['snow', 'Snowflake'], databricks: ['db', 'Databricks'], web: ['link', ''] });
+function linkChip(l, rm) {
+  const kind = Shared.linkKind(l.url);
+  const k = LINK_KINDS()[kind];
+  const label = l.title || k[1] || String(l.url).replace(/^https?:\/\//, '').split(/[/?#]/)[0];
+  return '<span class="lk"><a class="lk-a k-' + kind + '" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer" title="' + esc(l.url) + '">' + icon(k[0], 'sm') + '<span>' + esc(label) + '</span></a>' +
+    (rm ? '<button type="button" class="lk-x" data-action="link-rm" data-kind="' + rm.kind + '" data-id="' + esc(rm.id) + '" data-i="' + rm.i + '"' +
+      ' title="' + esc(L('Link entfernen', 'Remove link')) + '" aria-label="' + esc(L('Link entfernen: ', 'Remove link: ') + label) + '">' + icon('x', 'sm') + '</button>' : '') + '</span>';
+}
+/** kind: 'task' | 'project'; edit: may add and remove. */
+function linksHtml(links, kind, id, edit) {
+  return (links || []).map((l, i) => linkChip(l, edit ? { kind: kind, id: id, i: i } : null)).join('') +
+    (edit ? '<button type="button" class="lk-add" data-action="link-add" data-kind="' + kind + '" data-id="' + esc(id) + '">' + icon('plus', 'sm') + L('Link', 'Link') + '</button>' : '');
+}
+/** Links written into a task description (Gmail threads, documents …) that are not in its link list yet. */
+function descLinksHtml(t) {
+  const known = (t.links || []).map(l => l.url);
+  return Shared.findLinks(t.description).filter(u => known.indexOf(u) < 0).slice(0, 12).map(u => linkChip({ title: '', url: u })).join('');
+}
+const linkOwner = (kind, id) => (kind === 'task' ? task(id) : project(id));
+function saveLinks(kind, id, links) {
+  const o = linkOwner(kind, id);
+  const before = o.links;
+  o.links = links;
+  render();
+  const req = kind === 'task' ? call('tasks.save', { id: id, links: links }).then(changed => applyTasks(changed))
+    : call('projects.setLinks', { projectId: id, links: links }).then(saved => Object.assign(o, saved));
+  return req.then(() => render()).catch(err => { o.links = before; render(); fail(err); });
+}
+A['link-add'] = el => {
+  const kind = el.dataset.kind, id = el.dataset.id;
+  openModal({
+    title: L('Link hinzufügen', 'Add link'),
+    body: field(L('Adresse', 'Address'), '<input class="input" name="url" required placeholder="https://…" autocomplete="off">') +
+      field(L('Titel (optional)', 'Title (optional)'), '<input class="input" name="title" maxlength="120" placeholder="' + esc(L('z. B. Dashboard, Notebook, Mailverlauf', 'e.g. dashboard, notebook, mail thread')) + '">') +
+      '<p class="hint">' + esc(L('Snowflake, Databricks, Google Drive, Gmail-Verläufe oder jede andere Webseite. Für einen Mailverlauf die Adresse der Mail in Gmail kopieren.',
+        'Snowflake, Databricks, Google Drive, Gmail threads or any other web page. For a mail thread copy the address of the mail in Gmail.')) + '</p>',
+    submitLabel: L('Hinzufügen', 'Add'),
+    onSubmit: v => {
+      const add = Shared.cleanLinks([{ title: v.title, url: v.url }]);
+      if (!add.length) { toast(L('Bitte eine Web- oder Mailadresse angeben.', 'Please enter a web or mail address.')); return false; }
+      const o = linkOwner(kind, id);
+      return saveLinks(kind, id, Shared.cleanLinks((o.links || []).concat(add)));
+    },
+  });
+};
+A['link-rm'] = el => {
+  const o = linkOwner(el.dataset.kind, el.dataset.id);
+  if (o) saveLinks(el.dataset.kind, el.dataset.id, (o.links || []).filter((_, i) => i !== Number(el.dataset.i)));
+};
+
 function selectField(name, options, value) {
   return '<select class="select" name="' + name + '">' + options.map(o =>
     '<option value="' + esc(o.key) + '"' + (o.key === value ? ' selected' : '') + '>' + esc(o.label) + '</option>').join('') + '</select>';

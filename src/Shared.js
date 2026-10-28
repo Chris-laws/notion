@@ -367,6 +367,40 @@ function SharedFactory() {
   const PROJECT_COLORS = ['default', 'gray'].concat(PROJECT_PALETTE);
 
   /** Colour -> project name for the projects of a team (except one), so no colour is used twice in a team. */
+  // ---------------------------------------------------------------- links
+  const LINK_RE = /(?:https?:\/\/|mailto:)[^\s<>"']+/g;
+  /** What a link points to, for its icon and label: mail (Gmail, mailto), drive, meet, snowflake, databricks or web. */
+  function linkKind(url) {
+    const u = String(url || '').toLowerCase();
+    const host = (/^https?:\/\/([^/?#]+)/.exec(u) || ['', ''])[1];
+    if (u.indexOf('mailto:') === 0 || host === 'mail.google.com') return 'mail';
+    if (/^(drive|docs|sheets|slides)\.google\.com$/.test(host)) return 'drive';
+    if (host === 'meet.google.com') return 'meet';
+    if (/(^|\.)(snowflakecomputing\.com|snowflake\.com)$/.test(host)) return 'snowflake';
+    if (/(^|\.)(databricks\.com|azuredatabricks\.net)$/.test(host)) return 'databricks';
+    return 'web';
+  }
+  /** Links as stored: [{ title, url }], only http, https and mailto, each address once, at most 30. */
+  function cleanLinks(list) {
+    const out = [];
+    (Array.isArray(list) ? list : []).forEach(l => {
+      const o = typeof l === 'string' ? { url: l } : l || {};
+      const url = String(o.url || '').trim();
+      if (url.length > 2000 || !/^(https?:\/\/|mailto:)[^\s<>"']+$/.test(url) || out.some(x => x.url === url)) return;
+      out.push({ title: String(o.title || '').replace(/\s+/g, ' ').trim().slice(0, 120), url: url });
+    });
+    return out.slice(0, 30);
+  }
+  /** The web and mail addresses in a text (without a full stop or bracket after them), each once. */
+  function findLinks(text) {
+    const out = [];
+    (String(text || '').match(LINK_RE) || []).forEach(m => {
+      const url = m.replace(/[.,;:!?)]+$/, '');
+      if (out.indexOf(url) < 0) out.push(url);
+    });
+    return out;
+  }
+
   /** Leads of a team: the list, or the one lead of teams from before there were several. */
   function teamLeads(t) {
     return (t && Array.isArray(t.leads) && t.leads.length ? t.leads : [t && t.lead]).filter(Boolean);
@@ -613,7 +647,7 @@ function SharedFactory() {
 
   return {
     jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoCarry, protoMerge, protoDiff,
-    teamLeads, projectLeads, QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
+    linkKind, cleanLinks, findLinks, teamLeads, projectLeads, QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,
     endOfMonth, nextOccurrence, parse, norm,

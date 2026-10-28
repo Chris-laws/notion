@@ -35,6 +35,7 @@ const ROUTES = {
   'teams.remove': p => Teams.remove(p.id),
   'teams.setRole': p => Teams.setRole(p),
   'projects.setRole': p => Projects.setRole(p),
+  'projects.setLinks': p => Projects.setLinks(p),
   'projects.save': p => Projects.save(p),
   'projects.remove': p => Projects.remove(p.id),
   'users.save': p => Users.save(p),
