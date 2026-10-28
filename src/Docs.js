@@ -78,7 +78,7 @@ const Docs = {
 
   get(p) {
     const x = Docs.doc_(p.id, Docs.ctx_(), false);
-    return Object.assign(Docs.meta_(x.doc), { content: Docs.read_(x.doc), canWrite: Access.canManageProject(x.project, Docs.ctx_()) });
+    return Object.assign(Docs.meta_(x.doc), { content: Docs.live_(Docs.read_(x.doc)), canWrite: Access.canManageProject(x.project, Docs.ctx_()) });
   },
 
   /**
@@ -97,6 +97,45 @@ const Docs = {
     return r.conflict ? r : Object.assign({}, r, { jf: Jf.overview_(ctx, '') });
   },
 
+  /**
+   * Task links of minutes as they are now (on reading and saving): a link to a deleted task is dropped, so the
+   * topic or line can become a task again; an action whose task is done counts as done. Tasks the reader may
+   * not see still exist here, so their links stay.
+   */
+  live_(text) {
+    const m = Shared.protoFromText(text);
+    if (!m) return text;
+    let changed = false;
+    const check = o => {
+      const t = o.taskId ? Db.get('Tasks', o.taskId) : null;
+      if (o.taskId && !t) { o.taskId = ''; changed = true; }
+      return t;
+    };
+    m.topics.forEach(tp => {
+      check(tp);
+      tp.items.forEach(i => {
+        const t = check(i);
+        if (t && t.status === 'done' && i.type === 'A' && !i.done) { i.done = true; changed = true; }
+      });
+    });
+    return changed ? Shared.protoToText(m) : text;
+  },
+  /** Carried-over actions as they are now: done tasks are no longer open, deleted ones lose the link. */
+  liveItems_(items) {
+    return (items || []).map(i => {
+      const t = i.taskId ? Db.get('Tasks', i.taskId) : null;
+      if (t && t.status === 'done') return null;
+      return i.taskId && !t ? Object.assign({}, i, { taskId: '' }) : i;
+    }).filter(Boolean);
+  },
+  openCount_(d) {
+    const c = Docs.liveCarry_(d);
+    return c.open.length + c.pinned.reduce((n, t) => n + t.items.length, 0);
+  },
+  liveCarry_(d) {
+    return { open: Docs.liveItems_(d.openItems), pinned: (d.pinnedTopics || []).map(t => Object.assign({}, t, { items: Docs.liveItems_(t.items) })) };
+  },
+
   /** A sheet cell holds 50,000 characters (the journal keeps the row once more): longer texts go to Drive right away. */
   FAST_MAX: 40000,
   fast_(text) { return String(text).length <= Docs.FAST_MAX; },
@@ -106,6 +145,7 @@ const Docs = {
 
   /** New document row (inside a transaction); the file follows with docs.flush. folder(): the Drive folder id. */
   create_(project, v, extra, folder, fileTitle) {
+    v = { title: v.title, content: Docs.live_(v.content) };
     const fast = Docs.fast_(v.content);
     const fileId = fast ? '' : Gdrive.createFile(folder(), Docs.fileName_(fileTitle || v.title, extra.date), v.content);
     const now = new Date().toISOString();
@@ -168,7 +208,8 @@ const Docs = {
   /** Writes a new version unless someone saved after `base` (inside a transaction). */
   update_(x, v, base, baseContent) {
     const doc = x.doc;
-    const before = Docs.read_(doc);
+    const before = Docs.live_(Docs.read_(doc));
+    v = { title: v.title, content: Docs.live_(v.content) };
     let merged = false;
     if (base !== Number(doc.version)) {
       // minutes saved by someone else meanwhile: merge topic by topic and line by line when nobody
@@ -343,12 +384,12 @@ const Jf = {
     return {
       series: Db.all('JfSeries').filter(s => Jf.active_(s) && sees(s.projectId)).map(s => Object.assign({}, s, {
         carryFrom: last[s.id] ? last[s.id].date : '',
-        carry: { open: last[s.id] ? last[s.id].openItems || [] : [], pinned: last[s.id] ? last[s.id].pinnedTopics || [] : [] } })),
+        carry: last[s.id] ? Docs.liveCarry_(last[s.id]) : { open: [], pinned: [] } })),
       minutes: docs.map(d => {
         const m = Docs.meta_(d);
         return { id: m.id, projectId: m.projectId, seriesId: m.seriesId, date: m.date, title: m.title, version: m.version,
           updatedAt: m.updatedAt, updatedBy: m.updatedBy, lockBy: m.lockBy, people: m.people,
-          openCount: (d.openItems || []).length + (d.pinnedTopics || []).reduce((n, t) => n + (t.items || []).length, 0), pinnedCount: (d.pinnedTopics || []).length };
+          openCount: Docs.openCount_(d), pinnedCount: (d.pinnedTopics || []).length };
       }).sort((a, b) => (a.date < b.date ? 1 : -1)),
     };
   },
@@ -411,12 +452,12 @@ const Jf = {
     const x = Jf.series_(p.seriesId, ctx, false);
     const canWrite = Access.canManageProject(x.project, ctx);
     const found = Db.all('Docs').find(d => d.seriesId === x.series.id && d.date === p.date);
-    if (found) return Object.assign(Docs.meta_(found), { content: Docs.read_(found), canWrite: canWrite });
+    if (found) return Object.assign(Docs.meta_(found), { content: Docs.live_(Docs.read_(found)), canWrite: canWrite });
     const prev = Db.all('Docs').filter(d => d.seriesId === x.series.id && d.date < p.date).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
     return {
       id: '', draft: true, kind: 'jf', projectId: x.project.id, seriesId: x.series.id, date: p.date, version: 0,
       title: Jf.title_(x.series, p.date), canWrite: canWrite,
-      content: Jf.template_(x.series, p.date, prev ? { open: prev.openItems || [], pinned: prev.pinnedTopics || [] } : null, ctx.email),
+      content: Jf.template_(x.series, p.date, prev ? Docs.liveCarry_(prev) : null, ctx.email),
     };
   },
   title_(s, date) { return s.title + ' · ' + date; },
@@ -464,7 +505,7 @@ const Jf = {
   makeTasksTx_(p, ctx) {
     const target = Docs.project_(p.projectId, ctx, true);
     const x = p.docId ? Docs.doc_(p.docId, ctx, true) : null;
-    const model = x ? Shared.protoFromText(Docs.read_(x.doc)) : null;
+    const model = x ? Shared.protoFromText(Docs.live_(Docs.read_(x.doc))) : null;
     const topic = model ? model.topics.find(t => t.id === p.topicId) : null;
     if (x && !topic) throw new Error('Thema nicht gefunden.');
     const items = (Array.isArray(p.items) ? p.items : []).slice(0, 50);

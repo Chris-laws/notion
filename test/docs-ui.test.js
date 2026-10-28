@@ -353,3 +353,21 @@ describe('opening a jour fixe (v58)', () => {
     assert.deepEqual(calls().filter(c => c.indexOf(m.id) > 0), []);
   });
 });
+
+describe('minutes follow their tasks (v59)', () => {
+  test('deleting a task made from a line: the line offers "Als Aufgabe" again at once', async () => {
+    w.eval(`S.doc = null; S.protoEdit = null; S.projTab = 'jf'; go('project', ${JSON.stringify(pid)})`);
+    await until(() => $('.jf-active .jf-row'));
+    const m = w.eval(`jfData().minutes.find(x => x.projectId === ${JSON.stringify(pid)} && x.openCount >= 0)`);
+    await w.eval(`jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
+    await until(() => $('.doc-view .pt'));
+    const linked = $$('.pt .pt-line .md-task');
+    assert.ok(linked.length, 'a line with a task');
+    const id = linked[0].dataset.id;
+    const before = $$('.pt .pt-line .md-task').length;
+    w.eval(`deleteWithUndo(task(${JSON.stringify(id)}))`);
+    await until(() => $$('.pt .pt-line .md-task').length < before);
+    assert.equal($('.pt .md-task[data-id="' + id + '"]'), null, 'no link to the deleted task');
+    assert.ok($$('.pt [data-action="proto-task"]').length, 'the line can become a task again');
+  });
+});

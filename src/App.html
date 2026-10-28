@@ -444,8 +444,10 @@ function applyTasks(list) {
     if (i >= 0) S.tasks[i] = t; else S.tasks.push(t);
   });
 }
-function dropTasks(ids) {
+function dropTasks(ids, deleted) {
   S.tasks = S.tasks.filter(t => ids.indexOf(t.id) < 0);
+  // minutes that link these tasks show them as tasks no more (deleted) or ask the server again
+  if (ids.length) jfTasksGone(ids, !!deleted);
 }
 /** Optimistic update; reverts on error. */
 function patchTask(id, patch, opts) {
@@ -514,7 +516,7 @@ function deleteWithUndo(t) {
   const ids = [t.id];
   for (let i = 0; i < ids.length; i++) S.tasks.forEach(x => { if (x.parentId === ids[i] && ids.indexOf(x.id) < 0) ids.push(x.id); });
   const removed = S.tasks.filter(x => ids.indexOf(x.id) >= 0);
-  dropTasks(ids);
+  dropTasks(ids, true);
   if (ids.indexOf(S.peekId) >= 0) { S.peekId = null; S.peekFull = false; }
   render();
   const send = () => {
@@ -527,6 +529,7 @@ function deleteWithUndo(t) {
     clearTimeout(timer);
     delete PENDING_DELETES[t.id];
     S.tasks = S.tasks.concat(removed);
+    ids.forEach(id => { delete JF_DEAD[id]; });
     render();
   } } });
 }
@@ -838,7 +841,11 @@ function refresh() {
     const joined = (res.teams || []).filter(t => !known[t.id] && teamMembers(t).indexOf(S.me.email) >= 0);
     // Only redraw when someone else actually changed something.
     const before = JSON.stringify([S.tasks, S.teams, S.projects, S.jf]);
+    const now = {};
+    res.tasks.forEach(t => { now[t.id] = true; });
+    const gone = S.tasks.filter(t => !now[t.id] && !PENDING[t.id]).map(t => t.id);
     S.tasks = res.tasks;
+    if (gone.length) jfTasksGone(gone, false);
     if (res.teams) Object.assign(S, { teams: res.teams, projects: res.projects, users: res.users, jf: res.jf });
     S.tasksVer = res.ver;
     joined.forEach(t => toast(L('Du wurdest zum Team „' + t.name + '“ hinzugefügt', 'You were added to the team “' + t.name + '”')));

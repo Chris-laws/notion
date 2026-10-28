@@ -188,6 +188,18 @@ function jfOpenRemote(seriesId, date) {
   return call('jf.meeting', { seriesId: seriesId, date: date, lang: LANG }).then(m => { S.jfOpening = false; jfShow(m); })
     .catch(err => { S.jfOpening = false; fail(err); });
 }
+/* tasks this person deleted: links to them count as none (the server drops them on the next read too) */
+const JF_DEAD = {};
+const jfLive = id => (id && !JF_DEAD[id] ? id : '');
+/** Tasks left the page: deleted here (links drop at once) or elsewhere (cached texts are read again). */
+function jfTasksGone(ids, deleted) {
+  if (deleted) ids.forEach(id => { JF_DEAD[id] = true; });
+  Object.keys(DOC_TEXT).forEach(k => { delete DOC_TEXT[k]; });
+  const d = S.doc;
+  if (d && d.id && typeof d.content === 'string' && !S.protoEdit && ids.some(id => d.content.indexOf(id) >= 0)) {
+    docFetch(d.id).then(full => { if (S.doc && S.doc.id === full.id && !S.protoEdit) { S.doc = full; render({ peek: false }); } }).catch(() => {});
+  }
+}
 /* texts of saved minutes the page has seen (by id and version): opening them again needs no call */
 const DOC_TEXT = {};
 const DOC_LOADING = {};
@@ -262,12 +274,12 @@ function jfModal(s, projectId, teamId) {
 function protoTable(m, o) {
   const rows = [];
   m.topics.forEach((t, k) => {
-    const ttask = t.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(t.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
+    const ttask = jfLive(t.taskId) ? ' <button class="md-task" data-action="open-task" data-id="' + esc(t.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
       : o.actions ? ' <button class="md-mk" data-action="proto-topic-task" data-t="' + k + '">' + icon('plus', 'sm') + L('Thema als Aufgabe', 'Topic as task') + '</button>' : '';
     rows.push('<tr class="pt-topic"><td>' + (k + 1) + '.</td><td>' + (t.pinned ? '<span class="pt-pin"' + labelled(L('Verankert: kommt ins nächste Protokoll', 'Anchored: carried to the next minutes')) + '>' + icon('pin', 'sm') + '</span>' : '') +
       '</td><td><b>' + linkify(t.title) + '</b>' + ttask + '</td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
     t.items.forEach((i, n) => {
-      const task = i.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
+      const task = jfLive(i.taskId) ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
         : o.actions && i.type === 'A' && !i.done ? ' <button class="md-mk" data-action="proto-task" data-t="' + k + '" data-i="' + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
       rows.push('<tr class="pt-line' + (i.done ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
         '<td>' + linkify(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
@@ -409,7 +421,7 @@ function protoLine(i, k, n) {
 /** In the form: "as task" for a topic or an action line, or the link to the task made from it. */
 function peTaskBtn(x, k, n) {
   if (!x) return '<span></span>';
-  if (x.taskId) return '<button type="button" class="icon-btn pe-has" data-action="open-task" data-id="' + esc(x.taskId) + '"' + labelled(L('Aufgabe öffnen', 'Open task')) + '>' + icon('checksq', 'sm') + '</button>';
+  if (jfLive(x.taskId)) return '<button type="button" class="icon-btn pe-has" data-action="open-task" data-id="' + esc(x.taskId) + '"' + labelled(L('Aufgabe öffnen', 'Open task')) + '>' + icon('checksq', 'sm') + '</button>';
   return '<button type="button" class="icon-btn" data-action="pe-task" data-t="' + k + '"' + (n === undefined ? '' : ' data-i="' + n + '"') +
     labelled(n === undefined ? L('Thema als Aufgabe (mit Unteraufgaben)', 'Topic as task (with sub-tasks)') : L('Als Aufgabe', 'As task')) + '>' + icon('plus', 'sm') + '</button>';
 }
@@ -558,7 +570,7 @@ function jfPersonField(name, people, value) {
 }
 /** One line of the topic in the form: tick it to make it a sub-task; text, person and date can still be changed. */
 function jfMaskLine(i, people) {
-  const has = !!i.taskId;
+  const has = !!jfLive(i.taskId);
   const on = !has && !i.done && !!String(i.text).trim();
   return '<div class="jm-line' + (has ? ' has' : '') + '"><label class="jm-pick"><input type="checkbox" name="pick" value="' + esc(i.id) + '"' + (on ? ' checked' : '') + (has ? ' disabled' : '') +
     ariaL(L('Als Unteraufgabe übernehmen', 'Take as sub-task')) + '><span class="pt-type t-' + i.type + '">' + i.type + '</span></label>' +
