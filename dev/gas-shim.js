@@ -155,6 +155,7 @@
   root.Logger = { log: function () { if (!root.__GAS_QUIET__) console.log.apply(console, arguments); } };
   root.UrlFetchApp = {
     fetch(url, opts) {
+      if (/^https:\/\/www\.googleapis\.com\/(upload\/)?drive\/v3\/files/.test(url)) return root.__driveRest(url, opts || {});
       meter('fetch');
       if (root.__GAS_FETCH__) return root.__GAS_FETCH__(url, opts);
       throw new Error('Kein Netzwerk in der Vorschau');
@@ -208,9 +209,55 @@
     this.isTrashed = () => trashed;
     drive[this.id] = this;
   }
+  const tops = [];
   root.DriveApp = {
-    createFolder: n => { meter('driveWrite'); return new DFolder(n, null); },
+    createFolder: n => { meter('driveWrite'); const f = new DFolder(n, null); tops.push(f); return f; },
     getFolderById: id => { meter('driveRead'); if (!(drive[id] instanceof DFolder)) throw new Error('No item with the given ID could be found.'); return drive[id]; },
     getFileById: id => { meter('driveRead'); if (!(drive[id] instanceof DFile)) throw new Error('No item with the given ID could be found.'); return drive[id]; },
+  };
+  root.ScriptApp = { getOAuthToken: () => 'test-token' };
+  // Drive REST API (v3) on top of the in-memory Drive: what Drive.js calls with UrlFetchApp
+  const reply = (code, body) => ({ getResponseCode: () => code, getContentText: () => (typeof body === 'string' ? body : JSON.stringify(body)) });
+  const listOf = it => { const a = []; while (it.hasNext()) a.push(it.next()); return a; };
+  root.__driveRest = (url, opts) => {
+    if (root.__DRIVE_DENIED__) return reply(403, { error: { message: 'Insufficient Permission' } });
+    // no URL class in the test context: path and query parameters by hand
+    const query = {};
+    String(url.split('?')[1] || '').split('&').filter(Boolean).forEach(kv => { const i = kv.indexOf('='); query[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, ' ')); });
+    const u = { pathname: url.split('?')[0], searchParams: { get: k => (k in query ? query[k] : null) } };
+    const method = String(opts.method || 'get').toLowerCase();
+    const id = decodeURIComponent((/\/files\/([^/?]+)/.exec(u.pathname) || [])[1] || '');
+    const item = id && drive[id];
+    if (id && !item) return reply(404, { error: { message: 'File not found' } });
+    if (!id && method === 'get') {
+      meter('driveRead');
+      const q = u.searchParams.get('q') || '';
+      const name = ((/name = '((?:[^'\\]|\\.)*)'/.exec(q) || [])[1] || '').replace(/\\(.)/g, '$1');
+      const parent = (/'([^']+)' in parents/.exec(q) || [])[1];
+      const pool = parent ? (drive[parent] ? listOf(drive[parent].getFolders()) : []) : tops.filter(f => !f.isTrashed());
+      return reply(200, { files: pool.filter(f => f.getName() === name).map(f => ({ id: f.getId() })) });
+    }
+    if (!id && method === 'post' && /uploadType=multipart/.test(url)) {
+      const parts = String(opts.payload).split(/\r\n--[^\r\n]+/);
+      const body = part => part.split('\r\n\r\n').slice(1).join('\r\n\r\n');
+      const meta = JSON.parse(body(parts[0]));
+      return reply(200, { id: drive[meta.parents[0]].createFile(meta.name, body(parts[1]), meta.mimeType).getId() });
+    }
+    if (!id && method === 'post') {
+      const meta = JSON.parse(opts.payload);
+      const f = meta.parents ? drive[meta.parents[0]].createFolder(meta.name) : root.DriveApp.createFolder(meta.name);
+      return reply(200, { id: f.getId() });
+    }
+    if (method === 'get' && u.searchParams.get('alt') === 'media') { meter('driveRead'); return reply(200, item.getBlob().getDataAsString()); }
+    if (method === 'get') { meter('driveRead'); return reply(200, { id: id, trashed: item.isTrashed() }); }
+    if (method === 'patch' && /uploadType=media/.test(url)) { item.setContent(opts.payload); return reply(200, { id: id }); }
+    if (method === 'patch') {
+      meter('driveWrite');
+      const meta = JSON.parse(opts.payload);
+      if (meta.name !== undefined) item.setName(meta.name);
+      if (meta.trashed !== undefined) item.setTrashed(meta.trashed);
+      return reply(200, { id: id });
+    }
+    return reply(400, { error: { message: 'unsupported' } });
   };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

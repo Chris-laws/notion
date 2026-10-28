@@ -35,6 +35,8 @@ const Docs = {
     return Object.assign({}, d, { lockBy: locked ? d.lockBy : '', lockUntil: locked ? d.lockUntil : '' });
   },
   preview_(text) {
+    const minutes = Shared.protoFromText(text);
+    if (minutes) return minutes.topics.map(t => t.title).filter(Boolean).join(' · ').slice(0, 280);
     return String(text).replace(/[#*_>`|[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
   },
   fileName_(title, date) {
@@ -65,18 +67,19 @@ const Docs = {
     const v = Docs.check_(p.title, p.content);
     return Db.tx(() => {
       if (p.id) return Docs.update_(Docs.doc_(p.id, ctx, true), v, Number(p.baseVersion));
+      if (p.seriesId) return Jf.createMinutes_(p, v, ctx);
       const project = Docs.project_(p.projectId, ctx, true);
       return Docs.create_(project, v, { kind: 'doc' }, Store.documents(project));
     });
   },
 
   /** New document file plus its row (inside a transaction); fileTitle: name of the file if not the title. */
-  create_(project, v, extra, folder, fileTitle) {
-    const file = folder.createFile(Docs.fileName_(fileTitle || v.title, extra.date), v.content, 'text/markdown');
+  create_(project, v, extra, folderId, fileTitle) {
+    const fileId = Gdrive.createFile(folderId, Docs.fileName_(fileTitle || v.title, extra.date), v.content);
     const now = new Date().toISOString();
     const me = Auth.email();
     return Db.insert('Docs', Object.assign({
-      id: Util.uid('dc_'), projectId: project.id, kind: 'doc', seriesId: '', date: '', title: v.title, fileId: file.getId(),
+      id: Util.uid('dc_'), projectId: project.id, kind: 'doc', seriesId: '', date: '', title: v.title, fileId: fileId,
       version: 1, size: v.content.length, preview: Docs.preview_(v.content), updatedAt: now, updatedBy: me, createdBy: me, createdAt: now,
       lockBy: '', lockUntil: '',
     }, extra));
@@ -85,15 +88,14 @@ const Docs = {
   /** Writes a new version unless someone saved after `base` (inside a transaction). */
   update_(x, v, base) {
     const doc = x.doc;
-    const file = DriveApp.getFileById(doc.fileId);
-    const before = file.getBlob().getDataAsString();
+    const before = Gdrive.read(doc.fileId);
     if (base !== Number(doc.version)) {
       return { conflict: true, current: Object.assign(Docs.meta_(doc), { content: before }) };
     }
     Docs.keepVersion_(doc, before, x.project);
-    file.setContent(v.content);
+    Gdrive.write(doc.fileId, v.content);
     try {
-      if (v.title !== doc.title && doc.kind !== 'jf') file.setName(Docs.fileName_(v.title, doc.date));
+      if (v.title !== doc.title && doc.kind !== 'jf') Gdrive.rename(doc.fileId, Docs.fileName_(v.title, doc.date));
       const me = Auth.email();
       return Db.update('Docs', doc.id, {
         title: v.title, version: Number(doc.version) + 1, size: v.content.length, preview: Docs.preview_(v.content),
@@ -101,15 +103,15 @@ const Docs = {
       });
     } catch (e) {
       // the database did not take the new version: the file goes back to what it was
-      file.setContent(before);
+      Gdrive.write(doc.fileId, before);
       throw e;
     }
   },
 
   /** Keeps the text of the current version as a file; only the last KEEP stay, older ones go to the trash. */
   keepVersion_(doc, text, project) {
-    const f = Store.versions(project).createFile(doc.id + '-v' + doc.version + '.md', text, 'text/markdown');
-    Db.insert('DocVersions', { id: Util.uid('dv_'), docId: doc.id, version: Number(doc.version), fileId: f.getId(), at: doc.updatedAt, by: doc.updatedBy });
+    const fileId = Gdrive.createFile(Store.versions(project), doc.id + '-v' + doc.version + '.md', text);
+    Db.insert('DocVersions', { id: Util.uid('dv_'), docId: doc.id, version: Number(doc.version), fileId: fileId, at: doc.updatedAt, by: doc.updatedBy });
     const all = Db.all('DocVersions').filter(r => r.docId === doc.id).sort((a, b) => b.version - a.version);
     all.slice(Docs.KEEP).forEach(r => { Store.trash(r.fileId); Db.remove('DocVersions', r.id); });
   },
@@ -163,7 +165,11 @@ const Docs = {
   },
 };
 
-/** Jour fixe: recurring meetings of a project with minutes from a template. */
+/**
+ * Jour fixe: recurring meetings of a project. Each meeting has structured minutes (header,
+ * numbered topics, lines of type I/A/B/N) stored like a document (see Shared.protoToText).
+ * Opening a meeting writes nothing: the file is created with the first "Übernehmen".
+ */
 const Jf = {
   RHYTHMS: ['weekly', 'biweekly', 'monthly'],
 
@@ -176,17 +182,20 @@ const Jf = {
     }
     return { series: s, project: project };
   },
+  active_(s) { return s.active === true || String(s.active).toLowerCase() === 'true'; },
 
+  /** Everything the tab shows, from the tables only (no Drive call): series, minutes, documents. */
   list(p) {
     const ctx = Docs.ctx_();
     const project = Docs.project_(p.projectId, ctx, false);
+    const docs = Db.all('Docs').filter(d => d.projectId === project.id).map(Docs.meta_);
     return {
       series: Db.all('JfSeries').filter(s => s.projectId === project.id && Jf.active_(s)),
-      meetings: Db.all('Docs').filter(d => d.projectId === project.id && d.kind === 'jf').map(Docs.meta_)
-        .sort((a, b) => (a.date < b.date ? 1 : -1)),
+      meetings: docs.filter(d => d.kind === 'jf').sort((a, b) => (a.date < b.date ? 1 : -1)),
+      docs: docs.filter(d => d.kind !== 'jf').sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+      canWrite: Access.canManageProject(project, ctx),
     };
   },
-  active_(s) { return s.active === true || String(s.active).toLowerCase() === 'true'; },
 
   saveSeries(p) {
     const ctx = Docs.ctx_();
@@ -236,65 +245,58 @@ const Jf = {
     return out;
   },
 
-  /** The minutes of one meeting: opened when they exist, otherwise made from the template (needs write rights). */
+  /**
+   * One meeting, ready to show in a single call: the saved minutes with their text, or (not saved yet)
+   * a draft from the template with the open action items of the last meeting. Writes nothing.
+   */
   meeting(p) {
     const ctx = Docs.ctx_();
     if (!Shared.isDate(p.date)) throw new Error('Bitte ein Datum angeben.');
-    return Db.tx(() => {
-      const x = Jf.series_(p.seriesId, ctx, false);
-      const found = Db.all('Docs').find(d => d.seriesId === x.series.id && d.date === p.date);
-      if (found) return Docs.meta_(found);
-      Jf.series_(p.seriesId, ctx, true);
-      const prev = Db.all('Docs').filter(d => d.seriesId === x.series.id && d.date < p.date).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-      const content = Jf.template_(x.series, p.date, prev ? Store.read(prev.fileId) : '', p.lang === 'en');
-      const v = { title: x.series.title + ' · ' + p.date, content: content };
-      return Docs.create_(x.project, v, { kind: 'jf', seriesId: x.series.id, date: p.date }, Store.series(x.series, x.project), x.series.title);
+    const x = Jf.series_(p.seriesId, ctx, false);
+    const canWrite = Access.canManageProject(x.project, ctx);
+    const found = Db.all('Docs').find(d => d.seriesId === x.series.id && d.date === p.date);
+    if (found) return Object.assign(Docs.meta_(found), { content: Store.read(found.fileId), canWrite: canWrite });
+    const prev = Db.all('Docs').filter(d => d.seriesId === x.series.id && d.date < p.date).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    return {
+      id: '', draft: true, kind: 'jf', projectId: x.project.id, seriesId: x.series.id, date: p.date, version: 0,
+      title: Jf.title_(x.series, p.date), canWrite: canWrite,
+      content: Jf.template_(x.series, p.date, prev ? Shared.protoFromText(Store.read(prev.fileId)) : null, ctx.email),
+    };
+  },
+  title_(s, date) { return s.title + ' · ' + date; },
+
+  /** Minutes template: header from the series; open action items of the last meeting as the first topic. */
+  template_(s, date, prev, me) {
+    const open = prev ? Shared.protoOpenActions(prev) : [];
+    return Shared.protoToText({
+      title: s.title, date: date, minuteTaker: me, present: s.attendees || [], absent: [],
+      topics: open.length ? [{ title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : [],
     });
   },
 
-  /** Minutes template; open action items of the last meeting are carried over. */
-  template_(s, date, prevText, en) {
-    const L = (de, e) => (en ? e : de);
-    const open = String(prevText).split('\n').filter(line => {
-      const a = Shared.parseActionItem(line);
-      return a && !a.done && a.text;
-    }).map(line => line.trim().replace(/^\*/, '-'));
-    const lines = [
-      '# ' + s.title + ' – ' + date,
-      '',
-      '**' + L('Zeit', 'Time') + ':** ' + s.time + ' (' + s.duration + ' ' + L('Min.', 'min') + ')' + (s.meetLink ? ' · **Meet:** ' + s.meetLink : ''),
-      '',
-      '## ' + L('Teilnehmende', 'Attendees'),
-    ].concat((s.attendees || []).map(e => '- @' + e), [
-      '',
-      '## Agenda',
-      '- ',
-      '',
-    ]);
-    if (open.length) lines.push('## ' + L('Offene Punkte vom letzten Jour Fixe', 'Open items from the last meeting'), ...open, '');
-    return lines.concat([
-      '## ' + L('Notizen', 'Notes'), '', '',
-      '## ' + L('Beschlüsse', 'Decisions'), '- ', '',
-      '## Action Items', '- [ ] ', '',
-    ]).join('\n');
+  /** First save of a meeting's minutes: the file in Jour Fixe/<series> and the row (inside the transaction of Docs.save). */
+  createMinutes_(p, v, ctx) {
+    const x = Jf.series_(p.seriesId, ctx, true);
+    if (!Shared.isDate(p.date)) throw new Error('Bitte ein Datum angeben.');
+    const found = Db.all('Docs').find(d => d.seriesId === x.series.id && d.date === p.date);
+    // saved by someone else in the meantime: never a second file, show theirs instead
+    if (found) return { conflict: true, current: Object.assign(Docs.meta_(found), { content: Store.read(found.fileId) }) };
+    return Docs.create_(x.project, { title: Jf.title_(x.series, p.date), content: v.content },
+      { kind: 'jf', seriesId: x.series.id, date: p.date }, Store.series(x.series, x.project), x.series.title);
   },
 
-  /** Turns one open action item of a document into a project task and links the line to it. */
+  /** Turns an action line (topic t, line i) of saved minutes into a project task and links the line to it. */
   actionToTask(p) {
     const ctx = Docs.ctx_();
     return Db.tx(() => {
       const x = Docs.doc_(p.docId, ctx, true);
-      const text = Store.read(x.doc.fileId);
-      const lines = text.split('\n');
-      const i = lines.findIndex(line => {
-        const a = Shared.parseActionItem(line);
-        return a && !a.taskId && a.text === String(p.text || '').trim();
-      });
-      if (i < 0) throw new Error('Punkt nicht gefunden oder schon als Aufgabe angelegt.');
-      const a = Shared.parseActionItem(lines[i]);
-      const task = Tasks.save({ title: a.text, projectId: x.project.id, assignees: a.assignee ? [a.assignee] : [ctx.email], dueDate: a.due })[0];
-      lines[i] = lines[i].replace(/\s+$/, '') + ' ⟶ #' + task.id;
-      const doc = Docs.update_(x, { title: x.doc.title, content: lines.join('\n') }, Number(x.doc.version));
+      const model = Shared.protoFromText(Store.read(x.doc.fileId));
+      const topic = model && model.topics[Number(p.topic)];
+      const line = topic && topic.items[Number(p.item)];
+      if (!line || line.type !== 'A' || line.taskId) throw new Error('Punkt nicht gefunden oder schon als Aufgabe angelegt.');
+      const task = Tasks.save({ title: line.text || topic.title, projectId: x.project.id, assignees: line.owner ? [line.owner] : [ctx.email], dueDate: line.due })[0];
+      line.taskId = task.id;
+      const doc = Docs.update_(x, { title: x.doc.title, content: Shared.protoToText(model) }, Number(x.doc.version));
       return { task: task, doc: doc };
     });
   },

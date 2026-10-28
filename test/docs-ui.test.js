@@ -33,12 +33,12 @@ describe('markdown rendering', () => {
   });
 });
 
-describe('documents tab', () => {
-  let pid;
+describe('documents in the jour fixe tab', () => {
   test('a new document is written in the app and saved with "Übernehmen"', async () => {
-    pid = w.eval('S.projects[0].id');
-    w.eval(`S.projTab = 'docs'; go('project', ${JSON.stringify(pid)})`);
+    const pid = w.eval('S.projects[0].id');
+    w.eval(`S.projTab = 'jf'; go('project', ${JSON.stringify(pid)})`);
     await until(() => $('[data-action="doc-new"]'));
+    assert.equal(w.document.querySelectorAll('.pj-tabs [data-v="docs"]').length, 0, 'one tab, not two');
     click($('[data-action="doc-new"]'));
     await until(() => $('.de-text'));
     assert.ok($('[data-action="doc-save"]').disabled, 'nothing to save yet');
@@ -50,7 +50,6 @@ describe('documents tab', () => {
     ta.dispatchEvent(new w.Event('input', { bubbles: true }));
     await wait(250);
     assert.ok($('.de-preview h2'), 'live preview');
-    assert.equal($('[data-action="doc-save"]').disabled, false);
     click($('[data-action="doc-save"]'));
     await until(() => $('.doc-view'));
     assert.match($('.doc-view').textContent, /Schneller liefern/);
@@ -58,7 +57,6 @@ describe('documents tab', () => {
   });
   test('when someone else saved in between, a dialog offers both versions instead of overwriting', async () => {
     const id = w.eval('S.doc.id');
-    // someone else saves version 2
     await w.eval(`call('docs.save', { id: ${JSON.stringify(id)}, title: 'Konzept', content: 'Fremde Fassung', baseVersion: 1 })`);
     click($('[data-action="doc-edit"]'));
     await until(() => $('.de-text'));
@@ -71,29 +69,43 @@ describe('documents tab', () => {
     await until(() => $('#modal-root .de-preview'));
     assert.match($('#modal-root').textContent, /Fremde Fassung/);
     assert.equal(w.eval('JSON.stringify(store.get(draftKey(S.docEdit.id), null).content)'), JSON.stringify('Meine Fassung'), 'my text is kept');
-    w.eval('closeModal()');
+    w.eval('closeModal(); docEndEdit(); S.doc = null; render()');
   });
 });
 
-describe('jour fixe tab', () => {
-  test('a series shows its next meeting; minutes open with the template; an action item becomes a task', async () => {
+describe('jour fixe minutes', () => {
+  test('"Nächster" opens the form for the meeting; topics and lines are filled in and saved; an action becomes a task', async () => {
     const pid = w.eval('S.projects[0].id');
-    w.eval('docEndEdit(); S.doc = null');
     await w.eval(`call('jf.saveSeries', { projectId: ${JSON.stringify(pid)}, title: 'Team-JF', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: '2026-01-05', attendees: [S.me.email] })`);
     w.eval(`delete S.jfs[${JSON.stringify(pid)}]; S.projTab = 'jf'; render()`);
     await until(() => $('.jf-card'));
-    assert.match($('.jf-card').textContent, /Team-JF/);
-    click($('.jf-card [data-action="jf-open"]'));
-    await until(() => $('.doc-view'));
-    assert.match($('.doc-view').textContent, /Agenda/);
-    const doc = w.eval('S.doc');
-    await w.eval(`call('docs.save', { id: ${JSON.stringify(doc.id)}, title: ${JSON.stringify(doc.title)}, baseVersion: ${doc.version},
-      content: S.doc.content + '\\n- [ ] Folien bauen !2030-01-10' })`);
-    await w.eval(`docOpen(${JSON.stringify(doc.id)})`);
-    await until(() => $('[data-action="doc-to-task"]'));
+    const next = [...w.document.querySelectorAll('.jf-card [data-action="jf-open"]')].find(b => /Nächster/.test(b.textContent));
+    assert.ok(next, 'button for the next meeting');
+    click(next);
+    await until(() => $('.proto-edit'));
+    assert.match($('.proto-edit').textContent, /Anwesend/);
+    click($('[data-action="proto-add-topic"]'));
+    await until(() => $('.pe-topic'));
+    const title = $('.pe-topic input[data-path="topics.0.title"]');
+    title.value = 'Budget';
+    title.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const type = $('.pe-topic select[data-path="topics.0.items.0.type"]');
+    type.value = 'A';
+    type.dispatchEvent(new w.Event('change', { bubbles: true }));
+    const text = $('.pe-topic textarea[data-path="topics.0.items.0.text"]');
+    text.value = 'Angebot einholen';
+    text.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const due = $('.pe-topic input[data-path="topics.0.items.0.due"]');
+    due.value = '2030-01-10';
+    due.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await wait(200);
+    click($('[data-action="proto-save"]'));
+    await until(() => $('.pt'));
+    assert.match($('.pt').textContent, /Budget/);
+    assert.match($('.pt').textContent, /Angebot einholen/);
     const before = w.eval('S.tasks.length');
-    click($('[data-action="doc-to-task"]'));
-    await until(() => w.eval('S.tasks.length') > before && $('.md-task'));
-    assert.ok(w.eval("S.tasks.some(t => t.title === 'Folien bauen' && t.dueDate === '2030-01-10')"));
+    click($('[data-action="proto-task"]'));
+    await until(() => w.eval('S.tasks.length') > before && $('.pt .md-task'));
+    assert.ok(w.eval("S.tasks.some(t => t.title === 'Angebot einholen' && t.dueDate === '2030-01-10')"));
   });
 });

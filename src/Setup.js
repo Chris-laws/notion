@@ -32,6 +32,8 @@ function setup() {
   Object.keys(defaults).forEach(k => {
     if (props.getProperty(k) === null) props.setProperty(k, defaults[k]);
   });
+  // the Drive folder for documents and minutes; asks for the Drive permission while setup runs
+  try { Logger.log('Drive-Ordner bereit: https://drive.google.com/drive/folders/' + Store.root()); } catch (e) { Logger.log('Drive: ' + e.message); }
   Logger.log('Datenbank bereit: ' + ss.getUrl());
   return ss.getUrl();
 }

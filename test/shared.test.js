@@ -262,3 +262,42 @@ describe('safe file names', () => {
     assert.equal(S.safeName('x'.repeat(200)).length, 80);
   });
 });
+
+describe('jour fixe minutes (structured)', () => {
+  const model = () => ({
+    title: 'Team-JF', date: '2026-11-02', minuteTaker: 'a@firma.de', present: ['a@firma.de', 'b@firma.de'], absent: ['c@firma.de'],
+    topics: [
+      { title: 'Reinigung | Geldspeicher', owner: 'a@firma.de', items: [
+        { type: 'I', text: 'Schwieriger als gedacht\nzweite Zeile', owner: 'a@firma.de', due: '' },
+        { type: 'A', text: 'Bericht im nächsten JF', owner: 'b@firma.de', due: '2026-11-09', done: false, taskId: '' },
+        { type: 'A', text: 'Erledigt', owner: 'b@firma.de', due: '', done: true, taskId: 't_1' },
+      ] },
+      { title: 'Lotterie', owner: '', items: [{ type: 'N', text: 'Nachtrag --> wichtig', owner: '', due: '' }] },
+    ],
+  });
+  test('round trip: text for people (table) plus the data block the form loads again', () => {
+    const text = S.protoToText(model());
+    assert.match(text, /\| 1\. \| \| \*\*Reinigung \\| Geldspeicher\*\* \| @a@firma\.de \| \|/);
+    assert.match(text, /\| \| A \| Bericht im nächsten JF \| @b@firma\.de \| 2026-11-09 \|/);
+    assert.match(text, /Schwieriger als gedacht zweite Zeile/, 'one table row per line');
+    assert.deepEqual(plain(S.protoFromText(text)), plain(S.protoClean(model())));
+  });
+  test('text without a data block, or a broken one, gives null', () => {
+    assert.equal(S.protoFromText('# nur Text'), null);
+    assert.equal(S.protoFromText('x\n<!-- lidlflow:protocol {kaputt -->'), null);
+  });
+  test('clean: unknown types become I, missing lists become empty, texts are limited', () => {
+    const c = S.protoClean({ topics: [{ title: 'x'.repeat(500), items: [{ type: 'Z', text: 'a' }] }] });
+    assert.equal(c.topics[0].items[0].type, 'I');
+    assert.equal(c.topics[0].title.length, 200);
+    assert.deepEqual(plain(c.present), []);
+    assert.deepEqual(plain(S.protoClean(null).topics), []);
+    assert.equal(S.protoClean({ topics: [{ items: [{ type: 'A', done: 'true' }] }] }).topics[0].items[0].done, true);
+  });
+  test('open action items carry over: type A and not done', () => {
+    const open = S.protoOpenActions(model());
+    assert.deepEqual(plain(open.map(i => i.text)), ['Bericht im nächsten JF']);
+    assert.equal(open[0].owner, 'b@firma.de');
+    assert.deepEqual(plain(S.protoOpenActions({ topics: [] })), []);
+  });
+});

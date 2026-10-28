@@ -434,8 +434,71 @@ function SharedFactory() {
     return !name || /^\.+$/.test(name) ? '_' : name;
   }
 
+  /* ---- jour fixe minutes: a structured form, stored as a Markdown table plus a data block ---- */
+  const PROTO_TYPES = ['I', 'A', 'B', 'N']; // information, action, decision, note
+  const PROTO_MARK = '<!-- lidlflow:protocol ';
+  const cut = (s, n) => String(s === undefined || s === null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, n);
+  const mail = s => cut(s, 120).toLowerCase();
+  const mails = list => (Array.isArray(list) ? list.map(mail).filter(Boolean) : []);
+  const yes = v => v === true || String(v).toLowerCase() === 'true';
+
+  /** A minutes model with only known fields, types and lengths. */
+  function protoClean(m) {
+    m = m && typeof m === 'object' ? m : {};
+    const item = i => ({
+      type: PROTO_TYPES.indexOf(i && i.type) >= 0 ? i.type : 'I',
+      text: cut(i && i.text, 2000), owner: mail(i && i.owner), due: isDate(i && i.due) ? i.due : '',
+      done: yes(i && i.done), taskId: /^t_\w+$/.test(i && i.taskId) ? i.taskId : '',
+    });
+    const topic = t => ({ title: cut(t && t.title, 200), owner: mail(t && t.owner), items: (t && Array.isArray(t.items) ? t.items : []).slice(0, 100).map(item) });
+    return {
+      title: cut(m.title, 120), date: isDate(m.date) ? m.date : '', minuteTaker: mail(m.minuteTaker),
+      present: mails(m.present), absent: mails(m.absent),
+      topics: (Array.isArray(m.topics) ? m.topics : []).slice(0, 100).map(topic),
+    };
+  }
+
+  /** The minutes as a Markdown table (readable in Drive) with the model as a data block at the end. */
+  function protoToText(m) {
+    m = protoClean(m);
+    const cell = s => String(s).replace(/\|/g, '\\|');
+    const who = e => (e ? '@' + e : '');
+    const lines = [
+      '# ' + cell(m.title) + ' – ' + m.date,
+      '',
+      '**Protokoll:** ' + who(m.minuteTaker),
+      '**Anwesend:** ' + m.present.map(who).join(', '),
+      '**Abwesend:** ' + m.absent.map(who).join(', '),
+      '',
+      '| Nr. | Art | Thema | Verantwortlich | Termin |',
+      '|---|---|---|---|---|',
+    ];
+    m.topics.forEach((t, k) => {
+      lines.push('| ' + (k + 1) + '. | | **' + cell(t.title) + '** | ' + who(t.owner) + ' | |');
+      t.items.forEach(i => lines.push('| | ' + i.type + ' | ' + cell(i.text) + (i.done ? ' ✓' : '') + ' | ' + who(i.owner) + ' | ' + i.due + ' |'));
+    });
+    // "--" would end the HTML comment: written as a JSON escape, read back unchanged
+    lines.push('', PROTO_MARK + JSON.stringify(m).replace(/--/g, '-\\u002d') + ' -->');
+    return lines.join('\n');
+  }
+
+  /** The model from a stored text; null when there is no (valid) data block. */
+  function protoFromText(text) {
+    const at = String(text || '').lastIndexOf(PROTO_MARK);
+    if (at < 0) return null;
+    const end = String(text).indexOf(' -->', at);
+    try { return protoClean(JSON.parse(String(text).slice(at + PROTO_MARK.length, end < 0 ? undefined : end))); } catch (e) { return null; }
+  }
+
+  /** Action items still open (type A, not done): they move on to the next meeting. */
+  function protoOpenActions(m) {
+    const out = [];
+    protoClean(m).topics.forEach(t => t.items.forEach(i => { if (i.type === 'A' && !i.done) out.push(i); }));
+    return out;
+  }
+
   return {
-    jfDates, parseActionItem, safeName,
+    jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions,
     QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,

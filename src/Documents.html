@@ -75,12 +75,10 @@ function mdRender(text, o) {
 /* ---------------- state ---------------- */
 // S.docs[projectId]: list; S.jfs[projectId]: { series, meetings }; S.doc: open document { ..., content }
 // S.docEdit: { id, projectId, title, content, base, kind } while editing
+/** Documents of the project: part of the one call that loads the jour fixe tab. */
 function docsOf(pid) {
-  if (S.docs[pid] === undefined) {
-    S.docs[pid] = null;
-    call('docs.list', { projectId: pid }).then(l => { S.docs[pid] = l; render({ peek: false }); }).catch(err => { S.docs[pid] = { error: friendlyError(err.message) }; render({ peek: false }); });
-  }
-  return S.docs[pid];
+  const j = jfOf(pid);
+  return j && !j.error ? j.docs : j;
 }
 function jfOf(pid) {
   if (S.jfs[pid] === undefined) {
@@ -89,21 +87,18 @@ function jfOf(pid) {
   }
   return S.jfs[pid];
 }
-function docsReload(pid) { delete S.docs[pid]; delete S.jfs[pid]; }
+function docsReload(pid) { delete S.jfs[pid]; }
 const draftKey = id => 'draft:doc:' + (id || 'new');
 const RHYTHMS = () => [{ key: 'weekly', label: L('Wöchentlich', 'Weekly') }, { key: 'biweekly', label: L('Alle 2 Wochen', 'Every 2 weeks') }, { key: 'monthly', label: L('Monatlich', 'Monthly') }];
 const WEEKDAYS = () => [1, 2, 3, 4, 5, 6, 0].map(d => ({ key: String(d), label: DOW_LONG[d] }));
 
-/* ---------------- documents tab ---------------- */
-function docsTab(p) {
-  if (S.docEdit && S.docEdit.projectId === p.id) return docEditor(p);
-  if (S.doc && S.doc.projectId === p.id && S.doc.kind !== 'jf') return docViewer(p);
+/* ---------------- documents (a section of the jour fixe tab) ---------------- */
+function docsSection(p) {
   const list = docsOf(p.id);
-  const head = '<div class="docs-head"><div><h3>' + icon('text', 'sm') + 'Dokumente</h3><p class="hint">Konzepte, Notizen und Anleitungen des Projekts. Gespeichert in Google Drive (Ordner LidlFlow).</p></div>' +
-    '<button class="btn primary" data-action="doc-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neues Dokument</button></div>';
-  if (list === null) return head + skRows(3);
-  if (list.error) return head + '<div class="notice">' + esc(list.error) + '</div>';
-  if (!list.length) return head + '<div class="empty-mini">Noch keine Dokumente. Lege das erste an.</div>';
+  const head = '<div class="docs-head"><div><h3>' + icon('text', 'sm') + 'Dokumente</h3><p class="hint">Weitere Unterlagen des Projekts: Konzepte, Notizen, Anleitungen.</p></div>' +
+    '<button class="btn" data-action="doc-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neues Dokument</button></div>';
+  if (!list) return head + skRows(2);
+  if (!list.length) return head + '<div class="empty-mini">Noch keine Dokumente.</div>';
   return head + '<div class="docs-list">' + list.map(docCard).join('') + '</div>';
 }
 function docCard(d) {
@@ -115,8 +110,7 @@ function docCard(d) {
 function docViewer(p) {
   const d = S.doc;
   if (!d.content && d.content !== '') return skLines(6);
-  const back = d.kind === 'jf' ? 'jf' : 'docs';
-  return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close" data-v="' + back + '" title="Zurück" aria-label="Zurück">' + icon('back') + '</button>' +
+  return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close" data-v="jf" title="Zurück" aria-label="Zurück">' + icon('back') + '</button>' +
     '<div class="dv-t"><h2>' + esc(d.title) + '</h2><small>' + esc(L('Version ', 'Version ') + d.version + ' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) + '</small></div>' +
     (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') +
     (d.canWrite ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' +
@@ -136,7 +130,7 @@ function docEditor() {
     '<div class="ed-tools de-tools" role="toolbar" aria-label="Formatierung">' +
     [['h', 'Überschrift', 'H'], ['b', 'Fett', '<b>B</b>'], ['i', 'Kursiv', '<i>I</i>'], ['ul', 'Liste', icon('list', 'sm')], ['ai', 'Action Item', icon('checksq', 'sm')],
       ['link', 'Link', icon('open', 'sm')], ['at', 'Person erwähnen', '@'], ['tbl', 'Tabelle', icon('table', 'sm')], ['due', 'Fälligkeit', icon('calendar', 'sm')]]
-      .map(t => '<button type="button" data-action="de-fmt" data-k="' + t[0] + '" title="' + esc(t[1]) + '" aria-label="' + esc(t[1]) + '">' + t[2] + '</button>').join('') + '</div>' +
+      .map(t => '<button type="button" data-action="de-fmt" data-k="' + t[0] + '"' + labelled(t[1]) + '>' + t[2] + '</button>').join('') + '</div>' +
     '<div class="de-split"><textarea class="textarea de-text" data-on-input="doc-text" aria-label="Text des Dokuments" spellcheck="true">' + esc(e.content) + '</textarea>' +
     '<div class="de-preview" aria-label="Vorschau">' + mdRender(e.content) + '</div></div>' +
     '<p class="hint">Markdown: # Überschrift · **fett** · _kursiv_ · - Liste · - [ ] Action Item @person@firma.de !2026-11-03 · [Text](Link) · | Tabelle |</p>' +
@@ -226,23 +220,28 @@ function docSave(force) {
     return docOpen(r.id);
   }).catch(fail);
 }
-/** Someone saved in between: keep mine (on top of theirs) or take theirs. Nothing is lost silently. */
-function docConflict(cur) {
+const END_BTN = '</button></div>';
+const hintP = t => '<p class="hint">' + esc(t) + '</p>';
+const labelled = t => ' title="' + esc(t) + '" aria-label="' + esc(t) + '"';
+/**
+ * Someone saved in between (documents and minutes): keep mine (on top of theirs) or take theirs.
+ * Nothing is lost silently; o.mine saves mine, o.theirs drops mine.
+ */
+function conflictModal(cur, o) {
   openModal({
     title: L('Inzwischen geändert', 'Changed in the meantime'),
-    body: '<p style="margin:0 0 8px">' + esc(L(user(cur.updatedBy).name + ' hat das Dokument gespeichert, während du es bearbeitet hast (Version ' + cur.version + ').',
-      user(cur.updatedBy).name + ' saved the document while you were editing it (version ' + cur.version + ').')) + '</p>' +
-      '<p class="hint">' + esc(L('Deine Fassung bleibt als Entwurf im Browser erhalten. Ihre Fassung siehst du unten.', 'Your text stays as a draft in this browser. Theirs is shown below.')) + '</p>' +
-      '<div class="de-preview conflict">' + mdRender(cur.content) + '</div>',
+    body: '<p style="margin:0 0 8px">' + esc(L(user(cur.updatedBy).name + ' hat gespeichert, während du bearbeitet hast.', user(cur.updatedBy).name + ' saved while you were editing.')) + '</p>' +
+      hintP(L('Deine Fassung bleibt als Entwurf im Browser erhalten. Ihre Fassung siehst du unten.', 'Your version stays as a draft in this browser. Theirs is shown below.')) +
+      '<div class="de-preview conflict">' + docPreview(cur.content) + '</div>',
     submitLabel: L('Meine Fassung speichern', 'Save my version'),
-    danger: { label: L('Ihre Fassung übernehmen', 'Take their version'), onClick: () => {
-      const e = S.docEdit;
-      store.set(draftKey(e.id), null);
-      closeModal();
-      docEndEdit();
-      docOpen(e.id);
-    } },
-    onSubmit: () => { S.docEdit.base = cur.version; closeModal(); return docSave(true); },
+    danger: { label: L('Ihre Fassung übernehmen', 'Take their version'), onClick: () => { closeModal(); o.theirs(); } },
+    onSubmit: () => { closeModal(); return o.mine(); },
+  });
+}
+function docConflict(cur) {
+  conflictModal(cur, {
+    mine: () => { S.docEdit.base = cur.version; return docSave(true); },
+    theirs: () => { const e = S.docEdit; store.set(draftKey(e.id), null); docEndEdit(); docOpen(e.id); },
   });
 }
 A['doc-remove'] = el => {
@@ -256,7 +255,7 @@ A['doc-versions'] = el => {
     title: L('Versionen', 'Versions'),
     body: list.length ? '<div class="list-plain">' + list.map(v => '<div class="li"><span class="grow"><b>' + esc(L('Version ', 'Version ') + v.version) + '</b> <span class="faint">' +
       esc(user(v.by).name + ' · ' + timeAgo(v.at)) + '</span></span><button type="button" class="btn sm" data-action="doc-restore" data-id="' + esc(id) + '" data-v="' + v.version + '">' +
-      esc(L('Wiederherstellen', 'Restore')) + '</button></div>').join('') + '</div>' : '<p class="hint">' + esc(L('Noch keine älteren Versionen.', 'No earlier versions yet.')) + '</p>',
+      esc(L('Wiederherstellen', 'Restore')) + END_BTN).join('') + '</div>' : hintP(L('Noch keine älteren Versionen.', 'No earlier versions yet.')),
     submitLabel: L('Schließen', 'Close'),
     onSubmit: () => closeModal(),
   })).catch(fail);
@@ -291,17 +290,18 @@ function deInsert(ta, text, after, replace) {
 
 /* ---------------- jour fixe tab ---------------- */
 function jfTab(p) {
+  if (S.protoEdit && S.protoEdit.projectId === p.id) return protoEditor(p);
   if (S.docEdit && S.docEdit.projectId === p.id) return docEditor(p);
-  if (S.doc && S.doc.projectId === p.id && S.doc.kind === 'jf') return docViewer(p);
+  if (S.doc && S.doc.projectId === p.id) return S.doc.kind === 'jf' ? protoViewer(p) : docViewer(p);
   const jf = jfOf(p.id);
-  const head = '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3><p class="hint">Regelmäßige Termine mit Protokoll aus der Vorlage. Offene Action Items wandern ins nächste Protokoll.</p></div>' +
+  const head = '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3><p class="hint">Regelmäßige Termine mit Protokoll. Offene Aufgaben wandern ins nächste Protokoll.</p></div>' +
     '<button class="btn primary" data-action="jf-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button></div>';
-  if (jf === null) return head + skRows(3);
+  if (jf === null) return head + skRows(3) + skRows(2);
   if (jf.error) return head + '<div class="notice">' + esc(jf.error) + '</div>';
   const series = jf.series.length ? '<div class="jf-list">' + jf.series.map(s => jfCard(s)).join('') + '</div>'
     : '<div class="empty-mini">Noch kein Jour Fixe. Lege eine Serie an, z. B. jeden Montag 9:00.</div>';
   const archive = jf.meetings.length ? '<div class="h2">' + icon('inbox') + 'Protokolle</div><div class="docs-list">' + jf.meetings.map(docCard).join('') + '</div>' : '';
-  return head + series + archive;
+  return head + series + archive + '<div class="h2-gap"></div>' + docsSection(p);
 }
 function jfCard(s) {
   const next = Shared.jfDates(s, TODAY(), Shared.addDays(TODAY(), 62))[0];
@@ -309,7 +309,7 @@ function jfCard(s) {
   const rh = (RHYTHMS().find(r => r.key === s.rhythm) || RHYTHMS()[0]).label;
   return '<div class="card-w jf-card"><div class="jf-top"><b>' + esc(s.title) + '</b><span class="chip soft">' + esc(rh + ' · ' + DOW_LONG[s.weekday] + ' ' + s.time) + '</span>' +
     '<span class="grow"></span>' + avatars(s.attendees || [], 5) +
-    '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '" title="Bearbeiten" aria-label="Jour Fixe bearbeiten">' + icon('settings', 'sm') + '</button></div>' +
+    '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '" title="Bearbeiten" aria-label="Jour Fixe bearbeiten">' + icon('settings', 'sm') + END_BTN +
     '<div class="jf-acts">' +
     (last ? '<button class="btn sm" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + last + '">' + icon('text', 'sm') + esc(L('Letzter: ', 'Last: ') + fmtDate(last, { absolute: true })) + '</button>' : '') +
     (next ? '<button class="btn sm primary" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + next + '">' + icon('text', 'sm') + esc(L('Nächster: ', 'Next: ') + fmtDate(next, { absolute: true })) + '</button>' : '') +
@@ -318,13 +318,12 @@ function jfCard(s) {
 A['jf-open'] = el => jfOpen(el.dataset.id, el.dataset.v);
 function jfOpen(seriesId, date) {
   return call('jf.meeting', { seriesId: seriesId, date: date, lang: LANG }).then(m => {
-    const pid = m.projectId;
-    delete S.jfs[pid];
     S.projTab = 'jf';
-    if (S.route.view !== 'project' || S.route.id !== pid) go('project', pid);
-    S.doc = { id: m.id, projectId: pid, kind: 'jf' };
-    return call('docs.get', { id: m.id });
-  }).then(d => { S.doc = d; render({ peek: false }); }).catch(fail);
+    if (S.route.view !== 'project' || S.route.id !== m.projectId) go('project', m.projectId);
+    S.doc = m;
+    if (m.draft && m.canWrite) return protoStartEdit(m);
+    render({ peek: false });
+  }).catch(fail);
 }
 A['jf-new'] = el => jfModal(null, el.dataset.id);
 A['jf-edit'] = el => {
@@ -351,10 +350,180 @@ function jfModal(s, projectId) {
       .then(() => { delete S.jfs[projectId]; closeModal(); calReload(); toast(L('Jour Fixe gespeichert', 'Jour fixe saved')); }),
   });
 }
-A['doc-to-task'] = el => call('jf.actionToTask', { docId: el.dataset.id, text: el.dataset.text }).then(r => {
+/* ---------------- jour fixe minutes: view and form ---------------- */
+const PROTO_LABELS = () => ({ I: L('Info', 'Info'), A: L('Aufgabe', 'Action'), B: L('Beschluss', 'Decision'), N: L('Nachtrag', 'Note') });
+/** Text of a document for previews: minutes as their table, anything else as Markdown. */
+function docPreview(text) {
+  const m = Shared.protoFromText(text);
+  return m ? protoTable(m, {}) : mdRender(text);
+}
+const whoName = e => (e ? user(e).name : '');
+/** The minutes table: numbered topics with their lines (Art, Thema, Verantwortlich, Termin). */
+function protoTable(m, o) {
+  const rows = [];
+  m.topics.forEach((t, k) => {
+    rows.push('<tr class="pt-topic"><td>' + (k + 1) + '.</td><td></td><td><b>' + esc(t.title) + '</b></td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
+    t.items.forEach((i, n) => {
+      const task = i.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
+        : o.actions && i.type === 'A' && !i.done ? ' <button class="md-mk" data-action="proto-task" data-id="' + esc(o.docId) + '" data-t="' + k + '" data-i="' + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
+      rows.push('<tr class="pt-line' + (i.done ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
+        '<td>' + esc(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
+    });
+  });
+  return '<div class="md-tw"><table class="pt"><thead><tr><th>' + L('Nr.', 'No.') + '</th><th>' + L('Art', 'Type') + '</th><th>' + L('Thema', 'Topic') + '</th><th>' +
+    L('Verantwortlich', 'Responsible') + '</th><th>' + L('Termin', 'Due') + '</th></tr></thead><tbody>' +
+    (rows.join('') || '<tr><td colspan="5" class="faint">' + L('Noch keine Themen.', 'No topics yet.') + '</td></tr>') + '</tbody></table></div>';
+}
+function protoHead(m, version) {
+  const people = list => (list.length ? list.map(e => '<span class="pt-p">' + avatar(e) + esc(whoName(e)) + '</span>').join('') : '<span class="faint">–</span>');
+  return '<dl class="pt-head"><dt>' + L('Datum', 'Date') + '</dt><dd>' + esc(fmtDate(m.date, { absolute: true })) + (version ? ' · Rev. ' + version : '') + '</dd>' +
+    '<dt>' + L('Protokoll', 'Minutes by') + '</dt><dd>' + people(m.minuteTaker ? [m.minuteTaker] : []) + '</dd>' +
+    '<dt>' + L('Anwesend', 'Present') + '</dt><dd>' + people(m.present) + '</dd>' +
+    '<dt>' + L('Abwesend', 'Absent') + '</dt><dd>' + people(m.absent) + '</dd></dl>';
+}
+function protoViewer() {
+  const d = S.doc;
+  const m = d.content !== undefined ? Shared.protoFromText(d.content) : null;
+  if (!m) return d.content !== undefined ? docViewer() : skLines(6);
+  return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close" data-v="jf" title="Zurück" aria-label="Zurück">' + icon('back') + '</button>' +
+    '<div class="dv-t"><h2>' + esc(m.title) + '</h2><small>' + esc(L('Jour-Fixe-Protokoll', 'Jour fixe minutes')) + (d.updatedBy ? esc(' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) : '') + '</small></div>' +
+    (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') +
+    (d.canWrite && d.id ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' : '') +
+    (d.canWrite ? '<button class="btn sm primary" data-action="proto-edit">' + icon('text', 'sm') + 'Bearbeiten</button>' : '') + '</div>' +
+    protoHead(m, d.version) + protoTable(m, { actions: d.canWrite && d.id, docId: d.id }) + '</div>';
+}
+
+/* the form: S.protoEdit = { doc fields, model, saved } while editing */
+const protoKey = e => draftKey('jf:' + e.seriesId + ':' + e.date);
+function protoStartEdit(d) {
+  const model = Shared.protoFromText(d.content) || Shared.protoClean({ date: d.date, topics: [] });
+  const e = { id: d.id || '', projectId: d.projectId, seriesId: d.seriesId, date: d.date, title: d.title, base: d.version || 0, model: model, saved: Shared.protoToText(model) };
+  const draft = store.get(protoKey(e), null);
+  if (draft && draft.base === e.base && Shared.protoToText(draft.model) !== e.saved) {
+    e.model = Shared.protoClean(draft.model);
+    toast(L('Dein ungespeicherter Entwurf wurde wiederhergestellt.', 'Your unsaved draft was restored.'));
+  }
+  S.protoEdit = e;
+  if (e.id) docLock(e.id);
+  render({ peek: false });
+}
+const protoDirty = () => !!S.protoEdit && Shared.protoToText(S.protoEdit.model) !== S.protoEdit.saved;
+/** People to pick from: attendees, the project's people, then everybody else. */
+function protoPeople() {
+  const e = S.protoEdit;
+  const p = project(e.projectId);
+  const first = e.model.present.concat(p ? projectMembers(p) : []);
+  const all = first.concat(S.users.map(u => u.email)).filter((x, i, a) => x && a.indexOf(x) === i);
+  return all;
+}
+function personSelect(path, value) {
+  return '<select class="select sm" data-on-change="proto-field" data-path="' + path + '" aria-label="' + esc(L('Verantwortlich', 'Responsible')) + '"><option value="">–</option>' +
+    protoPeople().map(x => '<option value="' + esc(x) + '"' + (x === value ? ' selected' : '') + '>' + esc(user(x).name) + '</option>').join('') + '</select>';
+}
+function protoEditor() {
+  const e = S.protoEdit;
+  const m = e.model;
+  const dirty = protoDirty();
+  const chips = (list, key) => list.map(x => '<span class="nt-chip">' + avatar(x) + '<span>' + esc(user(x).name) + '</span><button type="button" class="nt-x" data-action="proto-unperson" data-k="' + key + '" data-v="' + esc(x) + '" aria-label="Entfernen" title="Entfernen">' + icon('x', 'sm') + '</button></span>').join('');
+  const topics = m.topics.map((t, k) =>
+    '<div class="pe-topic card-w"><div class="pe-th"><span class="pe-no">' + (k + 1) + '.</span>' +
+    '<input class="input" data-on-input="proto-field" data-path="topics.' + k + '.title" value="' + esc(t.title) + '" placeholder="' + esc(L('Thema', 'Topic')) + '" aria-label="' + esc(L('Thema', 'Topic')) + '">' +
+    personSelect('topics.' + k + '.owner', t.owner) +
+    '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '"' + labelled(L('Thema löschen', 'Delete topic')) + '>' + icon('trash', 'sm') + END_BTN +
+    t.items.map((i, n) => '<div class="pe-line">' +
+      '<select class="select sm pe-type" data-on-change="proto-field" data-path="topics.' + k + '.items.' + n + '.type" aria-label="' + esc(L('Art', 'Type')) + '">' +
+      Shared.PROTO_TYPES.map(ty => '<option value="' + ty + '"' + (ty === i.type ? ' selected' : '') + '>' + ty + ' · ' + esc(PROTO_LABELS()[ty]) + '</option>').join('') + '</select>' +
+      '<textarea class="textarea pe-text" rows="1" data-on-input="proto-field" data-path="topics.' + k + '.items.' + n + '.text" aria-label="Text">' + esc(i.text) + '</textarea>' +
+      personSelect('topics.' + k + '.items.' + n + '.owner', i.owner) +
+      '<input class="input sm" type="date" data-on-change="proto-field" data-path="topics.' + k + '.items.' + n + '.due" value="' + esc(i.due) + '" aria-label="' + esc(L('Termin', 'Due')) + '">' +
+      (i.type === 'A' ? '<label class="pe-done"><input type="checkbox" data-on-change="proto-field" data-path="topics.' + k + '.items.' + n + '.done"' + (i.done ? ' checked' : '') + '> ' + esc(L('erledigt', 'done')) + '</label>' : '<span class="pe-done"></span>') +
+      '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '" data-i="' + n + '"' + labelled(L('Zeile löschen', 'Delete line')) + '>' + icon('x', 'sm') + END_BTN).join('') +
+    '<button type="button" class="btn sm outline" data-action="proto-add-line" data-t="' + k + '">' + icon('plus', 'sm') + L('Zeile', 'Line') + END_BTN).join('');
+  return '<div class="doc-edit card-w proto-edit"><div class="dv-head"><div class="dv-t"><h2>' + esc(m.title || e.title) + '</h2><small>' + esc(fmtDate(e.date, { absolute: true })) + '</small></div></div>' +
+    '<div class="pe-head"><label class="field"><span>' + L('Protokoll', 'Minutes by') + '</span>' + personSelect('minuteTaker', m.minuteTaker) + '</label>' +
+    '<div class="field"><span>' + L('Anwesend', 'Present') + '</span><div class="nt-people">' + chips(m.present, 'present') + '<button type="button" class="nt-add" data-action="proto-person" data-k="present">' + icon('plus', 'sm') + L('Personen', 'People') + '</button></div></div>' +
+    '<div class="field"><span>' + L('Abwesend', 'Absent') + '</span><div class="nt-people">' + chips(m.absent, 'absent') + '<button type="button" class="nt-add" data-action="proto-person" data-k="absent">' + icon('plus', 'sm') + L('Personen', 'People') + '</button></div></div></div>' +
+    '<p class="hint">' + L('Art: I = Info · A = Aufgabe (mit Verantwortlich und Termin, wird zur Projektaufgabe) · B = Beschluss · N = Nachtrag', 'Type: I = info · A = action (with responsible and due date, becomes a project task) · B = decision · N = note') + '</p>' +
+    topics + '<button type="button" class="btn" data-action="proto-add-topic">' + icon('plus', 'sm') + L('Thema hinzufügen', 'Add topic') + '</button>' +
+    '<div class="peek-commit doc-commit' + (dirty ? '' : ' clean') + '" role="status">' + icon('text', 'sm') +
+    '<span class="grow">' + (dirty ? L('Ungespeicherte Änderungen (als Entwurf im Browser gesichert)', 'Unsaved changes (kept as a draft in this browser)') : L('Keine Änderungen', 'No changes')) + '</span>' +
+    '<button type="button" class="btn sm" data-action="proto-discard">' + (dirty ? L('Verwerfen', 'Discard') : L('Schließen', 'Close')) + '</button>' +
+    '<button type="button" class="btn sm primary" data-action="proto-save"' + (dirty ? '' : ' disabled') + '>' + L('Übernehmen', 'Apply') + '</button></div></div>';
+}
+/** Sets model[path] ("topics.0.items.2.text"); structural changes re-render, typing only updates the bar. */
+function protoSet(path, value) {
+  const keys = path.split('.');
+  let o = S.protoEdit.model;
+  keys.slice(0, -1).forEach(k => { o = o[k]; });
+  o[keys[keys.length - 1]] = value;
+  store.set(protoKey(S.protoEdit), { base: S.protoEdit.base, model: S.protoEdit.model });
+}
+ON.input['proto-field'] = el => { protoSet(el.dataset.path, el.value); protoBarSoon(); };
+ON.change['proto-field'] = el => { protoSet(el.dataset.path, el.type === 'checkbox' ? el.checked : el.value); render({ peek: false }); };
+const protoBarSoon = debounce(() => {
+  const bar = $('.proto-edit .doc-commit');
+  if (!bar || !S.protoEdit) return;
+  const dirty = protoDirty();
+  bar.classList.toggle('clean', !dirty);
+  $('[data-action="proto-save"]', bar).disabled = !dirty;
+}, 150);
+A['proto-add-topic'] = () => { S.protoEdit.model.topics.push({ title: '', owner: S.me.email, items: [{ type: 'I', text: '', owner: '', due: '', done: false, taskId: '' }] }); render({ peek: false }); };
+A['proto-add-line'] = el => { S.protoEdit.model.topics[Number(el.dataset.t)].items.push({ type: 'I', text: '', owner: '', due: '', done: false, taskId: '' }); render({ peek: false }); };
+A['proto-del'] = el => {
+  const t = S.protoEdit.model.topics;
+  if (el.dataset.i === undefined) t.splice(Number(el.dataset.t), 1);
+  else t[Number(el.dataset.t)].items.splice(Number(el.dataset.i), 1);
+  render({ peek: false });
+};
+A['proto-person'] = el => {
+  const k = el.dataset.k;
+  peopleModal({ title: k === 'present' ? L('Anwesend', 'Present') : L('Abwesend', 'Absent'), selected: S.protoEdit.model[k].slice(), prefer: protoPeople(),
+    onChange: list => { S.protoEdit.model[k] = list; render({ peek: false }); } });
+};
+A['proto-unperson'] = el => { const k = el.dataset.k; S.protoEdit.model[k] = S.protoEdit.model[k].filter(x => x !== el.dataset.v); render({ peek: false }); };
+A['proto-edit'] = () => protoStartEdit(S.doc);
+A['proto-discard'] = () => {
+  const e = S.protoEdit;
+  store.set(protoKey(e), null);
+  if (e.id) docEndEdit();
+  S.protoEdit = null;
+  if (!e.id) S.doc = null;
+  render({ peek: false });
+};
+A['proto-save'] = () => protoSave(false);
+function protoSave(force) {
+  const e = S.protoEdit;
+  const content = Shared.protoToText(e.model);
+  const payload = e.id ? { id: e.id, title: e.title, content: content, baseVersion: e.base }
+    : { projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content };
+  return call('docs.save', payload).then(r => {
+    if (r.conflict && !force) return protoConflict(r.current);
+    if (r.conflict) { e.id = r.current.id; e.base = r.current.version; return protoSave(false); }
+    store.set(protoKey(e), null);
+    if (e.id) docEndEdit();
+    S.protoEdit = null;
+    docsReload(e.projectId);
+    toast(L('Protokoll gespeichert', 'Minutes saved'));
+    return call('docs.get', { id: r.id }).then(d => { S.doc = d; render({ peek: false }); });
+  }).catch(fail);
+}
+function protoConflict(cur) {
+  conflictModal(cur, {
+    mine: () => protoSave(true),
+    theirs: () => {
+      const e = S.protoEdit;
+      store.set(protoKey(e), null);
+      if (e.id) docEndEdit();
+      S.protoEdit = null;
+      S.doc = cur;
+      render({ peek: false });
+    },
+  });
+}
+A['proto-task'] = el => call('jf.actionToTask', { docId: el.dataset.id, topic: Number(el.dataset.t), item: Number(el.dataset.i) }).then(r => {
   applyTasks([r.task]);
   toast(L('Aufgabe angelegt: ', 'Task created: ') + r.task.title, { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.task.id) } });
-  return docOpen(el.dataset.id);
+  return call('docs.get', { id: el.dataset.id }).then(d => { S.doc = d; render({ peek: false }); });
 }).catch(fail);
 
 /* ---------------- admin: storage links ---------------- */
