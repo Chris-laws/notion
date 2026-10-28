@@ -70,8 +70,8 @@ function profile(users, tasks) {
   let ver = '';
   const kinds = {
     bootstrap: () => app.raw('bootstrap'),
-    poll: () => app.raw('tasks.list', { ver: 'old' }),
-    pollSame: () => app.raw('tasks.list', { ver: ver }),
+    poll: () => app.raw('tasks.list', { ver: 'old', full: true }),
+    pollSame: () => app.raw('tasks.list', { ver: ver, full: true }),
     calendar: () => app.raw('calendar.range', { from: '2026-10-19', to: '2026-11-30' }),
     report: () => app.raw('ai.report', { range: 'week' }),
     update: () => app.raw('tasks.save', { id: someTask.id, title: 'x' + Math.random() }),
@@ -291,8 +291,9 @@ function main() {
   console.log('  Task table in the cache: ' + Math.round(tasksBytes / 1024) + ' KB as JSON (fits ' + (tasksBytes < LIMITS.cacheTableMax ? 'yes' : 'NO') + '), compressed ' +
     Math.round(tasksZipBytes / 1024) + ' KB (fits ' + (tasksZipBytes < LIMITS.cacheTableMax ? 'yes' : 'NO') + ')');
 
-  const before = { pollSec: 90, pollJitter: 0, writeEveryMin: 10, retry: 'reads', jitter: false, cacheInTx: false, zip: false };
-  const after = { pollSec: 120, pollJitter: 0.25, writeEveryMin: 10, retry: 'all', jitter: true, cacheInTx: true, zip: true, writeThrough: true };
+  // the current app with the old (120 s) and the new (60 s) refresh interval
+  const after = { pollSec: 60, pollJitter: 0.25, writeEveryMin: 10, retry: 'all', jitter: true, cacheInTx: true, zip: true, writeThrough: true };
+  const before = Object.assign({}, after, { pollSec: 120 });
   const rows = [];
   scenarioUsers.forEach(n => {
     // data grows with the people: 3 tasks each (at most 30 000)

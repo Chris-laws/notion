@@ -805,26 +805,37 @@ function editing() {
   return (a && /INPUT|TEXTAREA/.test(a.tagName)) || $('#popover-root').children.length || $('#modal-root').children.length || dragState.id;
 }
 let pollFailures = 0;
+/** Background refresh: tasks plus teams, projects, people and jour fixe when anything changed. */
 function refresh() {
-  if (document.visibilityState !== 'visible' || editing() || S.busy) return;
-  call('tasks.list', { ver: S.tasksVer || '' }, { quiet: true }).then(res => {
+  if (document.visibilityState !== 'visible' || editing() || S.busy) return Promise.resolve();
+  return call('tasks.list', { ver: S.tasksVer || '', full: true }, { quiet: true }).then(res => {
     pollFailures = 0;
     if (res.same || editing() || S.busy) return;
-    const list = res.tasks;
-    const pending = S.tasks.filter(t => PENDING[t.id]);
-    if (pending.length) return;
+    if (S.tasks.some(t => PENDING[t.id])) return;
+    const known = {};
+    S.teams.forEach(t => { known[t.id] = true; });
+    const joined = (res.teams || []).filter(t => !known[t.id] && (t.lead === S.me.email || (t.members || []).indexOf(S.me.email) >= 0));
     // Only redraw when someone else actually changed something.
-    if (JSON.stringify(list) === JSON.stringify(S.tasks)) { S.tasksVer = res.ver; return; }
-    S.tasks = list;
+    const before = JSON.stringify([S.tasks, S.teams, S.projects, S.jf]);
+    S.tasks = res.tasks;
+    if (res.teams) Object.assign(S, { teams: res.teams, projects: res.projects, users: res.users, jf: res.jf });
     S.tasksVer = res.ver;
+    joined.forEach(t => toast(L('Du wurdest zum Team „' + t.name + '“ hinzugefügt', 'You were added to the team “' + t.name + '”')));
+    if (JSON.stringify([S.tasks, S.teams, S.projects, S.jf]) === before) return;
     S.reportDirty = true;
     render();
   }).catch(() => { pollFailures++; /* next round, a bit later */ });
 }
-// polling: about every 2 minutes, spread per client, slower after failures (see Shared.pollDelay)
-function schedulePoll() { setTimeout(() => { refresh(); schedulePoll(); }, Shared.pollDelay(120, pollFailures, Math.random())); }
+// polling: every 60 s (±25 %) while someone works here, every 5 min after 10 idle minutes, slower after failures
+let lastActive = Date.now();
+['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { lastActive = Date.now(); }, { passive: true, capture: true }));
+function pollDelayNow(rand) {
+  const idle = Date.now() - lastActive > 10 * 60000;
+  return Shared.pollDelay(idle ? 300 : 60, pollFailures, rand);
+}
+function schedulePoll() { setTimeout(() => { refresh(); schedulePoll(); }, pollDelayNow(Math.random())); }
 schedulePoll();
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { lastActive = Date.now(); refresh(); } });
 
 /* ---------------- skeletons: placeholders shaped like the content that is on its way ---------------- */
 const SKW = ['72%', '54%', '86%', '61%', '78%', '47%', '69%', '58%'];

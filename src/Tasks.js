@@ -11,10 +11,14 @@ const Tasks = {
     if (versioned && p.ver && p.ver === ver) return { ver: ver, same: true };
     const ctx = Access.context(me);
     const tasks = Db.all('Tasks').filter(t => Access.canSeeTask(t, ctx));
-    return versioned ? { ver: ver, tasks: tasks } : tasks;
+    if (!versioned) return tasks;
+    // the background refresh (full) also brings teams, projects, people and jour fixe: new members see
+    // their team without reloading; unchanged data still costs only the version check above
+    return p.full ? { ver: ver, tasks: tasks, teams: Db.all('Teams'), projects: Db.all('Projects'), users: Users.list(), jf: Jf.overview_(ctx, '') }
+      : { ver: ver, tasks: tasks };
   },
   /** Taken before reading, so a write that lands meanwhile shows up next time. */
-  version_() { return Db.version(['Tasks', 'Teams', 'Projects', 'Users']); },
+  version_() { return Db.version(['Tasks', 'Teams', 'Projects', 'Users', 'JfSeries', 'Docs']); },
 
   /**
    * Creates or updates a task. Only the fields present in the payload are
