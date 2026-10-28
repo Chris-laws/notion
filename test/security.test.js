@@ -47,7 +47,7 @@ const ATTEMPTS = w => ({
   'docs.get': { id: 'x' }, 'docs.save': { projectId: w.project.id, title: 'x', content: 'x' },
   'docs.versions': { id: 'x' }, 'docs.version': { id: 'x', version: 1 }, 'docs.restore': { id: 'x', version: 1 }, 'docs.lock': { id: 'x' }, 'docs.unlock': { id: 'x' }, 'docs.remove': { id: 'x' },
   'jf.list': { projectId: w.project.id }, 'jf.saveSeries': { projectId: w.project.id, title: 'x', rhythm: 'weekly', weekday: 1 },
-  'jf.removeSeries': { id: 'x' }, 'jf.meeting': { seriesId: 'x', date: '2030-01-07' }, 'jf.actionToTask': { docId: 'x', text: 'x' },
+  'jf.removeSeries': { id: 'x' }, 'jf.topicToTask': { docId: 'x', topicId: 'x' }, 'jf.meeting': { seriesId: 'x', date: '2030-01-07' }, 'jf.actionToTask': { docId: 'x', text: 'x' },
   'storage.links': {},
   'backup.status': {},
   'backup.run': {},

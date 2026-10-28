@@ -35,6 +35,15 @@ function esc(s) {
   return String(s === undefined || s === null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+/** Escaped text in which web and mail addresses are links (only http, https and mailto: nothing that runs script). */
+function linkify(s) {
+  return String(s === undefined || s === null ? '' : s).split(/((?:https?:\/\/|mailto:)[^\s<>"']+)/).map((part, k) => {
+    if (k % 2 === 0) return esc(part);
+    const tail = /[.,;:!?)]+$/.exec(part);
+    const href = tail ? part.slice(0, -tail[0].length) : part;
+    return '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(href) + '</a>' + esc(tail ? tail[0] : '');
+  }).join('');
+}
 function attr(obj) { return esc(JSON.stringify(obj)); }
 function debounce(fn, ms) {
   let t;
@@ -117,6 +126,8 @@ const isMine = t => t.assignees.indexOf(S.me.email) >= 0 || (!t.assignees.length
 const myTeams = () => S.teams.filter(t => t.lead === S.me.email || t.members.indexOf(S.me.email) >= 0);
 const teamMembers = t => [t.lead].concat(t.members).filter((e, i, a) => e && a.indexOf(e) === i);
 const projectMembers = p => (p.members && p.members.length ? p.members : (team(p.teamId) ? teamMembers(team(p.teamId)) : []));
+/** Like Access.canManageProject on the server (which checks again): admin, creator, team or project member. */
+const canEditProject = p => !!(S.me.admin || p.createdBy === S.me.email || (team(p.teamId) && teamMembers(team(p.teamId)).indexOf(S.me.email) >= 0) || (p.members || []).indexOf(S.me.email) >= 0);
 const subtasks = id => S.tasks.filter(t => t.parentId === id);
 const allTags = () => {
   const set = {};
@@ -151,6 +162,8 @@ const ICONS = {
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   flag: '<path d="M4 22V4"/><path d="M4 4h13l-2 4 2 4H4"/>',
+  pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',
+  video: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-4v12l-6-4z"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',

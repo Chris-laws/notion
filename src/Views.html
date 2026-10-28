@@ -1317,11 +1317,23 @@ function focusDate() {
   if (!S.plan) S.plan = { date: TODAY(), filter: 'due' };
   return S.plan.date;
 }
-/** Time blocks of one day (tasks sorted by start), overlapping blocks share the width. */
-function blocksHtml(planned) {
+/** Start minute of an event with a clock time ("09:30"), else null: it belongs to the all-day row. */
+function evStart(e) {
+  const m = /^(\d\d):(\d\d)$/.exec(e.time || '');
+  return m && (!e.endDate || e.endDate === e.startDate) ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+function evBlockHtml(ev, style) {
+  const e = ev.ev;
+  return '<div class="blk-p blk-ev" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '" style="' + style + '">' +
+    '<div class="bt">' + esc(evLabel(e)) + '</div><div class="bm">' + fmtClock(ev.s) + ' – ' + fmtClock(ev.e) + '</div></div>';
+}
+/** Time blocks of one day (tasks and meetings sorted by start), overlapping blocks share the width. */
+function blocksHtml(planned, events) {
   let cluster = [], clusterEnd = 0;
   const flush = () => { cluster.forEach(c => { c.n = cluster.reduce((m, x) => Math.max(m, x.lane + 1), 1); }); };
-  const evs = planned.slice().sort((a, c) => a.planStart - c.planStart).map(t => ({ t: t, s: t.planStart, e: t.planStart + plDur(t), lane: 0, n: 1 }));
+  const evs = planned.map(t => ({ t: t, s: t.planStart, e: t.planStart + plDur(t), lane: 0, n: 1 }))
+    .concat((events || []).map(e => ({ ev: e, s: evStart(e), e: evStart(e) + Math.max(15, Number(e.duration) || 30), lane: 0, n: 1 })))
+    .sort((a, c) => a.s - c.s);
   const laneEnds = [];
   evs.forEach(ev => {
     if (ev.s >= clusterEnd) { flush(); cluster = []; laneEnds.length = 0; clusterEnd = 0; }
@@ -1332,8 +1344,9 @@ function blocksHtml(planned) {
   flush();
   return evs.map(ev => {
     const t = ev.t, top = plPx(Math.max(ev.s, PL.from)), height = Math.max(plPx(Math.min(ev.e, PL.to)) - top, 26);
-    return '<div class="blk-p p-' + esc(t.priority || 'none') + (isDone(t) ? ' done' : '') + '" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" style="top:' + top + 'px;height:' + height +
-      'px;left:calc(6px + (100% - 12px) * ' + ev.lane + ' / ' + ev.n + ');width:calc((100% - 12px) / ' + ev.n + ' - 4px)">' +
+    const style = 'top:' + top + 'px;height:' + height + 'px;left:calc(6px + (100% - 12px) * ' + ev.lane + ' / ' + ev.n + ');width:calc((100% - 12px) / ' + ev.n + ' - 4px)';
+    if (ev.ev) return evBlockHtml(ev, style);
+    return '<div class="blk-p p-' + esc(t.priority || 'none') + (isDone(t) ? ' done' : '') + '" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" style="' + style + '">' +
       '<div class="bt">' + esc(t.title) + '</div>' + (height > 40 ? '<div class="bm">' + fmtClock(ev.s) + ' – ' + fmtClock(ev.e) + '</div>' : '') +
       '<div class="bx"><button data-action="blk-len" data-id="' + esc(t.id) + '" data-d="-15" title="15 Min. kürzer">−</button><button data-action="blk-len" data-id="' + esc(t.id) + '" data-d="15" title="15 Min. länger">+</button>' +
       '<button data-action="blk-unplan" data-id="' + esc(t.id) + '" title="Aus dem Plan nehmen">×</button></div></div>';
@@ -1387,7 +1400,7 @@ function timeGridHtml(days, o) {
   }).join('');
   const allday = days.map(d => {
     const items = [];
-    if (o.show.events && data) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d).forEach(e =>
+    if (o.show.events && data) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d && evStart(e) === null).forEach(e =>
       items.push('<div class="wk-chip event" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '">' + esc(evLabel(e)) + '</div>'));
     if (o.show.tasks) o.tasks.filter(t => t.dueDate === d && t.planDate !== d && !isDone(t) && inScope(t)).forEach(t =>
       items.push('<div class="wk-chip" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" title="Auf die Zeitleiste ziehen, um zu planen">' + glyph(t.status) + '<span>' + esc(t.title) + '</span></div>'));
@@ -1396,7 +1409,8 @@ function timeGridHtml(days, o) {
   const cols = days.map(d => {
     const wd = Shared.weekday(d);
     const planned = S.tasks.filter(t => t.planDate === d && inScope(t));
-    return '<div class="wk-col' + (d === today ? ' today' : '') + (wd === 0 || wd === 6 ? ' weekend' : '') + '" data-plan-date="' + d + '" data-action="wk-slot" data-date="' + d + '" title="Klicken, um hier eine Aufgabe einzuplanen">' + blocksHtml(planned) + nowLineHtml(d) + '</div>';
+    const timed = o.show.events && data ? data.events.filter(e => e.startDate === d && evStart(e) !== null) : [];
+    return '<div class="wk-col' + (d === today ? ' today' : '') + (wd === 0 || wd === 6 ? ' weekend' : '') + '" data-plan-date="' + d + '" data-action="wk-slot" data-date="' + d + '" title="Klicken, um hier eine Aufgabe einzuplanen">' + blocksHtml(planned, timed) + nowLineHtml(d) + '</div>';
   }).join('');
   const h = (PL.to - PL.from) / 60 * PL.hh;
   return '<div class="card-w wk' + (data ? '' : ' sk-on') + '" data-keep-scroll="wk" style="--cols:' + days.length + ';--hh:' + PL.hh + 'px;--tlh:' + h + 'px">' +
@@ -1503,6 +1517,7 @@ function teamPage(t) {
   if (tab === 'tasks') body = database(tasks, { people: members, teamId: t.id });
   if (tab === 'projects') body = '<div class="grid">' + projects.map(projectCard).join('') +
     '<button class="pcard new" data-action="project-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Neues Projekt</button></div>';
+  if (tab === 'jf') body = jfTeamTab(t, projects);
   if (tab === 'members') body = '<div class="members-list">' + members.map(e => {
     const u = user(e);
     const open = S.tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
@@ -1513,7 +1528,7 @@ function teamPage(t) {
       '<span class="col2 num">' + open + ' offen</span></div>';
   }).join('') + '</div>';
   return '<div class="page wide">' +
-    pageHead(t.name, t.description ? esc(t.description) : '', mark(t, 'lg'),
+    pageHead(t.name, t.description ? linkify(t.description) : '', mark(t, 'lg'),
       '<button class="btn outline" data-action="team-capacity" data-id="' + esc(t.id) + '">' + icon('users', 'sm') + 'Verfügbarkeit</button>' +
       '<button class="btn outline" data-action="team-calendar" data-id="' + esc(t.id) + '">' + icon('calendar', 'sm') + 'Kalender</button>' +
       '<button class="icon-btn" data-action="team-edit" data-id="' + esc(t.id) + '" title="Team bearbeiten">' + icon('settings') + '</button>') +
@@ -1521,7 +1536,8 @@ function teamPage(t) {
     '<span>Lead: ' + esc(user(t.lead).name) + '</span><span class="sep"></span><span>' + projects.length + ' Projekte</span></div>' +
     teamWarningsBanner(t.id) +
     '<div class="db-bar"><div class="tabs">' +
-    [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length], ['members', 'Mitglieder', 'users', members.length]]
+    [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length],
+      ['jf', 'Jour Fixe', 'repeat', jfData().series.filter(s => projects.some(p => p.id === s.projectId)).length], ['members', 'Mitglieder', 'users', members.length]]
       .map(x => '<button class="tab' + (tab === x[0] ? ' active' : '') + '" data-action="team-tab" data-v="' + x[0] + '">' + icon(x[2]) + x[1] + ' <span class="n">' + x[3] + '</span></button>').join('') +
     '</div>' + (tab === 'members' ? '<button class="btn primary" data-action="team-members" data-id="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Mitglieder hinzufügen</button>' : '') +
     '</div><div class="fit-body" data-keep-scroll="fit">' + body + '</div></div>';
@@ -1601,7 +1617,7 @@ function projectPage(p) {
   }
   return '<div class="page wide"><div class="pj-banner ' + inkClass(projectColorKey(p)) + '" style="--pc:' + pc + '">' +
     '<div class="pj-l">' + mark(p, 'lg') + '<div><div class="pj-t"><h1>' + esc(p.name) + '</h1><span class="pb-chip">' + esc(st.label) + '</span></div>' +
-    '<p>' + esc(p.description || 'Keine Beschreibung.') + '</p>' +
+    '<p>' + (p.description ? linkify(p.description) : 'Keine Beschreibung.') + '</p>' +
     '<div class="pj-m">' + (t ? '<button data-action="nav" data-view="team" data-id="' + esc(t.id) + '">' + mark(t) + esc(t.name) + '</button>' : '') +
     (p.startDate || p.endDate ? '<span>' + icon('calendar', 'sm') + esc(fmtRange(p.startDate || p.endDate, p.endDate)) + '</span>' : '') +
     '<button class="pj-people" data-action="project-members" data-id="' + esc(p.id) + '" title="Personen hinzufügen oder entfernen">' + avatars(members, 5) +

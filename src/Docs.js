@@ -39,7 +39,9 @@ const Docs = {
   /** For minutes: attendance and open action items, kept in the row (lists and the next meeting read no file). */
   summary_(content) {
     const m = Shared.protoFromText(content);
-    return m ? { people: JSON.stringify({ present: m.present, absent: m.absent }), openItems: Shared.protoOpenActions(m) } : {};
+    if (!m) return {};
+    const carry = Shared.protoCarry(m);
+    return { people: JSON.stringify({ present: m.present, absent: m.absent }), openItems: carry.open, pinnedTopics: carry.pinned };
   },
   /** File text, from the script cache while the version is unchanged (saves a Drive call per open). */
   read_(doc) {
@@ -252,7 +254,8 @@ const Jf = {
       minutes: Db.all('Docs').filter(d => d.kind === 'jf' && sees(d.projectId)).map(d => {
         const m = Docs.meta_(d);
         return { id: m.id, projectId: m.projectId, seriesId: m.seriesId, date: m.date, title: m.title, version: m.version,
-          updatedAt: m.updatedAt, updatedBy: m.updatedBy, lockBy: m.lockBy, people: m.people, openCount: (d.openItems || []).length };
+          updatedAt: m.updatedAt, updatedBy: m.updatedBy, lockBy: m.lockBy, people: m.people,
+          openCount: (d.openItems || []).length + (d.pinnedTopics || []).reduce((n, t) => n + (t.items || []).length, 0) };
       }).sort((a, b) => (a.date < b.date ? 1 : -1)),
     };
   },
@@ -320,16 +323,18 @@ const Jf = {
     return {
       id: '', draft: true, kind: 'jf', projectId: x.project.id, seriesId: x.series.id, date: p.date, version: 0,
       title: Jf.title_(x.series, p.date), canWrite: canWrite,
-      content: Jf.template_(x.series, p.date, prev ? prev.openItems || [] : [], ctx.email),
+      content: Jf.template_(x.series, p.date, prev ? { open: prev.openItems || [], pinned: prev.pinnedTopics || [] } : null, ctx.email),
     };
   },
   title_(s, date) { return s.title + ' · ' + date; },
 
   /** Minutes template: header from the series; open action items of the last meeting as the first topic. */
-  template_(s, date, open, me) {
+  template_(s, date, carry, me) {
+    const open = carry ? carry.open : [];
+    const pinned = carry ? carry.pinned : [];
     return Shared.protoToText({
       title: s.title, date: date, minuteTaker: me, present: s.attendees || [], absent: [],
-      topics: open.length ? [{ id: 'carry', title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : [],
+      topics: (open.length ? [{ id: 'carry', title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : []).concat(pinned),
     });
   },
 
@@ -343,6 +348,24 @@ const Jf = {
     if (found) return Docs.update_({ doc: found, project: x.project }, v, -1, p.baseContent);
     return Docs.create_(x.project, { title: Jf.title_(x.series, p.date), content: v.content },
       { kind: 'jf', seriesId: x.series.id, date: p.date }, Store.series(x.series, x.project), x.series.title);
+  },
+
+  /** A whole topic as a task: title, its lines as the description; in the project of the jour fixe or another one. */
+  topicToTask(p) {
+    const ctx = Docs.ctx_();
+    return Db.tx(() => {
+      const x = Docs.doc_(p.docId, ctx, true);
+      const model = Shared.protoFromText(Docs.read_(x.doc));
+      const topic = model && model.topics.find(t => t.id === p.topicId);
+      if (!topic) throw new Error('Thema nicht gefunden.');
+      const target = p.projectId ? Docs.project_(p.projectId, ctx, true) : x.project;
+      const lines = topic.items.filter(i => i.text).map(i => '- ' + i.type + ': ' + i.text + (i.owner ? ' (' + i.owner + ')' : '') + (i.due ? ' – ' + i.due : ''));
+      const task = Tasks.save({ title: topic.title || 'Thema aus dem Jour Fixe', projectId: target.id, assignees: [topic.owner || ctx.email],
+        description: ('Aus dem Jour Fixe „' + x.doc.title + '“' + (lines.length ? ':\n' + lines.join('\n') : '')).slice(0, 20000) })[0];
+      topic.taskId = task.id;
+      const doc = Docs.update_(x, { title: x.doc.title, content: Shared.protoToText(model) }, Number(x.doc.version));
+      return { task: task, doc: doc };
+    });
   },
 
   /** Turns an action line (topic t, line i) of saved minutes into a project task and links the line to it. */

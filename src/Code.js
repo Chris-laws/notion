@@ -65,6 +65,7 @@ const ROUTES = {
   'jf.removeSeries': p => Jf.removeSeries(p),
   'jf.meeting': p => Jf.meeting(p),
   'jf.actionToTask': p => Jf.actionToTask(p),
+  'jf.topicToTask': p => Jf.topicToTask(p),
   'storage.links': () => Store.adminLinks(),
   'backup.status': () => Backup.status(),
   'backup.run': () => Backup.runNow(),

@@ -90,6 +90,11 @@ A['jf-archive-all'] = () => { S.jfArchiveAll = true; render({ peek: false }); };
  * One meeting: series, date ("Nächster: …" for the next one, the plain date in the archive) and people:
  * before the meeting everybody invited, afterwards only who missed it (they should read the minutes).
  */
+/** The Meet link of a series, next to the row (opens Meet, not the minutes). */
+function jfMeet(s) {
+  return s.meetLink && /^https:\/\/meet\.google\.com\//.test(s.meetLink) ? '<a class="btn sm jf-meet" href="' + esc(s.meetLink) + '" target="_blank" rel="noopener noreferrer"' +
+    labelled(L('Google Meet öffnen', 'Open Google Meet')) + '>' + icon('video', 'sm') + 'Meet</a>' : '';
+}
 function jfRow(s, date, minutes, upcoming) {
   // no minutes yet (or ahead): the people invited; afterwards: who missed it
   const planned = upcoming || !minutes;
@@ -102,6 +107,7 @@ function jfRow(s, date, minutes, upcoming) {
     '<span class="grow"></span>' +
     (people.length ? (planned ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 6) : '') +
     icon('right', 'sm faint') + '</div>' +
+    jfMeet(s) +
     (upcoming ? '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '"' + labelled(L('Jour Fixe bearbeiten', 'Edit jour fixe')) + '>' + icon('settings', 'sm') + '</button>' : '') +
     '</div>';
 }
@@ -120,25 +126,51 @@ function jfOpen(seriesId, date) {
     render({ peek: false });
   }).catch(err => { S.jfOpening = false; fail(err); });
 }
-A['jf-new'] = el => jfModal(null, el.dataset.id);
+/** Team page: the jour fixe of all its projects, next meeting first; a new one for any of the projects. */
+function jfTeamTab(t, projects) {
+  const minutes = jfData().minutes;
+  const rows = [];
+  projects.forEach(p => jfUpcoming(p.id).forEach(u => rows.push({ date: u.date, html: jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true) })));
+  rows.sort((a, c) => a.date.localeCompare(c.date));
+  return '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3>' +
+    hintP(L('Alle Jour Fixe der Projekte dieses Teams. Teilnehmende: ganze Projektgruppen oder einzelne Personen.', 'Every jour fixe of the projects of this team. Participants: whole project groups or single people.')) + '</div>' +
+    (projects.length ? '<button class="btn primary" data-action="jf-new" data-id="' + esc(projects[0].id) + '" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button>' : '') + '</div>' +
+    (rows.length ? '<div class="jf-rows jf-active" role="list">' + rows.map(r => r.html).join('') + '</div>'
+      : '<div class="empty-mini">' + esc(L('Noch kein Jour Fixe in den Projekten dieses Teams.', 'No jour fixe in the projects of this team yet.')) + '</div>');
+}
+A['jf-new'] = el => jfModal(null, el.dataset.id, el.dataset.team);
 A['jf-edit'] = el => { const s = jfData().series.find(x => x.id === el.dataset.id); if (s) jfModal(s, s.projectId); };
-function jfModal(s, projectId) {
+/** "+ Projektgruppe": all people of a project join the participants (nobody twice). */
+A['jf-add-group'] = el => {
+  const box = $('.pp-field[data-pp="attendees"]', el.closest('form') || document);
+  const p = project(el.dataset.id);
+  if (box && p) ppSet(box, ppValue(box).concat(projectMembers(p)).filter((x, i, a) => a.indexOf(x) === i));
+};
+function jfGroups(teamId, projectId) {
+  const tid = teamId || (project(projectId) || {}).teamId;
+  const groups = S.projects.filter(p => p.teamId === tid);
+  return groups.length ? '<div class="jf-groups"><span class="faint">' + esc(L('Projektgruppe hinzufügen:', 'Add project group:')) + '</span>' +
+    groups.map(p => '<button type="button" class="nt-add" data-action="jf-add-group" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + esc(p.name) + '</button>').join('') + '</div>' : '';
+}
+function jfModal(s, projectId, teamId) {
   const p = project(projectId);
+  const choose = !s && teamId ? S.projects.filter(x => x.teamId === teamId) : [];
   s = s || { title: 'Jour Fixe', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: TODAY(), attendees: p ? projectMembers(p) : [S.me.email] };
   openModal({
     title: s.id ? L('Jour Fixe bearbeiten', 'Edit jour fixe') : L('Neuer Jour Fixe', 'New jour fixe'),
     body: field('Titel', '<input class="input" name="title" required maxlength="80" value="' + esc(s.title) + '">') +
+      (choose.length ? field(L('Projekt', 'Project'), selectField('projectId', choose.map(x => ({ key: x.id, label: x.name })), projectId)) : '') +
       '<div class="row">' + field('Rhythmus', selectField('rhythm', RHYTHMS(), s.rhythm)) + field('Wochentag', selectField('weekday', WEEKDAYS(), String(s.weekday))) + '</div>' +
       '<div class="row">' + field('Uhrzeit', '<input class="input" type="time" name="time" value="' + esc(s.time) + '">') +
       field('Dauer (Min.)', '<input class="input" type="number" min="15" max="480" step="5" name="duration" value="' + esc(s.duration) + '">') + '</div>' +
       '<div class="row">' + field('Ab', '<input class="input" type="date" name="startDate" value="' + esc(s.startDate || '') + '">') +
       field('Bis (optional)', '<input class="input" type="date" name="endDate" value="' + esc(s.endDate || '') + '">') + '</div>' +
-      divField('Teilnehmende', peoplePicker('attendees', s.attendees || [], { add: 'Personen hinzufügen', prefer: p ? projectMembers(p) : [] })) +
+      divField('Teilnehmende', peoplePicker('attendees', s.attendees || [], { add: 'Personen hinzufügen', prefer: p ? projectMembers(p) : [] }) + jfGroups(teamId, projectId)) +
       field('Google-Meet-Link (optional)', '<input class="input" name="meetLink" placeholder="https://meet.google.com/…" value="' + esc(s.meetLink || '') + '">'),
     submitLabel: s.id ? 'Speichern' : L('Jour Fixe anlegen', 'Create jour fixe'),
     danger: s.id ? { label: L('Serie beenden', 'End series'), onClick: () => confirmDelete(L('Serie beenden? Alle Protokolle bleiben erhalten.', 'End the series? All minutes are kept.'),
       () => call('jf.removeSeries', { id: s.id }).then(() => { calReload(); return jfReload(); })) } : null,
-    onSubmit: v => call('jf.saveSeries', Object.assign({ id: s.id, projectId: projectId }, v, { weekday: Number(v.weekday), attendees: collectPeople(v, 'attendees') }))
+    onSubmit: v => call('jf.saveSeries', Object.assign({ id: s.id, projectId: v.projectId || projectId }, v, { weekday: Number(v.weekday), attendees: collectPeople(v, 'attendees') }))
       .then(() => { closeModal(); calReload(); toast(L('Jour Fixe gespeichert', 'Jour fixe saved')); return jfReload(); }),
   });
 }
@@ -148,12 +180,15 @@ function jfModal(s, projectId) {
 function protoTable(m, o) {
   const rows = [];
   m.topics.forEach((t, k) => {
-    rows.push('<tr class="pt-topic"><td>' + (k + 1) + '.</td><td></td><td><b>' + esc(t.title) + '</b></td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
+    const ttask = t.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(t.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
+      : o.actions ? ' <button class="md-mk" data-action="proto-topic-task" data-id="' + esc(o.docId) + '" data-tid="' + esc(t.id) + '">' + icon('plus', 'sm') + L('Thema als Aufgabe', 'Topic as task') + '</button>' : '';
+    rows.push('<tr class="pt-topic"><td>' + (k + 1) + '.</td><td>' + (t.pinned ? '<span class="pt-pin"' + labelled(L('Verankert: kommt ins nächste Protokoll', 'Anchored: carried to the next minutes')) + '>' + icon('pin', 'sm') + '</span>' : '') +
+      '</td><td><b>' + linkify(t.title) + '</b>' + ttask + '</td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
     t.items.forEach((i, n) => {
       const task = i.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
         : o.actions && i.type === 'A' && !i.done ? ' <button class="md-mk" data-action="proto-task" data-id="' + esc(o.docId) + '" data-t="' + k + '" data-i="' + n + '" data-tid="' + esc(t.id) + '" data-iid="' + esc(i.id) + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
       rows.push('<tr class="pt-line' + (i.done ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
-        '<td>' + esc(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
+        '<td>' + linkify(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
     });
   });
   return '<div class="md-tw"><table class="pt"><thead><tr><th>' + L('Nr.', 'No.') + '</th><th>' + L('Art', 'Type') + '</th><th>' + L('Thema', 'Topic') + '</th><th>' +
@@ -296,6 +331,8 @@ function protoEditor() {
     '<div class="pe-topic card-w"><div class="pe-th"><span class="pe-no">' + (k + 1) + '.</span>' +
     '<input class="input" data-on-input="proto-field" data-path="topics.' + k + '.title" value="' + esc(t.title) + '" placeholder="' + esc(L('Thema', 'Topic')) + '" aria-label="' + esc(L('Thema', 'Topic')) + '">' +
     personSelect('topics.' + k + '.owner', t.owner) +
+    '<button type="button" class="icon-btn pe-pin' + (t.pinned ? ' on' : '') + '" data-action="proto-pin" data-t="' + k + '" aria-pressed="' + !!t.pinned + '"' +
+      labelled(t.pinned ? L('Anker lösen', 'Remove anchor') : L('Verankern: kommt in jedes nächste Protokoll', 'Anchor: carried to every next minutes')) + '>' + icon('pin', 'sm') + '</button>' +
     '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '"' + labelled(L('Thema löschen', 'Delete topic')) + '>' + icon('trash', 'sm') + END_BTN +
     t.items.map((i, n) => protoLine(i, k, n)).join('') +
     '<button type="button" class="btn sm outline" data-action="proto-add-line" data-t="' + k + '">' + icon('plus', 'sm') + L('Zeile', 'Line') + '</button></div>').join('');
@@ -332,6 +369,7 @@ const protoBarSoon = debounce(() => {
 const newId = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7);
 const newLine = () => ({ id: newId(), type: 'I', text: '', owner: '', due: '', done: false, taskId: '' });
 A['proto-add-topic'] = () => { S.protoEdit.model.topics.push({ id: newId(), title: '', owner: S.me.email, items: [newLine()] }); protoRender(); };
+A['proto-pin'] = el => { const t = S.protoEdit.model.topics[Number(el.dataset.t)]; protoSet('topics.' + el.dataset.t + '.pinned', !t.pinned); protoRender(); };
 A['proto-add-line'] = el => { S.protoEdit.model.topics[Number(el.dataset.t)].items.push(newLine()); protoRender(); };
 A['proto-del'] = el => {
   const t = S.protoEdit.model.topics;
@@ -407,6 +445,23 @@ A['proto-task'] = el => call('jf.actionToTask', { docId: el.dataset.id, topic: N
   toast(L('Aufgabe angelegt: ', 'Task created: ') + r.task.title, { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.task.id) } });
   return protoReopen(el.dataset.id);
 }).catch(fail);
+/** A whole topic as a task: the project of the jour fixe is preselected, any project the person may change can be chosen. */
+A['proto-topic-task'] = el => {
+  const d = S.doc;
+  const choice = S.projects.filter(p => p.id === d.projectId || canEditProject(p));
+  openModal({
+    title: L('Thema als Aufgabe', 'Topic as task'),
+    body: field(L('Projekt', 'Project'), selectField('projectId', choice.map(p => ({ key: p.id, label: p.name })), d.projectId)) +
+      hintP(L('Titel ist das Thema, die Zeilen stehen in der Beschreibung. Verantwortlich: wer das Thema hat.', 'The title is the topic, its lines go into the description. Assigned to the topic owner.')),
+    submitLabel: L('Aufgabe anlegen', 'Create task'),
+    onSubmit: v => call('jf.topicToTask', { docId: el.dataset.id, topicId: el.dataset.tid, projectId: v.projectId }).then(r => {
+      closeModal();
+      applyTasks([r.task]);
+      toast(L('Aufgabe angelegt: ', 'Task created: ') + r.task.title, { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.task.id) } });
+      return protoReopen(el.dataset.id);
+    }),
+  });
+};
 
 /* ---------------- admin: storage links ---------------- */
 function storageBox() {

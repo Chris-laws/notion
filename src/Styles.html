@@ -1627,7 +1627,16 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .pt-p { display: inline-flex; align-items: center; gap: 6px; }
 .pe-head { display: grid; grid-template-columns: 220px 1fr 1fr; gap: 12px; margin-bottom: 8px; }
 .pe-topic { padding: 12px; margin: 10px 0; display: grid; gap: 8px; }
-.pe-th { display: grid; grid-template-columns: 32px 1fr 190px 34px; gap: 8px; align-items: center; }
+.pe-th { display: grid; grid-template-columns: 32px 1fr 190px 34px 34px; gap: 8px; align-items: center; }
+.pe-pin.on { background: var(--accent-soft); color: var(--accent-text); }
+.pt-pin { display: inline-grid; place-items: center; color: var(--accent-text); }
+.pt a, .pj-banner p a, .page-sub a { color: inherit; text-decoration: underline; word-break: break-all; }
+.pt .md-task, .pt .md-mk { margin-left: 6px; display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; border-radius: 6px; padding: 1px 7px; vertical-align: middle; }
+.pt .md-task { background: var(--success-soft); color: var(--success-text); }
+.pt .md-mk { background: var(--bg); color: var(--accent-text); }
+.jf-meet { flex: none; }
+.jf-groups { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; }
+.blk-p.blk-ev { background: var(--accent-soft); color: var(--accent-text); border-left-color: var(--accent); box-shadow: none; cursor: pointer; }
 .pe-no { font-weight: 700; color: var(--accent-text); }
 .pe-line { display: grid; grid-template-columns: 120px 1fr 170px 140px 80px 34px; gap: 8px; align-items: start; padding-left: 40px; }
 .pe-text { min-height: 34px; resize: vertical; }

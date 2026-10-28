@@ -401,3 +401,23 @@ describe('jour fixe minutes: what changed', () => {
     assert.deepEqual(plain(S.protoDiff(b, a)), { topics: -1, lines: 1, changed: 1, removed: 1, header: true });
   });
 });
+
+describe('jour fixe minutes: anchored topics and topic tasks', () => {
+  test('topics keep their anchor and their task link through cleaning, merging and the text', () => {
+    const m = S.protoClean({ topics: [{ id: 't1', title: 'Budget', pinned: true, taskId: 't_9', items: [] }] });
+    assert.equal(m.topics[0].pinned, true);
+    assert.equal(m.topics[0].taskId, 't_9');
+    assert.equal(S.protoFromText(S.protoToText(m)).topics[0].pinned, true);
+    assert.equal(S.protoClean({ topics: [{ pinned: 'nein' }] }).topics[0].pinned, false);
+    const r = S.protoMerge({ topics: [{ id: 't1', title: 'A' }] }, { topics: [{ id: 't1', title: 'A', pinned: true }] }, { topics: [{ id: 't1', title: 'A' }] });
+    assert.equal(r.model.topics[0].pinned, true, 'the anchor merges like a field');
+  });
+  test('carry-over: anchored topics come again with their open actions; open actions of other topics are collected', () => {
+    const c = S.protoCarry({ topics: [
+      { id: 'a', title: 'Dauerthema', pinned: true, items: [{ id: 'x', type: 'A', text: 'offen' }, { id: 'y', type: 'A', text: 'fertig', done: true }, { id: 'z', type: 'I', text: 'Info' }] },
+      { id: 'b', title: 'Einmal', items: [{ id: 'w', type: 'A', text: 'auch offen' }] },
+    ] });
+    assert.deepEqual(plain(c.pinned.map(t => [t.title, t.pinned, t.items.map(i => i.text)])), [['Dauerthema', true, ['offen']]]);
+    assert.deepEqual(plain(c.open.map(i => i.text)), ['auch offen']);
+  });
+});

@@ -454,7 +454,9 @@ function SharedFactory() {
       text: cut(i && i.text, 2000), owner: mail(i && i.owner), due: isDate(i && i.due) ? i.due : '',
       done: yes(i && i.done), taskId: /^t_\w+$/.test(i && i.taskId) ? i.taskId : '',
     });
+    // pinned: the topic comes back in every next meeting until the anchor is removed; taskId: made into a task
     const topic = (t, k) => ({ id: id(t, 't' + k), title: cut(t && t.title, 200), owner: mail(t && t.owner),
+      pinned: yes(t && t.pinned), taskId: /^t_\w+$/.test(t && t.taskId) ? t.taskId : '',
       items: (t && Array.isArray(t.items) ? t.items : []).slice(0, 100).map((i, n) => item(i, k, n)) });
     return {
       title: cut(m.title, 120), date: isDate(m.date) ? m.date : '', minuteTaker: mail(m.minuteTaker),
@@ -496,6 +498,19 @@ function SharedFactory() {
   }
 
   /** Action items still open (type A, not done): they move on to the next meeting. */
+  /**
+   * What the next meeting starts with: anchored topics again (with their open actions only) and the
+   * open actions of all other topics, collected. { pinned: [topics], open: [lines] }
+   */
+  function protoCarry(m) {
+    const c = protoClean(m);
+    const open = i => i.type === 'A' && !i.done;
+    return {
+      pinned: c.topics.filter(t => t.pinned).map(t => Object.assign({}, t, { taskId: '', items: t.items.filter(open) })),
+      open: c.topics.filter(t => !t.pinned).reduce((all, t) => all.concat(t.items.filter(open)), []),
+    };
+  }
+
   function protoOpenActions(m) {
     const out = [];
     protoClean(m).topics.forEach(t => t.items.forEach(i => { if (i.type === 'A' && !i.done) out.push(i); }));
@@ -549,7 +564,7 @@ function SharedFactory() {
       return out;
     };
     const line = (bx, mx, tx, path) => fields(bx, mx, tx, ['type', 'text', 'owner', 'due', 'done', 'taskId'], path);
-    const topic = (bx, mx, tx, path) => Object.assign(fields(bx, mx, tx, ['title', 'owner'], path), { items: list(bx.items, mx.items, tx.items, line, path + '.items') });
+    const topic = (bx, mx, tx, path) => Object.assign(fields(bx, mx, tx, ['title', 'owner', 'pinned', 'taskId'], path), { items: list(bx.items, mx.items, tx.items, line, path + '.items') });
     // somebody both present and absent (one side each): my side decides
     let present = people(b.present, m.present, t.present);
     let absent = people(b.absent, m.absent, t.absent);
@@ -588,7 +603,7 @@ function SharedFactory() {
   }
 
   return {
-    jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoMerge, protoDiff,
+    jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoCarry, protoMerge, protoDiff,
     QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,

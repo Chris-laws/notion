@@ -471,3 +471,39 @@ describe('Drive errors say what Google answered', () => {
     assert.match(err, /Google 403: Google Drive API has not been used/);
   });
 });
+
+describe('jour fixe v54: anchors, topic tasks', () => {
+  const S = app => app.x.Shared;
+  function saved(edit) {
+    const { app, project } = world();
+    const s = app.call('jf.saveSeries', { projectId: project.id, title: 'Weekly', rhythm: 'weekly', weekday: 1, startDate: '2026-11-02', attendees: [ME, ANNA] });
+    const m = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    const model = S(app).protoFromText(m.content);
+    edit(model);
+    const d = app.call('docs.save', { projectId: project.id, seriesId: s.id, date: '2026-11-02', title: m.title, content: S(app).protoToText(model) });
+    return { app, project, s, d };
+  }
+  test('an anchored topic comes back in the next minutes until the anchor is removed', () => {
+    const { app, s, d } = saved(m => m.topics.push({ id: 'p1', title: 'Dauerthema', pinned: true, items: [] }, { id: 'n1', title: 'Einmalig', items: [] }));
+    const next = S(app).protoFromText(app.call('jf.meeting', { seriesId: s.id, date: '2026-11-09' }).content);
+    assert.deepEqual(JSON.parse(JSON.stringify(next.topics.map(t => [t.title, t.pinned]))), [['Dauerthema', true]]);
+    const cur = app.call('docs.get', { id: d.id });
+    const unpinned = S(app).protoFromText(cur.content); unpinned.topics[0].pinned = false;
+    app.call('docs.save', { id: d.id, title: d.title, baseVersion: cur.version, content: S(app).protoToText(unpinned) });
+    assert.equal(S(app).protoFromText(app.call('jf.meeting', { seriesId: s.id, date: '2026-11-09' }).content).topics.length, 0);
+  });
+  test('a topic becomes a task: in the project of the jour fixe by default, or in another project', () => {
+    const { app, project, d } = saved(m => m.topics.push({ id: 't1', title: 'Budget klären', owner: ANNA, items: [{ id: 'l1', type: 'I', text: 'Zahlen von Q3' }] }));
+    const r = app.call('jf.topicToTask', { docId: d.id, topicId: 't1' });
+    assert.equal(r.task.projectId, project.id);
+    assert.equal(r.task.title, 'Budget klären');
+    assert.match(r.task.description, /Zahlen von Q3/);
+    assert.deepEqual(JSON.parse(JSON.stringify(r.task.assignees)), [ANNA]);
+    assert.equal(S(app).protoFromText(app.call('docs.get', { id: d.id }).content).topics[0].taskId, r.task.id);
+    const t = app.call('teams.save', { name: 'Anderes', members: [ME] });
+    const other = app.call('projects.save', { teamId: t.id, name: 'Anderes Projekt', members: [] });
+    const r2 = app.call('jf.topicToTask', { docId: d.id, topicId: 't1', projectId: other.id });
+    assert.equal(r2.task.projectId, other.id);
+    assert.ok(app.as(OUT).error('jf.topicToTask', { docId: d.id, topicId: 't1' }));
+  });
+});

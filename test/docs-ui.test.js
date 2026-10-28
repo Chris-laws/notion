@@ -145,3 +145,87 @@ describe('minutes form', () => {
     w.eval('closeModal()');
   });
 });
+
+describe('jour fixe v54', () => {
+  test('a meeting with a time is a block on the time line of the week view, not in the all-day row', () => {
+    const html = w.eval(`timeGridHtml(['2030-01-07'], { data: { events: [{ id: 'jf_a_2030-01-07', type: 'jf', title: 'Team-JF', startDate: '2030-01-07', endDate: '2030-01-07', time: '09:00', duration: 60, projectId: ${JSON.stringify(pid)} }, { id: 'ev1', title: 'Messe', startDate: '2030-01-07' }], holidays: [], absences: [], warnings: [] }, show: { events: true, tasks: false }, tasks: [] })`);
+    const d = w.document.createElement('div');
+    d.innerHTML = html;
+    const blk = d.querySelector('.wk-col .blk-ev');
+    assert.ok(blk, 'a block in the day column');
+    assert.match(blk.textContent, /Team-JF/);
+    assert.match(blk.textContent, /09:00 – 10:00/);
+    assert.equal(blk.style.top, ((9 * 60 - 6 * 60) / 60 * 44) + 'px', 'starts at 09:00');
+    assert.equal(blk.style.height, '44px', 'one hour high');
+    assert.doesNotMatch(d.querySelector('.wk-a').textContent, /Team-JF/, 'not in the all-day row');
+    assert.match(d.querySelector('.wk-a').textContent, /Messe/, 'events without a time stay in the all-day row');
+  });
+  test('links in texts become safe hyperlinks; nothing else does', () => {
+    const html = w.eval(`linkify('See https://x.example/a?b=1&c=2, mail to mailto:a@b.de and javascript:alert(1) <b>')`);
+    const d = w.document.createElement('div');
+    d.innerHTML = html;
+    const a = [...d.querySelectorAll('a')];
+    assert.deepEqual(a.map(x => x.getAttribute('href')), ['https://x.example/a?b=1&c=2', 'mailto:a@b.de']);
+    a.forEach(x => { assert.equal(x.getAttribute('target'), '_blank'); assert.match(x.getAttribute('rel'), /noopener/); });
+    assert.equal(d.querySelector('b'), null, 'text is escaped');
+    assert.match(d.textContent, /javascript:alert\(1\)/);
+  });
+  test('the Meet link sits in the row of the meeting, outside the part that opens the minutes', async () => {
+    await w.eval(`(async () => { const s = jfData().series.find(x => x.projectId === ${JSON.stringify(pid)}); await call('jf.saveSeries', Object.assign({}, s, { meetLink: 'https://meet.google.com/abc-defg-hij' })); S.jf = await call('jf.list', {}); S.doc = null; S.protoEdit = null; S.projTab = 'jf'; go('project', ${JSON.stringify(pid)}); })()`);
+    await until(() => $('.jf-active .jf-meet'));
+    const a = $('.jf-active .jf-meet');
+    assert.equal(a.getAttribute('href'), 'https://meet.google.com/abc-defg-hij');
+    assert.match(a.getAttribute('rel'), /noopener/);
+    assert.equal(a.closest('.jf-hit'), null);
+  });
+  test('a topic can be anchored in the form; the minutes show the anchor', async () => {
+    click($('.jf-active .jf-hit'));
+    await until(() => $('.proto-edit') || $('[data-action="proto-edit"]'));
+    if (!$('.proto-edit')) { click($('[data-action="proto-edit"]')); await until(() => $('.proto-edit')); }
+    if (!$('.pe-topic')) { click($('[data-action="proto-add-topic"]')); await until(() => $('.pe-topic')); }
+    const title = $('.pe-topic input[data-path="topics.0.title"]');
+    title.value = 'Dauerthema Budget';
+    title.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const pin = $('.pe-topic [data-action="proto-pin"]');
+    assert.equal(pin.getAttribute('aria-pressed'), 'false');
+    click(pin);
+    await until(() => $('.pe-topic [data-action="proto-pin"][aria-pressed="true"]'));
+    assert.equal(w.eval('S.protoEdit.model.topics[0].pinned'), true);
+    click($('[data-action="proto-save"]'));
+    await until(() => $('.pt .pt-pin'));
+    assert.ok($('.pt .pt-pin'), 'anchor marker in the minutes');
+  });
+  test('a topic becomes a task: the project of the jour fixe is preselected, another one can be chosen', async () => {
+    const btn = $('.pt [data-action="proto-topic-task"]');
+    assert.ok(btn, 'button per topic');
+    click(btn);
+    await until(() => $('#modal-root select[name="projectId"]'));
+    assert.equal($('#modal-root select[name="projectId"]').value, pid);
+    const before = w.eval('S.tasks.length');
+    $('#modal-root form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await until(() => w.eval('S.tasks.length') > before);
+    assert.ok(w.eval(`S.tasks.some(t => t.title === 'Dauerthema Budget' && t.projectId === ${JSON.stringify(pid)})`));
+    await until(() => $('.pt .pt-topic .md-task'));
+    assert.ok($('.pt .pt-topic .md-task'), 'the topic links to its task');
+  });
+  test('the team page has a "Jour Fixe" tab with the meetings of its projects', async () => {
+    const tid = w.eval(`project(${JSON.stringify(pid)}).teamId`);
+    w.eval(`S.doc = null; S.protoEdit = null; S.teamTab = 'jf'; go('team', ${JSON.stringify(tid)})`);
+    await until(() => $('.jf-row'));
+    assert.ok($('.tabs [data-action="team-tab"][data-v="jf"]'));
+    assert.match($('.jf-active').textContent, /Team-JF/);
+  });
+  test('the series form adds a whole project group as participants with one click', async () => {
+    const tid = w.eval(`project(${JSON.stringify(pid)}).teamId`);
+    w.eval(`jfModal(null, ${JSON.stringify(pid)}, ${JSON.stringify(tid)})`);
+    await until(() => $('#modal-root [data-action="jf-add-group"]'));
+    const box = $('#modal-root .pp-field[data-pp="attendees"]');
+    w.eval(`ppSet($('#modal-root .pp-field[data-pp="attendees"]'), [])`);
+    click($('#modal-root [data-action="jf-add-group"][data-id="' + pid + '"]'));
+    const want = w.eval(`projectMembers(project(${JSON.stringify(pid)}))`);
+    const got = box.querySelector('input[type=hidden]').value.split(',').filter(Boolean);
+    assert.deepEqual(got.slice().sort(), JSON.parse(JSON.stringify(want)).slice().sort());
+    assert.ok($('#modal-root select[name="projectId"]'), 'from the team page: the project of the series can be chosen');
+    w.eval('closeModal()');
+  });
+});
