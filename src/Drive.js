@@ -23,6 +23,10 @@ const Gdrive = {
     if (body !== undefined) { opts.payload = body; opts.contentType = contentType || 'application/json'; }
     const res = UrlFetchApp.fetch(url, opts);
     const code = res.getResponseCode();
+    // 403 also means "too many requests" or "storage full": that is no missing permission
+    if ((code === 403 || code === 429) && /rateLimit|userRateLimit|quotaExceeded|storageQuota/i.test(res.getContentText())) {
+      throw new Error('Google Drive ist gerade ausgelastet oder der Speicher ist voll. Bitte gleich noch einmal versuchen.');
+    }
     if (code === 401 || code === 403) {
       throw new Error('Die App darf noch nicht in Google Drive speichern. Bitte im Apps-Script-Editor einmal „setup“ ausführen und die Berechtigung zulassen.');
     }

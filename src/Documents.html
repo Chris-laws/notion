@@ -19,6 +19,14 @@ function jfData() { return S.jf || { series: [], minutes: [] }; }
 function jfReload() {
   return call('jf.list', {}, { quiet: true }).then(d => { S.jf = d; render({ peek: false }); }).catch(() => {});
 }
+/** Leaving the project closes the open minutes (and releases "wird gerade bearbeitet"); the browser draft stays. */
+function jfLeave(view, id) {
+  const pid = S.protoEdit ? S.protoEdit.projectId : S.doc && S.doc.projectId;
+  if (!pid || (view === 'project' && id === pid)) return;
+  if (S.protoEdit) docEndEdit();
+  S.protoEdit = null;
+  S.doc = null;
+}
 /** "Weekly · Team / Projekt": what a jour fixe entry is called in calendars and the overview. */
 function jfName(seriesTitle, projectId) {
   const p = project(projectId);
@@ -42,11 +50,19 @@ function jfArchiveRows(pid) {
   return jfData().minutes.filter(m => m.projectId === pid && !next.some(u => u.s.id === m.seriesId && u.date === m.date))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
+/** The last meeting of every series within the past month that has no minutes yet (written a day later, say). */
+function jfMissing(pid) {
+  const today = TODAY();
+  const minutes = jfData().minutes;
+  return jfData().series.filter(s => s.projectId === pid).map(s => ({ s: s, date: Shared.jfDates(s, Shared.addDays(today, -31), Shared.addDays(today, -1)).pop() }))
+    .filter(x => x.date && !minutes.some(m => m.seriesId === x.s.id && m.date === x.date));
+}
 function jfTab(p) {
   if (S.protoEdit && S.protoEdit.projectId === p.id) return protoEditor();
   if (S.doc && S.doc.projectId === p.id) return protoViewer();
   const minutes = jfData().minutes;
-  const active = jfUpcoming(p.id).map(u => jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true));
+  const active = jfUpcoming(p.id).map(u => jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true))
+    .concat(jfMissing(p.id).map(u => jfRow(u.s, u.date, null, false)));
   return '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3>' +
     hintP(L('Regelmäßige Termine mit Protokoll. Offene Aufgaben wandern ins nächste Protokoll.', 'Regular meetings with minutes. Open actions move on to the next minutes.')) + '</div>' +
     '<button class="btn primary" data-action="jf-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button></div>' +
@@ -63,9 +79,9 @@ function jfArchive(p) {
   const names = {};
   jfData().series.forEach(s => { names[s.id] = s; });
   const shown = S.jfArchiveAll ? rows : rows.slice(0, ARCHIVE_PAGE);
-  return '<div class="jf-archive"><button type="button" class="jf-arch-h" data-action="jf-archive" aria-expanded="' + open + '">' + icon(open ? 'chevron' : 'right', 'sm') +
+  return '<div class="jf-archive"><button type="button" class="jf-arch-h" data-action="jf-archive" aria-controls="jf-archive-list" aria-expanded="' + open + '">' + icon(open ? 'chevron' : 'right', 'sm') +
     '<b>' + L('Archiv', 'Archive') + '</b><span class="n">' + rows.length + '</span><span class="faint">' + esc(L('alle Protokolle, neueste zuerst', 'all minutes, newest first')) + '</span></button>' +
-    (open ? '<div class="jf-rows" role="list">' + shown.map(m => jfRow(names[m.seriesId] || { id: m.seriesId, title: String(m.title || '').split(' · ')[0], attendees: [] }, m.date, m, false)).join('') + '</div>' +
+    (open ? '<div class="jf-rows" id="jf-archive-list" role="list">' + shown.map(m => jfRow(names[m.seriesId] || { id: m.seriesId, title: String(m.title || '').split(' · ')[0], attendees: [] }, m.date, m, false)).join('') + '</div>' +
       (shown.length < rows.length ? '<button type="button" class="btn sm outline" data-action="jf-archive-all">' + esc(L('Alle ' + rows.length + ' anzeigen', 'Show all ' + rows.length)) + '</button>' : '') : '') + '</div>';
 }
 A['jf-archive'] = () => { store.set('jfArchive', !store.get('jfArchive', false)); render({ peek: false }); };
@@ -75,15 +91,16 @@ A['jf-archive-all'] = () => { S.jfArchiveAll = true; render({ peek: false }); };
  * before the meeting everybody invited, afterwards only who missed it (they should read the minutes).
  */
 function jfRow(s, date, minutes, upcoming) {
-  const absent = minutes && minutes.people ? minutes.people.absent || [] : [];
-  const people = upcoming ? s.attendees || [] : absent;
+  // no minutes yet (or ahead): the people invited; afterwards: who missed it
+  const planned = upcoming || !minutes;
+  const people = planned ? s.attendees || [] : (minutes.people && minutes.people.absent) || [];
   const label = upcoming ? L('Nächster: ', 'Next: ') + fmtDate(date, { absolute: true }) : fmtDate(date, { absolute: true });
   return '<div class="jf-row' + (upcoming ? ' next' : '') + '" role="listitem"><div class="jf-hit" role="button" tabindex="0" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(date) + '" ' +
-    'data-on-keydown="jf-row-key" aria-label="' + esc(s.title + ', ' + label) + '">' +
+    'data-on-keydown="jf-row-key">' +
     '<b class="jf-t">' + esc(s.title) + '</b><span class="jf-d' + (upcoming ? ' next' : '') + '">' + esc(label) + '</span>' +
     (minutes && minutes.openCount ? '<span class="chip warn">' + esc(minutes.openCount + L(' offen', ' open')) + '</span>' : '') +
     '<span class="grow"></span>' +
-    (people.length ? (upcoming ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 6) : '') +
+    (people.length ? (planned ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 6) : '') +
     icon('right', 'sm faint') + '</div>' +
     (upcoming ? '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '"' + labelled(L('Jour Fixe bearbeiten', 'Edit jour fixe')) + '>' + icon('settings', 'sm') + '</button>' : '') +
     '</div>';
@@ -92,6 +109,7 @@ ON.keydown['jf-row-key'] = (el, e) => { if (e.key === 'Enter' || e.key === ' ') 
 A['jf-open'] = el => jfOpen(el.dataset.id, el.dataset.v);
 /** One call: saved minutes with their text, or a draft from the template (nothing is written before "Übernehmen"). */
 function jfOpen(seriesId, date) {
+  if (S.jfOpening) return Promise.resolve();
   S.jfOpening = true;
   return call('jf.meeting', { seriesId: seriesId, date: date, lang: LANG }).then(m => {
     S.jfOpening = false;
@@ -133,7 +151,7 @@ function protoTable(m, o) {
     rows.push('<tr class="pt-topic"><td>' + (k + 1) + '.</td><td></td><td><b>' + esc(t.title) + '</b></td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
     t.items.forEach((i, n) => {
       const task = i.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
-        : o.actions && i.type === 'A' && !i.done ? ' <button class="md-mk" data-action="proto-task" data-id="' + esc(o.docId) + '" data-t="' + k + '" data-i="' + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
+        : o.actions && i.type === 'A' && !i.done ? ' <button class="md-mk" data-action="proto-task" data-id="' + esc(o.docId) + '" data-t="' + k + '" data-i="' + n + '" data-tid="' + esc(t.id) + '" data-iid="' + esc(i.id) + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
       rows.push('<tr class="pt-line' + (i.done ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
         '<td>' + esc(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
     });
@@ -167,17 +185,44 @@ function protoViewer() {
     protoHead(m, d.version) + protoTable(m, { actions: d.canWrite && d.id, docId: d.id }) + '</div>';
 }
 A['doc-close'] = () => { S.doc = null; S.projTab = 'jf'; render({ peek: false }); };
+/** "+1 Thema · 2 Zeilen neu · 1 geändert": what one save changed (null for older entries). */
+function changeText(c) {
+  if (!c) return '';
+  const parts = [];
+  const n = (k, one, many) => (Math.abs(c[k]) === 1 ? one : many).replace('#', Math.abs(c[k]));
+  if (c.topics > 0) parts.push(n('topics', L('+# Thema', '+# topic'), L('+# Themen', '+# topics')));
+  if (c.topics < 0) parts.push(n('topics', L('−# Thema', '−# topic'), L('−# Themen', '−# topics')));
+  if (c.lines) parts.push(n('lines', L('# Zeile neu', '# new line'), L('# Zeilen neu', '# new lines')));
+  if (c.changed) parts.push(n('changed', L('# geändert', '# changed'), L('# geändert', '# changed')));
+  if (c.removed) parts.push(n('removed', L('# gelöscht', '# removed'), L('# gelöscht', '# removed')));
+  if (c.header) parts.push(L('Kopf geändert', 'header changed'));
+  return parts.join(' · ') || L('keine inhaltliche Änderung', 'no change in content');
+}
+/** Every version: who, when, what changed; view any of them, restore an earlier one (as a new version). */
 A['doc-versions'] = el => {
   const id = el.dataset.id;
   call('docs.versions', { id: id }).then(list => openModal({
     title: L('Versionen', 'Versions'),
-    body: list.length ? '<div class="list-plain">' + list.map(v => '<div class="li"><span class="grow"><b>' + esc(L('Version ', 'Version ') + v.version) + '</b> <span class="faint">' +
-      esc(user(v.by).name + ' · ' + timeAgo(v.at)) + '</span></span><button type="button" class="btn sm" data-action="doc-restore" data-id="' + esc(id) + '" data-v="' + v.version + '">' +
-      esc(L('Wiederherstellen', 'Restore')) + END_BTN).join('') + '</div>' : hintP(L('Noch keine älteren Versionen.', 'No earlier versions yet.')),
+    body: '<div class="list-plain ver-list">' + list.map(v => '<div class="li"><span class="grow"><b>' + esc(L('Version ', 'Version ') + v.version) + '</b>' +
+      (v.current ? ' <span class="chip soft">' + esc(L('aktuell', 'current')) + '</span>' : '') +
+      '<br><span class="faint">' + esc(user(v.by).name + ' · ' + fmtDate(String(v.at).slice(0, 10), { absolute: true }) + ' ' + String(v.at).slice(11, 16)) + '</span>' +
+      (v.change ? '<br><span class="ver-ch">' + esc(changeText(v.change)) + '</span>' : '') + '</span>' +
+      '<button type="button" class="btn sm" data-action="doc-version-view" data-id="' + esc(id) + '" data-v="' + v.version + '">' + esc(L('Ansehen', 'View')) + '</button>' +
+      (v.current ? '</div>' : '<button type="button" class="btn sm" data-action="doc-restore" data-id="' + esc(id) + '" data-v="' + v.version + '">' + esc(L('Wiederherstellen', 'Restore')) + END_BTN)).join('') + '</div>',
     submitLabel: L('Schließen', 'Close'),
     onSubmit: () => closeModal(),
   })).catch(fail);
 };
+/** One version, read only (the version list stays one click away). */
+A['doc-version-view'] = el => call('docs.version', { id: el.dataset.id, version: Number(el.dataset.v) }).then(v => {
+  const m = Shared.protoFromText(v.content);
+  openModal({
+    title: L('Version ', 'Version ') + v.version,
+    body: '<div class="ver-view">' + (m ? protoHead(m, v.version) + protoTable(m, {}) : docPreview(v.content)) + '</div>',
+    submitLabel: L('Zurück zur Liste', 'Back to the list'),
+    onSubmit: () => A['doc-versions'](el),
+  });
+}).catch(fail);
 A['doc-restore'] = el => call('docs.restore', { id: el.dataset.id, version: Number(el.dataset.v) })
   .then(() => { closeModal(); toast(L('Version wiederhergestellt', 'Version restored')); return protoReopen(el.dataset.id); }).catch(fail);
 function protoReopen(id) {
@@ -202,9 +247,12 @@ function protoStartEdit(d) {
   const model = Shared.protoFromText(d.content) || Shared.protoClean({ date: d.date, topics: [] });
   const e = { id: d.id || '', projectId: d.projectId, seriesId: d.seriesId, date: d.date, title: d.title, base: d.version || 0, model: model, saved: Shared.protoToText(model), sizes: {} };
   const draft = store.get(protoKey(e), null);
-  if (draft && draft.base === e.base && Shared.protoToText(draft.model) !== e.saved) {
-    e.model = Shared.protoClean(draft.model);
-    toast(L('Dein ungespeicherter Entwurf wurde wiederhergestellt.', 'Your unsaved draft was restored.'));
+  if (draft && Shared.protoToText(draft.model) !== e.saved) {
+    // saved by someone else since: my draft is merged into their version (my side wins a clash)
+    const newer = draft.base !== e.base && draft.baseText;
+    e.model = newer ? Shared.protoMerge(Shared.protoFromText(draft.baseText), draft.model, model).model : Shared.protoClean(draft.model);
+    toast(newer ? L('Dein Entwurf wurde mit der neuen Fassung zusammengeführt.', 'Your draft was merged with the newer version.')
+      : L('Dein ungespeicherter Entwurf wurde wiederhergestellt.', 'Your unsaved draft was restored.'));
   }
   S.protoEdit = e;
   if (e.id) docLock(e.id);
@@ -268,7 +316,7 @@ function protoSet(path, value) {
   let o = S.protoEdit.model;
   keys.slice(0, -1).forEach(k => { o = o[k]; });
   o[keys[keys.length - 1]] = value;
-  store.set(protoKey(S.protoEdit), { base: S.protoEdit.base, model: S.protoEdit.model });
+  store.set(protoKey(S.protoEdit), { base: S.protoEdit.base, baseText: S.protoEdit.saved, model: S.protoEdit.model });
 }
 ON.input['proto-field'] = el => { protoSet(el.dataset.path, el.value); protoBarSoon(); };
 ON.change['proto-field'] = el => { protoSet(el.dataset.path, el.type === 'checkbox' ? el.checked : el.value); protoRender(); };
@@ -306,15 +354,14 @@ A['proto-discard'] = () => {
   if (!e.id) S.doc = null;
   render({ peek: false });
 };
-A['proto-save'] = () => protoSave(false);
-function protoSave(force) {
+A['proto-save'] = () => protoSave();
+function protoSave() {
   const e = S.protoEdit;
   const content = Shared.protoToText(e.model);
   const payload = e.id ? { id: e.id, title: e.title, content: content, baseVersion: e.base, baseContent: e.saved }
-    : { projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content };
+    : { projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content, baseContent: e.saved };
   return call('docs.save', payload).then(r => {
-    if (r.conflict && !force) return protoConflict(r.current);
-    if (r.conflict) { e.id = r.current.id; e.base = r.current.version; return protoSave(false); }
+    if (r.conflict) return protoConflict(r);
     store.set(protoKey(e), null);
     docEndEdit();
     S.protoEdit = null;
@@ -326,7 +373,8 @@ function protoSave(force) {
   }).catch(fail);
 }
 /** Someone saved in between: keep mine (on top of theirs) or take theirs. Nothing is lost silently. */
-function protoConflict(cur) {
+function protoConflict(r) {
+  const cur = r.current;
   openModal({
     title: L('Inzwischen geändert', 'Changed in the meantime'),
     body: '<p style="margin:0 0 8px">' + esc(L(user(cur.updatedBy).name + ' hat gespeichert, während du bearbeitet hast.', user(cur.updatedBy).name + ' saved while you were editing.')) + '</p>' +
@@ -342,10 +390,19 @@ function protoConflict(cur) {
       S.doc = cur;
       render({ peek: false });
     } },
-    onSubmit: () => { closeModal(); return protoSave(true); },
+    onSubmit: () => {
+      closeModal();
+      // on top of their version: theirs plus my changes, mine only where both changed the same field
+      const e = S.protoEdit;
+      e.id = cur.id;
+      e.base = cur.version;
+      e.saved = cur.content;
+      if (r.merged) e.model = Shared.protoFromText(r.merged);
+      return protoSave();
+    },
   });
 }
-A['proto-task'] = el => call('jf.actionToTask', { docId: el.dataset.id, topic: Number(el.dataset.t), item: Number(el.dataset.i) }).then(r => {
+A['proto-task'] = el => call('jf.actionToTask', { docId: el.dataset.id, topic: Number(el.dataset.t), item: Number(el.dataset.i), topicId: el.dataset.tid, itemId: el.dataset.iid }).then(r => {
   applyTasks([r.task]);
   toast(L('Aufgabe angelegt: ', 'Task created: ') + r.task.title, { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.task.id) } });
   return protoReopen(el.dataset.id);

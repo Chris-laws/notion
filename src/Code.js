@@ -55,6 +55,7 @@ const ROUTES = {
   'docs.get': p => Docs.get(p),
   'docs.save': p => Docs.save(p),
   'docs.versions': p => Docs.versions(p),
+  'docs.version': p => Docs.version(p),
   'docs.restore': p => Docs.restore(p),
   'docs.lock': p => Docs.lock(p),
   'docs.unlock': p => Docs.unlock(p),

@@ -446,14 +446,16 @@ function SharedFactory() {
   function protoClean(m) {
     m = m && typeof m === 'object' ? m : {};
     // ids let two people's changes be merged topic by topic and line by line
-    const id = x => (/^[A-Za-z0-9_-]{1,16}$/.test(x && x.id) ? x.id : '');
-    const item = i => ({
-      id: id(i),
+    // entries of older minutes without an id get a fixed one from their position
+    const id = (x, fallback) => (x && typeof x.id === 'string' && /^[A-Za-z0-9_-]{1,16}$/.test(x.id) ? x.id : fallback);
+    const item = (i, k, n) => ({
+      id: id(i, 'l' + k + '_' + n),
       type: PROTO_TYPES.indexOf(i && i.type) >= 0 ? i.type : 'I',
       text: cut(i && i.text, 2000), owner: mail(i && i.owner), due: isDate(i && i.due) ? i.due : '',
       done: yes(i && i.done), taskId: /^t_\w+$/.test(i && i.taskId) ? i.taskId : '',
     });
-    const topic = t => ({ id: id(t), title: cut(t && t.title, 200), owner: mail(t && t.owner), items: (t && Array.isArray(t.items) ? t.items : []).slice(0, 100).map(item) });
+    const topic = (t, k) => ({ id: id(t, 't' + k), title: cut(t && t.title, 200), owner: mail(t && t.owner),
+      items: (t && Array.isArray(t.items) ? t.items : []).slice(0, 100).map((i, n) => item(i, k, n)) });
     return {
       title: cut(m.title, 120), date: isDate(m.date) ? m.date : '', minuteTaker: mail(m.minuteTaker),
       present: mails(m.present), absent: mails(m.absent),
@@ -548,17 +550,45 @@ function SharedFactory() {
     };
     const line = (bx, mx, tx, path) => fields(bx, mx, tx, ['type', 'text', 'owner', 'due', 'done', 'taskId'], path);
     const topic = (bx, mx, tx, path) => Object.assign(fields(bx, mx, tx, ['title', 'owner'], path), { items: list(bx.items, mx.items, tx.items, line, path + '.items') });
+    // somebody both present and absent (one side each): my side decides
+    let present = people(b.present, m.present, t.present);
+    let absent = people(b.absent, m.absent, t.absent);
+    present.filter(x => absent.indexOf(x) >= 0).forEach(x => {
+      if (m.absent.indexOf(x) >= 0) present = present.filter(y => y !== x);
+      else absent = absent.filter(y => y !== x);
+    });
     const model = protoClean({
       title: pick(b.title, m.title, t.title, 'title'), date: pick(b.date, m.date, t.date, 'date'),
       minuteTaker: pick(b.minuteTaker, m.minuteTaker, t.minuteTaker, 'minuteTaker'),
-      present: people(b.present, m.present, t.present), absent: people(b.absent, m.absent, t.absent),
+      present: present, absent: absent,
       topics: list(b.topics, m.topics, t.topics, topic, 'topics'),
     });
     return { model: model, conflicts: conflicts };
   }
 
+  /**
+   * What changed between two versions of minutes, for the version list: topics added (minus removed),
+   * lines added, lines removed, lines or topic headings changed, and whether the header changed.
+   */
+  function protoDiff(before, after) {
+    const a = protoClean(before);
+    const b = protoClean(after);
+    const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+    const byId = list => { const o = {}; list.forEach((x, i) => { o[x.id || '#' + i] = x; }); return o; };
+    const lines = m => { const o = {}; m.topics.forEach((t, k) => t.items.forEach((x, i) => { o[x.id || '#' + k + '.' + i] = x; })); return o; };
+    const ta = byId(a.topics), tb = byId(b.topics), la = lines(a), lb = lines(b);
+    const count = (o, p) => Object.keys(o).filter(k => !(k in p)).length;
+    const changedTopics = Object.keys(tb).filter(k => k in ta && (ta[k].title !== tb[k].title || ta[k].owner !== tb[k].owner)).length;
+    const changedLines = Object.keys(lb).filter(k => k in la && !same(la[k], lb[k])).length;
+    const head = m => [m.title, m.date, m.minuteTaker, m.present, m.absent];
+    return {
+      topics: count(tb, ta) - count(ta, tb), lines: count(lb, la), changed: changedLines + changedTopics,
+      removed: count(la, lb), header: !same(head(a), head(b)),
+    };
+  }
+
   return {
-    jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoMerge,
+    jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoMerge, protoDiff,
     QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,

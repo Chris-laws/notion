@@ -65,7 +65,7 @@ describe('documents', () => {
     assert.equal(d2.updatedBy, ANNA);
     assert.equal(app.call('docs.get', { id: d.id }).content, 'zwei');
     const v = app.call('docs.versions', { id: d.id });
-    assert.deepEqual(v.map(x => x.version), [1]);
+    assert.deepEqual(JSON.parse(JSON.stringify(v.map(x => x.version))), [2, 1], 'the current version on top, the earlier one below');
   });
   test('saving on top of an older version is refused with the current text (never a silent overwrite)', () => {
     const { app, project } = world();
@@ -85,15 +85,15 @@ describe('documents', () => {
     assert.equal(r.version, 3);
     assert.equal(app.call('docs.get', { id: d.id }).content, 'eins');
   });
-  test('only the last 10 versions are kept; older ones go to the Drive trash', () => {
+  test('the last 50 earlier versions are kept; older ones go to the Drive trash', () => {
     const { app, project } = world();
     const d = app.call('docs.save', { projectId: project.id, title: 'A', content: 'v1' });
-    for (let i = 2; i <= 13; i++) app.call('docs.save', { id: d.id, title: 'A', content: 'v' + i, baseVersion: i - 1 });
+    for (let i = 2; i <= 53; i++) app.call('docs.save', { id: d.id, title: 'A', content: 'v' + i, baseVersion: i - 1 });
     const v = app.call('docs.versions', { id: d.id });
-    assert.equal(v.length, 10);
-    assert.equal(v[0].version, 12, 'newest first');
-    const first = app.sheet('DocVersions').data.slice(1).filter(r => r[0]).length;
-    assert.equal(first, 10);
+    assert.equal(v.length, 51, 'the current one plus 50 earlier ones');
+    assert.equal(v[0].version, 53, 'newest first, the current one on top');
+    assert.equal(v[0].current, true);
+    assert.equal(app.sheet('DocVersions').data.slice(1).filter(r => r[0]).length, 50);
   });
   test('who is editing is shown to others for 5 minutes', () => {
     const { app, project } = world();
@@ -327,5 +327,111 @@ describe('jour fixe: two people writing the same minutes at the same time', () =
     assert.equal(r.conflict, true);
     assert.deepEqual(JSON.parse(JSON.stringify(r.conflicts)), ['topics.t1.items.l1.text']);
     assert.equal(S(app).protoFromText(app.call('docs.get', { id: v1.id }).content).topics[0].items[0].text, 'Annas Plan');
+  });
+});
+
+describe('jour fixe: version history of minutes', () => {
+  const S = app => app.x.Shared;
+  function minutes() {
+    const { app, project } = world();
+    const s = app.call('jf.saveSeries', { projectId: project.id, title: 'Weekly', rhythm: 'weekly', weekday: 1, startDate: '2026-11-02', attendees: [ME, ANNA] });
+    const m = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    const model = S(app).protoFromText(m.content);
+    model.topics.push({ id: 't1', title: 'Budget', items: [{ id: 'l1', type: 'I', text: 'Plan' }] });
+    const v1 = app.call('docs.save', { projectId: project.id, seriesId: s.id, date: '2026-11-02', title: m.title, content: S(app).protoToText(model) });
+    return { app, s, v1 };
+  }
+  const edit = (app, id, base, fn) => {
+    const d = app.call('docs.get', { id: id });
+    const model = S(app).protoFromText(d.content);
+    fn(model);
+    return app.call('docs.save', { id: id, title: d.title, baseVersion: base, baseContent: d.content, content: S(app).protoToText(model) });
+  };
+  test('every version says who changed what; any version can be viewed', () => {
+    const { app, v1 } = minutes();
+    app.as(ANNA);
+    edit(app, v1.id, 1, m => { m.topics.push({ id: 't2', title: 'Personal', items: [{ id: 'l2', type: 'A', text: 'Stelle' }] }); m.topics[0].items[0].text = 'Plan neu'; });
+    const list = app.as(ME).call('docs.versions', { id: v1.id });
+    assert.deepEqual(list.map(v => [v.version, v.by]), [[2, ANNA], [1, ME]]);
+    assert.deepEqual(JSON.parse(JSON.stringify(list[0].change)), { topics: 1, lines: 1, changed: 1, removed: 0, header: false });
+    const old = app.call('docs.version', { id: v1.id, version: 1 });
+    assert.equal(S(app).protoFromText(old.content).topics[0].items[0].text, 'Plan');
+    assert.equal(S(app).protoFromText(app.call('docs.version', { id: v1.id, version: 2 }).content).topics.length, 2, 'the current version too');
+  });
+  test('past minutes stay editable for everyone who may change the project; restoring adds a version', () => {
+    const { app, s, v1 } = minutes();
+    const later = app.as(ANNA).call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    assert.equal(later.canWrite, true);
+    edit(app, v1.id, 1, m => { m.topics[0].title = 'Budget 2027'; });
+    const r = app.call('docs.restore', { id: v1.id, version: 1 });
+    assert.equal(r.version, 3);
+    assert.equal(S(app).protoFromText(app.call('docs.get', { id: v1.id }).content).topics[0].title, 'Budget');
+    assert.equal(app.call('docs.versions', { id: v1.id }).length, 3, 'nothing lost');
+  });
+  test('people outside the project see no versions', () => {
+    const { app, v1 } = minutes();
+    assert.ok(app.as(OUT).error('docs.version', { id: v1.id, version: 1 }));
+    assert.ok(app.as(OUT).error('docs.versions', { id: v1.id }));
+  });
+});
+
+describe('jour fixe: review findings (v49)', () => {
+  const S = app => app.x.Shared;
+  function opened() {
+    const { app, project } = world();
+    const s = app.call('jf.saveSeries', { projectId: project.id, title: 'Weekly', rhythm: 'weekly', weekday: 1, startDate: '2026-11-02', attendees: [ME, ANNA] });
+    return { app, project, s };
+  }
+  const withTopic = (app, text, id, title) => { const m = S(app).protoFromText(text); m.topics.push({ id: id, title: title, items: [] }); return S(app).protoToText(m); };
+  test('"keep mine" after a conflict keeps the other changes of the other person (only the clashing field is mine)', () => {
+    const { app, project, s } = opened();
+    const d = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    const m0 = S(app).protoFromText(d.content);
+    m0.topics.push({ id: 't1', title: 'Budget', items: [] });
+    const v1 = app.call('docs.save', { projectId: project.id, seriesId: s.id, date: d.date, title: d.title, content: S(app).protoToText(m0) });
+    const base = app.call('docs.get', { id: v1.id }).content;
+    const anna = S(app).protoFromText(base); anna.topics[0].title = 'Annas Titel'; anna.topics.push({ id: 't2', title: 'Anna extra', items: [] });
+    app.as(ANNA).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, baseContent: base, content: S(app).protoToText(anna) });
+    const mine = S(app).protoFromText(base); mine.topics[0].title = 'Mein Titel';
+    const r = app.as(ME).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, baseContent: base, content: S(app).protoToText(mine) });
+    assert.equal(r.conflict, true);
+    assert.ok(r.merged, 'the merge with mine winning the clash comes along');
+    // "Meine Fassung speichern" saves that merge on top of the current version
+    app.as(ME).call('docs.save', { id: v1.id, title: v1.title, baseVersion: r.current.version, baseContent: r.current.content, content: r.merged });
+    const final = S(app).protoFromText(app.call('docs.get', { id: v1.id }).content);
+    assert.deepEqual(JSON.parse(JSON.stringify(final.topics.map(t => t.title))), ['Mein Titel', 'Anna extra']);
+  });
+  test('two people starting the same new minutes with different topics: merged, no dialog', () => {
+    const { app, project, s } = opened();
+    const a = app.as(ANNA).call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    const b = app.as(ME).call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    app.as(ANNA).call('docs.save', { projectId: project.id, seriesId: s.id, date: a.date, title: a.title, baseContent: a.content, content: withTopic(app, a.content, 'ta', 'Von Anna') });
+    const r = app.as(ME).call('docs.save', { projectId: project.id, seriesId: s.id, date: b.date, title: b.title, baseContent: b.content, content: withTopic(app, b.content, 'tb', 'Von mir') });
+    assert.ok(!r.conflict, JSON.stringify(r.conflicts));
+    const final = S(app).protoFromText(app.call('docs.get', { id: r.id }).content);
+    assert.deepEqual(JSON.parse(JSON.stringify(final.topics.map(t => t.title))), ['Von Anna', 'Von mir']);
+  });
+  test('"Als Aufgabe" finds the line by its id, even after someone inserted a line above it', () => {
+    const { app, project, s } = opened();
+    const d = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    const m = S(app).protoFromText(d.content);
+    m.topics.push({ id: 't1', title: 'X', items: [{ id: 'mine', type: 'A', text: 'Meine Aufgabe' }] });
+    const v1 = app.call('docs.save', { projectId: project.id, seriesId: s.id, date: d.date, title: d.title, content: S(app).protoToText(m) });
+    m.topics[0].items.unshift({ id: 'other', type: 'A', text: 'Andere' });
+    app.as(ANNA).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, content: S(app).protoToText(m) });
+    const r = app.as(ME).call('jf.actionToTask', { docId: v1.id, topic: 0, item: 0, topicId: 't1', itemId: 'mine' });
+    assert.equal(r.task.title, 'Meine Aufgabe');
+  });
+  test('a conflict hands back the current version with the right to edit it', () => {
+    const { app, project, s } = opened();
+    const d = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
+    const v1 = app.call('docs.save', { projectId: project.id, seriesId: s.id, date: d.date, title: d.title, content: d.content });
+    const t = app.call('docs.get', { id: v1.id }).content;
+    const x = S(app).protoFromText(t); x.minuteTaker = ANNA;
+    app.as(ANNA).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, baseContent: t, content: S(app).protoToText(x) });
+    const y = S(app).protoFromText(t); y.minuteTaker = LEA;
+    const r = app.as(ME).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, baseContent: t, content: S(app).protoToText(y) });
+    assert.equal(r.conflict, true);
+    assert.equal(r.current.canWrite, true);
   });
 });

@@ -33,8 +33,11 @@ describe('jour fixe overview', () => {
     assert.equal($$('.pj-tabs [data-v="docs"]').length, 0);
     assert.equal($$('[data-action="doc-new"]').length, 0, 'no plain documents any more');
     const top = $$('.jf-active .jf-row');
-    assert.equal(top.length, 1, 'one row per series');
+    assert.equal($$('.jf-active .jf-row.next').length, 1, 'one "next" row per series');
     assert.match(top[0].textContent, /Team-JF\s*Nächster: /);
+    // a past meeting of the last month without minutes stays on top, so its minutes can still be written
+    const missing = w.eval(`jfMissing(${JSON.stringify(pid)}).map(x => x.date)`);
+    assert.equal(top.length, 1 + missing.length);
     assert.doesNotMatch($('#view').textContent, /noch kein Protokoll/);
     assert.equal(top[0].querySelectorAll('.avatar').length, 3, 'everybody invited');
   });
@@ -127,5 +130,18 @@ describe('minutes form', () => {
     await until(() => $$('.pe-topic').length === 2);
     assert.equal($('.proto-edit textarea[data-path="topics.0.items.0.text"]').style.height, '180px');
     click($('[data-action="proto-discard"]'));
+  });
+  test('the version list shows who changed what; any version opens read only', async () => {
+    await until(() => $('[data-action="doc-versions"]'));
+    click($('[data-action="doc-versions"]'));
+    await until(() => $('#modal-root .ver-list'));
+    const first = $('#modal-root .ver-list .li');
+    assert.match(first.textContent, /aktuell/);
+    assert.ok($('#modal-root [data-action="doc-version-view"]'));
+    assert.match($('#modal-root .ver-list').textContent, /Thema|Zeile|geändert|Kopf/);
+    click($$('#modal-root [data-action="doc-version-view"]').pop());
+    await until(() => $('#modal-root .ver-view'));
+    assert.ok($('#modal-root .ver-view .pt'), 'the minutes of that version');
+    w.eval('closeModal()');
   });
 });

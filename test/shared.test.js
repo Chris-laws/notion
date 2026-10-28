@@ -350,9 +350,22 @@ describe('jour fixe minutes: merging two people saving at the same time', () => 
     assert.equal(r.model.minuteTaker, 'c@x.de');
     assert.deepEqual(plain(r.conflicts), []);
   });
-  test('ids survive cleaning; unknown id shapes are dropped', () => {
+  test('ids survive cleaning; missing or odd ids get a fixed one from the position (older minutes)', () => {
     assert.equal(S.protoClean({ topics: [{ id: 'ab_12', items: [{ id: 'x' }] }] }).topics[0].id, 'ab_12');
-    assert.equal(S.protoClean({ topics: [{ id: '<b>', items: [] }] }).topics[0].id, '');
+    const c = S.protoClean({ topics: [{ id: '<b>', items: [] }, { items: [{ text: 'a' }, { text: 'b' }] }] });
+    assert.deepEqual(plain([c.topics[0].id, c.topics[1].id, c.topics[1].items[1].id]), ['t0', 't1', 'l1_1']);
+  });
+  test('older minutes without ids: deleting one line while the other side edits another keeps exactly the edit', () => {
+    const base = { topics: [{ items: [{ text: 'a' }, { text: 'b' }] }] };
+    const mine = { topics: [{ items: [{ id: 'l0_1', text: 'b' }] }] };
+    const theirs = { topics: [{ items: [{ text: 'a' }, { text: 'b2' }] }] };
+    const r = S.protoMerge(base, mine, theirs);
+    assert.deepEqual(plain(r.model.topics[0].items.map(i => i.text)), ['b2']);
+    assert.deepEqual(plain(r.conflicts), []);
+  });
+  test('a person never ends up both present and absent: mine decides', () => {
+    const r = S.protoMerge({ present: [], absent: [] }, { present: ['y@x.de'], absent: [] }, { present: [], absent: ['y@x.de'] });
+    assert.deepEqual(plain([r.model.present, r.model.absent]), [['y@x.de'], []]);
   });
 });
 
@@ -376,5 +389,15 @@ describe('jour fixe minutes: edge cases', () => {
     const full = S.protoToText({ title: 'X', topics: [] });
     const block = full.slice(full.lastIndexOf('<!-- lidlflow:protocol '));
     assert.equal(S.protoFromText(block).title, 'X');
+  });
+});
+
+describe('jour fixe minutes: what changed', () => {
+  test('counts new topics, new, removed and changed lines, and header changes', () => {
+    const a = { present: ['a@x.de'], topics: [{ id: 't1', title: 'A', items: [{ id: 'l1', text: 'x' }, { id: 'l2', text: 'y' }] }] };
+    const b = { present: ['a@x.de', 'b@x.de'], topics: [{ id: 't1', title: 'A', items: [{ id: 'l1', text: 'x2' }, { id: 'l3', text: 'z' }] }, { id: 't2', title: 'B', items: [] }] };
+    assert.deepEqual(plain(S.protoDiff(a, b)), { topics: 1, lines: 1, changed: 1, removed: 1, header: true });
+    assert.deepEqual(plain(S.protoDiff(a, a)), { topics: 0, lines: 0, changed: 0, removed: 0, header: false });
+    assert.deepEqual(plain(S.protoDiff(b, a)), { topics: -1, lines: 1, changed: 1, removed: 1, header: true });
   });
 });

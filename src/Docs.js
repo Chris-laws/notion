@@ -10,7 +10,7 @@
  */
 const Docs = {
   MAX: 300000,
-  KEEP: 10,
+  KEEP: 50,
   LOCK_MIN: 5,
 
   /** The project of a document or list, checked for the signed-in person. */
@@ -111,17 +111,22 @@ const Docs = {
       // minutes saved by someone else meanwhile: merge topic by topic and line by line when nobody
       // changed the same field; otherwise both versions go back to the person (conflict dialog)
       const r = Docs.merge_(baseContent, v.content, before);
-      if (!r || r.conflicts.length) return { conflict: true, conflicts: r ? r.conflicts : [], current: Object.assign(Docs.meta_(doc), { content: before }) };
+      // a real clash: both versions go back; "merged" is the merge with my side winning only the clashing
+      // fields, which "Meine Fassung speichern" saves on top of the current version (nothing else is lost)
+      if (!r || r.conflicts.length) {
+        return { conflict: true, conflicts: r ? r.conflicts : [], merged: r ? Shared.protoToText(r.model) : '',
+          current: Object.assign(Docs.meta_(doc), { content: before, canWrite: true }) };
+      }
       v = { title: v.title, content: Shared.protoToText(r.model) };
       merged = true;
     }
-    Docs.keepVersion_(doc, before, x.project);
     Gdrive.write(doc.fileId, v.content);
     try {
+      Docs.keepVersion_(doc, before, x.project);
       if (v.title !== doc.title && doc.kind !== 'jf') Gdrive.rename(doc.fileId, Docs.fileName_(v.title, doc.date));
       const me = Auth.email();
       const row = Db.update('Docs', doc.id, Object.assign({
-        title: v.title, version: Number(doc.version) + 1, size: v.content.length, preview: Docs.preview_(v.content),
+        change: Docs.change_(before, v.content), title: v.title, version: Number(doc.version) + 1, size: v.content.length, preview: Docs.preview_(v.content),
         updatedAt: new Date().toISOString(), updatedBy: me, lockBy: doc.lockBy === me ? '' : doc.lockBy, lockUntil: doc.lockBy === me ? '' : doc.lockUntil,
       }, Docs.summary_(v.content)));
       Docs.remember_(row, v.content);
@@ -142,15 +147,34 @@ const Docs = {
   /** Keeps the text of the current version as a file; only the last KEEP stay, older ones go to the trash. */
   keepVersion_(doc, text, project) {
     const fileId = Gdrive.createFile(Store.versions(project), doc.id + '-v' + doc.version + '.md', text);
-    Db.insert('DocVersions', { id: Util.uid('dv_'), docId: doc.id, version: Number(doc.version), fileId: fileId, at: doc.updatedAt, by: doc.updatedBy });
+    Db.insert('DocVersions', { id: Util.uid('dv_'), docId: doc.id, version: Number(doc.version), fileId: fileId, at: doc.updatedAt, by: doc.updatedBy, change: doc.change || '' });
     const all = Db.all('DocVersions').filter(r => r.docId === doc.id).sort((a, b) => b.version - a.version);
     all.slice(Docs.KEEP).forEach(r => { Store.trash(r.fileId); Db.remove('DocVersions', r.id); });
   },
 
+  /** What a save changed (minutes only): stored with the version, shown in the version list. */
+  change_(before, after) {
+    const a = Shared.protoFromText(before);
+    const b = Shared.protoFromText(after);
+    return a && b ? JSON.stringify(Shared.protoDiff(a, b)) : '';
+  },
+  parseChange_(s) { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } },
+
+  /** The current version and the earlier ones, newest first: who saved when and what changed. */
   versions(p) {
-    Docs.doc_(p.id, Docs.ctx_(), false);
-    return Db.all('DocVersions').filter(r => r.docId === p.id).sort((a, b) => b.version - a.version)
-      .map(r => ({ version: r.version, at: r.at, by: r.by }));
+    const doc = Docs.doc_(p.id, Docs.ctx_(), false).doc;
+    const current = { version: Number(doc.version), at: doc.updatedAt, by: doc.updatedBy, change: Docs.parseChange_(doc.change), current: true };
+    return [current].concat(Db.all('DocVersions').filter(r => r.docId === p.id).sort((a, b) => b.version - a.version)
+      .map(r => ({ version: r.version, at: r.at, by: r.by, change: Docs.parseChange_(r.change), current: false })));
+  },
+
+  /** The text of one version (read only). */
+  version(p) {
+    const x = Docs.doc_(p.id, Docs.ctx_(), false);
+    if (Number(p.version) === Number(x.doc.version)) return { version: x.doc.version, content: Docs.read_(x.doc) };
+    const row = Db.all('DocVersions').find(r => r.docId === p.id && Number(r.version) === Number(p.version));
+    if (!row) throw new Error('Diese Version gibt es nicht mehr.');
+    return { version: row.version, content: Store.read(row.fileId) };
   },
 
   /** Brings back an earlier version as the newest one. */
@@ -315,7 +339,8 @@ const Jf = {
     if (!Shared.isDate(p.date)) throw new Error('Bitte ein Datum angeben.');
     const found = Db.all('Docs').find(d => d.seriesId === x.series.id && d.date === p.date);
     // saved by someone else in the meantime: never a second file, show theirs instead
-    if (found) return { conflict: true, current: Object.assign(Docs.meta_(found), { content: Docs.read_(found) }) };
+    // started by someone else at the same time: merge on top of theirs (from the template both began with)
+    if (found) return Docs.update_({ doc: found, project: x.project }, v, -1, p.baseContent);
     return Docs.create_(x.project, { title: Jf.title_(x.series, p.date), content: v.content },
       { kind: 'jf', seriesId: x.series.id, date: p.date }, Store.series(x.series, x.project), x.series.title);
   },
@@ -326,8 +351,9 @@ const Jf = {
     return Db.tx(() => {
       const x = Docs.doc_(p.docId, ctx, true);
       const model = Shared.protoFromText(Docs.read_(x.doc));
-      const topic = model && model.topics[Number(p.topic)];
-      const line = topic && topic.items[Number(p.item)];
+      // by id (stays right when someone inserted lines meanwhile), by position for older clients
+      const topic = model && (model.topics.find(t => p.topicId && t.id === p.topicId) || model.topics[Number(p.topic)]);
+      const line = topic && (topic.items.find(i => p.itemId && i.id === p.itemId) || topic.items[Number(p.item)]);
       if (!line || line.type !== 'A' || line.taskId) throw new Error('Punkt nicht gefunden oder schon als Aufgabe angelegt.');
       const task = Tasks.save({ title: line.text || topic.title, projectId: x.project.id, assignees: line.owner ? [line.owner] : [ctx.email], dueDate: line.due })[0];
       line.taskId = task.id;
