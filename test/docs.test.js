@@ -14,9 +14,31 @@ function world() {
   app.as(ME);
   const team = app.call('teams.save', { name: 'Forecast', members: [ME, ANNA] });
   const project = app.call('projects.save', { teamId: team.id, name: 'Exception Handling', members: [] });
-  return { app, team, project };
+  return { app: flushing(app), team, project };
+}
+/**
+ * Saving writes the database; Drive follows with docs.flush, which the page sends right after
+ * (see jf-fast.test.js). These tests look at the state once Drive has caught up.
+ */
+function flushing(app) {
+  const call = app.call;
+  app.call = (m, p) => {
+    const r = call(m, p);
+    if (m !== 'docs.save' || !r || !r.id || r.conflict) return r;
+    call('docs.flush', { id: r.id });
+    return Object.assign({}, r, { fileId: app.x.Db.get('Docs', r.id).fileId });
+  };
+  return app;
 }
 const D = app => app.ctx.DriveApp;
+/** Saves (that works without Drive) and returns what the flush answered when Drive refused. */
+function driveError(app, project) {
+  const r = app.call('docs.save', { projectId: project.id, title: 'A', content: 'x' });
+  assert.equal(app.call('docs.get', { id: r.id }).content, 'x', 'saved and readable');
+  const f = app.call('docs.flush', { id: r.id });
+  assert.equal(f.pending, 1, 'still pending, tried again next time');
+  return f.error;
+}
 /** Folder names from the root down to a file. */
 function pathOf(app, fileId) {
   const names = [];
@@ -206,12 +228,15 @@ describe('jour fixe', () => {
     const { app, project } = world();
     const s = series(app, project);
     const d = saveMeeting(app, s, '2026-11-02', m => m.topics.push({ title: 'Angebote', items: [{ type: 'A', text: 'Angebot einholen', owner: ANNA, due: '2026-11-06' }] }));
-    const r = app.call('jf.actionToTask', { docId: d.id, topic: 0, item: 0 });
-    assert.equal(r.task.projectId, project.id);
-    assert.deepEqual(plain(r.task.assignees), [ANNA]);
-    assert.equal(r.task.dueDate, '2026-11-06');
-    assert.equal(S(app).protoFromText(app.call('docs.get', { id: d.id }).content).topics[0].items[0].taskId, r.task.id);
-    assert.ok(app.error('jf.actionToTask', { docId: d.id, topic: 0, item: 0 }), 'not twice');
+    const topic = S(app).protoFromText(app.call('docs.get', { id: d.id }).content).topics[0];
+    const line = topic.items[0];
+    const req = id => ({ docId: d.id, topicId: topic.id, projectId: project.id, item: true, requestId: id, items: [{ itemId: line.id, title: line.text, assignees: [line.owner], dueDate: line.due }] });
+    const task = app.call('jf.makeTasks', req('a')).tasks[0];
+    assert.equal(task.projectId, project.id);
+    assert.deepEqual(plain(task.assignees), [ANNA]);
+    assert.equal(task.dueDate, '2026-11-06');
+    assert.equal(S(app).protoFromText(app.call('docs.get', { id: d.id }).content).topics[0].items[0].taskId, task.id);
+    assert.ok(app.error('jf.makeTasks', req('b')), 'not twice');
   });
   test('people outside the project cannot see, open or change a series', () => {
     const { app, project } = world();
@@ -233,10 +258,10 @@ describe('jour fixe', () => {
     assert.equal(r.series.length, 1);
     assert.equal(r.minutes.length, 1);
   });
-  test('without the Drive permission the message says what to do', () => {
+  test('without the Drive permission the save still holds; the flush says what to do', () => {
     const { app, project } = world();
     app.ctx.__DRIVE_DENIED__ = true;
-    const err = app.error('docs.save', { projectId: project.id, title: 'A', content: 'x' });
+    const err = driveError(app, project);
     app.ctx.__DRIVE_DENIED__ = false;
     assert.match(err, /setup/);
   });
@@ -419,8 +444,10 @@ describe('jour fixe: review findings (v49)', () => {
     const v1 = app.call('docs.save', { projectId: project.id, seriesId: s.id, date: d.date, title: d.title, content: S(app).protoToText(m) });
     m.topics[0].items.unshift({ id: 'other', type: 'A', text: 'Andere' });
     app.as(ANNA).call('docs.save', { id: v1.id, title: v1.title, baseVersion: 1, content: S(app).protoToText(m) });
-    const r = app.as(ME).call('jf.actionToTask', { docId: v1.id, topic: 0, item: 0, topicId: 't1', itemId: 'mine' });
-    assert.equal(r.task.title, 'Meine Aufgabe');
+    const r = app.as(ME).call('jf.makeTasks', { docId: v1.id, topicId: 't1', projectId: project.id, item: true, requestId: 'm', items: [{ itemId: 'mine', title: 'Meine Aufgabe' }] });
+    const lines = S(app).protoFromText(app.call('docs.get', { id: v1.id }).content).topics[0].items;
+    assert.equal(lines.find(i => i.id === 'mine').taskId, r.tasks[0].id);
+    assert.equal(lines.find(i => i.id === 'other').taskId, '');
   });
   test('a conflict hands back the current version with the right to edit it', () => {
     const { app, project, s } = opened();
@@ -457,7 +484,7 @@ describe('Drive through the built-in Drive service (no UrlFetchApp)', () => {
     const { app, project } = world();
     const denied = () => { throw new Error('API call to drive.files failed with error: Insufficient Permission'); };
     app.ctx.Drive = { Files: { list: denied, get: denied, create: denied, update: denied } };
-    try { assert.match(app.error('docs.save', { projectId: project.id, title: 'A', content: 'x' }), /setup/); } finally { delete app.ctx.Drive; }
+    try { assert.match(driveError(app, project), /setup/); } finally { delete app.ctx.Drive; }
   });
 });
 
@@ -466,7 +493,7 @@ describe('Drive errors say what Google answered', () => {
     const { app, project } = world();
     app.ctx.__DRIVE_DENIED__ = 'Google Drive API has not been used in project 123 before or it is disabled.';
     let err;
-    try { err = app.error('docs.save', { projectId: project.id, title: 'A', content: 'x' }); } finally { app.ctx.__DRIVE_DENIED__ = false; }
+    try { err = driveError(app, project); } finally { app.ctx.__DRIVE_DENIED__ = false; }
     assert.match(err, /setup/);
     assert.match(err, /Google 403: Google Drive API has not been used/);
   });
@@ -491,19 +518,5 @@ describe('jour fixe v54: anchors, topic tasks', () => {
     const unpinned = S(app).protoFromText(cur.content); unpinned.topics[0].pinned = false;
     app.call('docs.save', { id: d.id, title: d.title, baseVersion: cur.version, content: S(app).protoToText(unpinned) });
     assert.equal(S(app).protoFromText(app.call('jf.meeting', { seriesId: s.id, date: '2026-11-09' }).content).topics.length, 0);
-  });
-  test('a topic becomes a task: in the project of the jour fixe by default, or in another project', () => {
-    const { app, project, d } = saved(m => m.topics.push({ id: 't1', title: 'Budget klären', owner: ANNA, items: [{ id: 'l1', type: 'I', text: 'Zahlen von Q3' }] }));
-    const r = app.call('jf.topicToTask', { docId: d.id, topicId: 't1' });
-    assert.equal(r.task.projectId, project.id);
-    assert.equal(r.task.title, 'Budget klären');
-    assert.match(r.task.description, /Zahlen von Q3/);
-    assert.deepEqual(JSON.parse(JSON.stringify(r.task.assignees)), [ANNA]);
-    assert.equal(S(app).protoFromText(app.call('docs.get', { id: d.id }).content).topics[0].taskId, r.task.id);
-    const t = app.call('teams.save', { name: 'Anderes', members: [ME] });
-    const other = app.call('projects.save', { teamId: t.id, name: 'Anderes Projekt', members: [] });
-    const r2 = app.call('jf.topicToTask', { docId: d.id, topicId: 't1', projectId: other.id });
-    assert.equal(r2.task.projectId, other.id);
-    assert.ok(app.as(OUT).error('jf.topicToTask', { docId: d.id, topicId: 't1' }));
   });
 });

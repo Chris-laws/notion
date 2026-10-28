@@ -491,7 +491,7 @@ function openModal(o) {
   if (!$('#modal-root').children.length) modalReturn = document.activeElement;
   modalDirty = false;
   $('#modal-root').innerHTML =
-    '<div class="modal-bg" data-action="modal-bg"><form class="modal" data-on-submit="modal" autocomplete="off" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+    '<div class="modal-bg" data-action="modal-bg"><form class="modal' + (o.wide ? ' wide' : '') + '" data-on-submit="modal" autocomplete="off" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
     '<div class="modal-head"><span id="modal-title">' + esc(o.title) + '</span><button type="button" class="icon-btn" data-action="modal-close" aria-label="Schließen" title="Schließen (Esc)">' + icon('x') + '</button></div>' +
     '<div class="modal-body">' + o.body + '</div>' +
     '<div class="modal-foot">' + (o.danger ? '<button type="button" class="btn danger left" data-action="modal-danger">' + esc(o.danger.label) + '</button>' : '') +

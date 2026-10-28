@@ -10,7 +10,7 @@
 const Backup = {
   KEEP: 8,
   // tables worth keeping (the journal and the holiday cache are rebuilt by the app)
-  TABLES: ['Users', 'Teams', 'Projects', 'Tasks', 'Comments', 'Events', 'Absences', 'CompanyHolidays', 'Docs', 'DocVersions', 'JfSeries', 'Folders'],
+  TABLES: ['Users', 'Teams', 'Projects', 'Tasks', 'Comments', 'Events', 'Absences', 'CompanyHolidays', 'Docs', 'DocVersions', 'DocPending', 'JfSeries', 'Folders'],
   INDEX: ['date', 'createdAt', 'by', 'rows'],
 
   target_() {
@@ -36,6 +36,8 @@ const Backup = {
   /** Copies all tables (consistent: under the write lock) and drops dates beyond KEEP. */
   run(date) {
     date = Shared.isDate(date) ? date : Util.today();
+    // minutes whose page was closed before Drive had them: written now
+    try { Docs.flushAll_(); } catch (e) { console.error('flush before backup: ' + e.message); }
     const db = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'));
     const data = {};
     Db.tx(() => Backup.TABLES.forEach(t => {

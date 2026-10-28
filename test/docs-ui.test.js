@@ -118,6 +118,12 @@ describe('minutes form', () => {
     assert.match($('.pt').textContent, /Budget/);
     const before = w.eval('S.tasks.length');
     click($('[data-action="proto-task"]'));
+    await until(() => $('#modal-root input[name="title"]'));
+    await wait(150);
+    assert.equal(w.eval('S.tasks.length'), before, 'the button only opens the form');
+    assert.equal($('#modal-root input[name="title"]').value, 'Angebot einholen');
+    assert.equal($('#modal-root input[name="due"]').value, '2030-01-10');
+    $('#modal-root form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
     await until(() => w.eval('S.tasks.length') > before && $('.pt .md-task'));
     assert.ok(w.eval("S.tasks.some(t => t.title === 'Angebot einholen' && t.dueDate === '2030-01-10')"));
   });
@@ -227,5 +233,74 @@ describe('jour fixe v54', () => {
     assert.deepEqual(got.slice().sort(), JSON.parse(JSON.stringify(want)).slice().sort());
     assert.ok($('#modal-root select[name="projectId"]'), 'from the team page: the project of the series can be chosen');
     w.eval('closeModal()');
+  });
+});
+
+describe('tasks from the minutes in a form (v57)', () => {
+  const submit = () => $('#modal-root form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  /** Opens the form of the next meeting with a topic of three lines. */
+  async function formWithTopic() {
+    w.eval(`S.doc = null; S.protoEdit = null; S.projTab = 'jf'; go('project', ${JSON.stringify(pid)})`);
+    await until(() => $('.jf-active .jf-hit'));
+    click($('.jf-active .jf-hit'));
+    await until(() => $('.proto-edit') || $('[data-action="proto-edit"]'));
+    if (!$('.proto-edit')) { click($('[data-action="proto-edit"]')); await until(() => $('.proto-edit')); }
+    w.eval(`(() => { const m = S.protoEdit.model; m.topics.push({ id: 'tq', title: 'Go-Live', owner: S.me.email, items: [
+      { id: 'q1', type: 'A', text: 'Server buchen', owner: S.users[1].email, due: '2030-02-01', done: false, taskId: '' },
+      { id: 'q2', type: 'I', text: 'Budget ist frei', owner: '', due: '', done: false, taskId: '' },
+      { id: 'q3', type: 'A', text: 'Doku schreiben', owner: '', due: '2030-02-03', done: false, taskId: '' }] }); protoRender(); })()`);
+    await until(() => $$('.pe-topic').length && $$('.pe-topic').pop().querySelector('[data-action="pe-task"]'));
+    return w.eval("S.protoEdit.model.topics.length - 1");
+  }
+  test('before "Übernehmen": a topic becomes one task, only the ticked lines its sub-tasks; the form keeps the links', async () => {
+    const k = await formWithTopic();
+    const before = w.eval('S.tasks.length');
+    click($('[data-action="pe-task"][data-t="' + k + '"]:not([data-i])'));
+    await until(() => $$('#modal-root input[name="pick"]').length === 3);
+    assert.equal(w.eval('S.tasks.length'), before, 'nothing made yet');
+    assert.equal($('#modal-root select[name="projectId"]').value, pid, 'the project of the jour fixe');
+    assert.equal($$('#modal-root input[name="pick"]:checked').length, 3, 'all lines ticked at first');
+    const all = $('#modal-root [data-on-change="jm-all"]');
+    all.checked = false;
+    all.dispatchEvent(new w.Event('change', { bubbles: true }));
+    assert.equal($$('#modal-root input[name="pick"]:checked').length, 0, '"Alle auswählen" clears and ticks all');
+    $('#modal-root input[name="pick"][value="q1"]').checked = true;
+    $('#modal-root input[name="pick"][value="q3"]').checked = true;
+    submit();
+    await until(() => w.eval('S.tasks.length') === before + 3);
+    const parent = w.eval("S.tasks.find(t => t.title === 'Go-Live')");
+    assert.ok(parent, 'one task for the topic');
+    const subs = w.eval(`S.tasks.filter(t => t.parentId === ${JSON.stringify(parent.id)}).map(t => t.title).sort()`);
+    assert.deepEqual(JSON.parse(JSON.stringify(subs)), ['Doku schreiben', 'Server buchen']);
+    await until(() => w.eval(`S.protoEdit.model.topics[${k}].taskId`) === parent.id);
+    assert.ok(w.eval(`S.protoEdit.model.topics[${k}].items[0].taskId`), 'the ticked line keeps its task');
+    assert.equal(w.eval(`S.protoEdit.model.topics[${k}].items[1].taskId`), '', 'the other one not');
+    await until(() => $$('.pe-topic').pop().querySelector('.pe-has'));
+    assert.ok($$('.pe-topic').pop().querySelector('.pe-has'), 'the form shows the link instead of the button');
+  });
+  test('"Übernehmen" keeps the links and makes nothing again; the overview comes along, no extra request', async () => {
+    const n = w.eval('S.tasks.length');
+    const calls = [];
+    w.eval('window.__calls = []; const oc = call; call = function (m) { window.__calls.push(m); return oc.apply(null, arguments); }');
+    click($('[data-action="proto-save"]'));
+    await until(() => $('.pt') && !$('.proto-edit'));
+    await wait(100);
+    const sent = JSON.parse(w.eval('JSON.stringify(window.__calls)'));
+    calls.push(...sent);
+    assert.equal(w.eval('S.tasks.length'), n);
+    assert.deepEqual(sent.filter(m => m !== 'docs.flush'), ['docs.save'], 'one request while the person waits (then the Drive flush)');
+    assert.ok(sent.indexOf('docs.flush') >= 0, 'Drive follows in the background');
+    assert.ok($$('.pt .pt-topic .md-task').length >= 1, 'the saved minutes link the topic to its task');
+  });
+  test('saved minutes: a line opens the form with person and date; a topic with a task offers no second one', async () => {
+    const btn = $$('.pt [data-action="proto-task"]')[0];
+    if (btn) {
+      click(btn);
+      await until(() => $('#modal-root select[name="owner"]'));
+      assert.ok($('#modal-root input[name="due"]'));
+      w.eval('closeModal()');
+    }
+    const k = w.eval("Shared.protoFromText(S.doc.content).topics.findIndex(t => t.title === 'Go-Live')");
+    assert.equal($('.pt [data-action="proto-topic-task"][data-t="' + k + '"]'), null);
   });
 });

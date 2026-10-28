@@ -11,6 +11,7 @@ const PROTO_LABELS = () => ({ I: L('Info', 'Info'), A: L('Aufgabe', 'Action'), B
 const END_BTN = '</button></div>';
 const hintP = t => '<p class="hint">' + esc(t) + '</p>';
 const labelled = t => ' title="' + esc(t) + '" aria-label="' + esc(t) + '"';
+const ariaL = t => ' aria-label="' + esc(t) + '"';
 const whoName = e => (e ? user(e).name : '');
 const draftKey = id => 'draft:doc:' + (id || 'new');
 
@@ -181,12 +182,12 @@ function protoTable(m, o) {
   const rows = [];
   m.topics.forEach((t, k) => {
     const ttask = t.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(t.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
-      : o.actions ? ' <button class="md-mk" data-action="proto-topic-task" data-id="' + esc(o.docId) + '" data-tid="' + esc(t.id) + '">' + icon('plus', 'sm') + L('Thema als Aufgabe', 'Topic as task') + '</button>' : '';
+      : o.actions ? ' <button class="md-mk" data-action="proto-topic-task" data-t="' + k + '">' + icon('plus', 'sm') + L('Thema als Aufgabe', 'Topic as task') + '</button>' : '';
     rows.push('<tr class="pt-topic"><td>' + (k + 1) + '.</td><td>' + (t.pinned ? '<span class="pt-pin"' + labelled(L('Verankert: kommt ins nächste Protokoll', 'Anchored: carried to the next minutes')) + '>' + icon('pin', 'sm') + '</span>' : '') +
       '</td><td><b>' + linkify(t.title) + '</b>' + ttask + '</td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
     t.items.forEach((i, n) => {
       const task = i.taskId ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
-        : o.actions && i.type === 'A' && !i.done ? ' <button class="md-mk" data-action="proto-task" data-id="' + esc(o.docId) + '" data-t="' + k + '" data-i="' + n + '" data-tid="' + esc(t.id) + '" data-iid="' + esc(i.id) + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
+        : o.actions && i.type === 'A' && !i.done ? ' <button class="md-mk" data-action="proto-task" data-t="' + k + '" data-i="' + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
       rows.push('<tr class="pt-line' + (i.done ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
         '<td>' + linkify(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
     });
@@ -320,7 +321,15 @@ function protoLine(i, k, n) {
     personSelect(at + '.owner', i.owner) +
     '<input class="input sm" type="date" data-on-change="proto-field" data-path="' + at + '.due" value="' + esc(i.due) + '" aria-label="' + esc(L('Termin', 'Due')) + '">' +
     (i.type === 'A' ? '<label class="pe-done"><input type="checkbox" data-on-change="proto-field" data-path="' + at + '.done"' + (i.done ? ' checked' : '') + '> ' + esc(L('erledigt', 'done')) + '</label>' : '<span class="pe-done"></span>') +
+    peTaskBtn(i.type === 'A' ? i : null, k, n) +
     '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '" data-i="' + n + '"' + labelled(L('Zeile löschen', 'Delete line')) + '>' + icon('x', 'sm') + END_BTN;
+}
+/** In the form: "as task" for a topic or an action line, or the link to the task made from it. */
+function peTaskBtn(x, k, n) {
+  if (!x) return '<span></span>';
+  if (x.taskId) return '<button type="button" class="icon-btn pe-has" data-action="open-task" data-id="' + esc(x.taskId) + '"' + labelled(L('Aufgabe öffnen', 'Open task')) + '>' + icon('checksq', 'sm') + '</button>';
+  return '<button type="button" class="icon-btn" data-action="pe-task" data-t="' + k + '"' + (n === undefined ? '' : ' data-i="' + n + '"') +
+    labelled(n === undefined ? L('Thema als Aufgabe (mit Unteraufgaben)', 'Topic as task (with sub-tasks)') : L('Als Aufgabe', 'As task')) + '>' + icon('plus', 'sm') + '</button>';
 }
 function protoEditor() {
   const e = S.protoEdit;
@@ -330,7 +339,7 @@ function protoEditor() {
   const topics = m.topics.map((t, k) =>
     '<div class="pe-topic card-w"><div class="pe-th"><span class="pe-no">' + (k + 1) + '.</span>' +
     '<input class="input" data-on-input="proto-field" data-path="topics.' + k + '.title" value="' + esc(t.title) + '" placeholder="' + esc(L('Thema', 'Topic')) + '" aria-label="' + esc(L('Thema', 'Topic')) + '">' +
-    personSelect('topics.' + k + '.owner', t.owner) +
+    personSelect('topics.' + k + '.owner', t.owner) + peTaskBtn(t, k) +
     '<button type="button" class="icon-btn pe-pin' + (t.pinned ? ' on' : '') + '" data-action="proto-pin" data-t="' + k + '" aria-pressed="' + !!t.pinned + '"' +
       labelled(t.pinned ? L('Anker lösen', 'Remove anchor') : L('Verankern: kommt in jedes nächste Protokoll', 'Anchor: carried to every next minutes')) + '>' + icon('pin', 'sm') + '</button>' +
     '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '"' + labelled(L('Thema löschen', 'Delete topic')) + '>' + icon('trash', 'sm') + END_BTN +
@@ -401,14 +410,23 @@ function protoSave() {
   return call('docs.save', payload).then(r => {
     if (r.conflict) return protoConflict(r);
     store.set(protoKey(e), null);
-    docEndEdit();
+    // the save released the "is editing" mark itself; Drive catches up in the background
+    clearInterval(docLockTimer);
     S.protoEdit = null;
     toast(r.merged ? L('Gespeichert und mit den Änderungen von ' + user(r.mergedWith).name + ' zusammengeführt', 'Saved and merged with the changes of ' + user(r.mergedWith).name)
       : L('Protokoll gespeichert', 'Minutes saved'));
     S.doc = Object.assign({}, r, { content: r.content || content, canWrite: true });
+    delete S.doc.jf;
+    if (r.jf) S.jf = r.jf;
     render({ peek: false });
-    return jfReload();
+    docFlush(r.id);
   }).catch(fail);
+}
+/** Writes the saved minutes into Drive (file and earlier version); nobody waits for it, a refusal is shown. */
+function docFlush(id) {
+  call('docs.flush', { id: id }, { quiet: true }).then(f => {
+    if (f && f.error) toast(L('Gespeichert. Google Drive hat es noch nicht übernommen: ', 'Saved. Google Drive has not taken it yet: ') + f.error);
+  }).catch(() => {});
 }
 /** Someone saved in between: keep mine (on top of theirs) or take theirs. Nothing is lost silently. */
 function protoConflict(r) {
@@ -440,28 +458,97 @@ function protoConflict(r) {
     },
   });
 }
-A['proto-task'] = el => call('jf.actionToTask', { docId: el.dataset.id, topic: Number(el.dataset.t), item: Number(el.dataset.i), topicId: el.dataset.tid, itemId: el.dataset.iid }).then(r => {
-  applyTasks([r.task]);
-  toast(L('Aufgabe angelegt: ', 'Task created: ') + r.task.title, { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.task.id) } });
-  return protoReopen(el.dataset.id);
-}).catch(fail);
-/** A whole topic as a task: the project of the jour fixe is preselected, any project the person may change can be chosen. */
-A['proto-topic-task'] = el => {
+/* ---------------- minutes: tasks from a topic or a line (a form; nothing is made before "Anlegen") ---------------- */
+/** The minutes the buttons belong to: the form (before "Übernehmen") or the saved minutes. */
+function jfTaskSource(draft) {
+  if (draft) { const e = S.protoEdit; return { model: e.model, projectId: e.projectId, docId: '', date: e.date, title: e.title }; }
   const d = S.doc;
-  const choice = S.projects.filter(p => p.id === d.projectId || canEditProject(p));
+  return { model: Shared.protoFromText(d.content), projectId: d.projectId, docId: d.id, date: d.date, title: d.title };
+}
+function jfPeople(src) {
+  const p = project(src.projectId);
+  return src.model.present.concat(p ? projectMembers(p) : [], S.users.map(u => u.email)).filter((x, i, a) => x && a.indexOf(x) === i);
+}
+function jfPersonField(name, people, value) {
+  return '<select class="select sm" name="' + name + '"' + ariaL(L('Verantwortlich', 'Responsible')) + '><option value="">' + esc(L('– ich –', '– me –')) + '</option>' +
+    people.map(x => '<option value="' + esc(x) + '"' + (x === value ? ' selected' : '') + '>' + esc(user(x).name) + '</option>').join('') + '</select>';
+}
+/** One line of the topic in the form: tick it to make it a sub-task; text, person and date can still be changed. */
+function jfMaskLine(i, people) {
+  const has = !!i.taskId;
+  const on = !has && !i.done && !!String(i.text).trim();
+  return '<div class="jm-line' + (has ? ' has' : '') + '"><label class="jm-pick"><input type="checkbox" name="pick" value="' + esc(i.id) + '"' + (on ? ' checked' : '') + (has ? ' disabled' : '') +
+    ariaL(L('Als Unteraufgabe übernehmen', 'Take as sub-task')) + '><span class="pt-type t-' + i.type + '">' + i.type + '</span></label>' +
+    '<input class="input sm" name="t_' + esc(i.id) + '" value="' + esc(i.text) + '"' + ariaL(L('Unteraufgabe', 'Sub-task')) + '>' +
+    jfPersonField('o_' + i.id, people, i.owner) +
+    '<input class="input sm" type="date" name="d_' + esc(i.id) + '" value="' + esc(i.due) + '"' + ariaL(L('Fällig', 'Due')) + '>' +
+    (has ? '<span class="chip soft">' + esc(L('schon Aufgabe', 'already a task')) + '</span>' : '') + '</div>';
+}
+/**
+ * The form for tasks from the minutes: project (the one of the jour fixe preselected), title, person, due date;
+ * for a topic also its lines with checkboxes: the ticked ones become sub-tasks of the topic's task.
+ */
+function jfTaskMask(draft, k, n) {
+  const src = jfTaskSource(draft);
+  const topic = src.model && src.model.topics[k];
+  if (!topic) return;
+  const line = n === undefined ? null : topic.items[n];
+  const people = jfPeople(src);
+  const choice = S.projects.filter(p => p.id === src.projectId || canEditProject(p));
+  const requestId = newId();
+  const head = line || { text: topic.title, owner: topic.owner, due: '' };
+  const lines = line ? '' : '<div class="field"><span class="jm-h">' + esc(L('Unteraufgaben', 'Sub-tasks')) +
+    '<label class="jm-all"><input type="checkbox" data-on-change="jm-all" checked> ' + esc(L('Alle auswählen', 'Select all')) + '</label></span>' +
+    (topic.items.length ? topic.items.map(i => jfMaskLine(i, people)).join('') : '<p class="hint">' + esc(L('Das Thema hat keine Zeilen.', 'The topic has no lines.')) + '</p>') + '</div>';
   openModal({
-    title: L('Thema als Aufgabe', 'Topic as task'),
-    body: field(L('Projekt', 'Project'), selectField('projectId', choice.map(p => ({ key: p.id, label: p.name })), d.projectId)) +
-      hintP(L('Titel ist das Thema, die Zeilen stehen in der Beschreibung. Verantwortlich: wer das Thema hat.', 'The title is the topic, its lines go into the description. Assigned to the topic owner.')),
-    submitLabel: L('Aufgabe anlegen', 'Create task'),
-    onSubmit: v => call('jf.topicToTask', { docId: el.dataset.id, topicId: el.dataset.tid, projectId: v.projectId }).then(r => {
-      closeModal();
-      applyTasks([r.task]);
-      toast(L('Aufgabe angelegt: ', 'Task created: ') + r.task.title, { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.task.id) } });
-      return protoReopen(el.dataset.id);
-    }),
+    title: line ? L('Punkt als Aufgabe', 'Item as task') : L('Thema als Aufgabe', 'Topic as task'),
+    wide: !line,
+    body: field(L('Projekt', 'Project'), selectField('projectId', choice.map(p => ({ key: p.id, label: p.name })), src.projectId)) +
+      field(L('Aufgabe', 'Task'), '<input class="input" name="title" required maxlength="300" value="' + esc(head.text) + '">') +
+      '<div class="row">' + field(L('Verantwortlich', 'Responsible'), jfPersonField('owner', people, head.owner)) +
+      field(L('Fällig', 'Due'), '<input class="input" type="date" name="due" value="' + esc(head.due) + '">') + '</div>' + lines +
+      hintP(draft ? L('Die Aufgaben entstehen sofort, das Protokoll merkt sich die Verknüpfung beim „Übernehmen“.', 'The tasks are made right away; the minutes keep the link when you apply them.')
+        : L('Nichts wird angelegt, bevor du bestätigst.', 'Nothing is made before you confirm.')),
+    submitLabel: line ? L('Aufgabe anlegen', 'Create task') : L('Aufgabe mit Unteraufgaben anlegen', 'Create task with sub-tasks'),
+    onSubmit: v => jfMakeTasks({ draft: draft, src: src, topic: topic, line: line, requestId: requestId }, v),
   });
-};
+}
+ON.change['jm-all'] = el => { $$('input[name="pick"]:not([disabled])', el.closest('form')).forEach(c => { c.checked = el.checked; }); };
+/** o: { draft, src, topic, line, requestId } from the form; v: its values. */
+function jfMakeTasks(o, v) {
+  const src = o.src, topic = o.topic, line = o.line;
+  const who = e => (e ? [e] : [S.me.email]);
+  const from = L('Aus dem Jour Fixe „', 'From the jour fixe "') + src.title + (L('“', '"'));
+  const picked = line ? [] : [].concat(v.pick || []);
+  const payload = { projectId: v.projectId, requestId: o.requestId, docId: src.docId, topicId: topic.id, item: !!line,
+    task: { title: v.title, assignees: who(v.owner), dueDate: v.due, description: from },
+    items: line ? [{ itemId: line.id, title: v.title, assignees: who(v.owner), dueDate: v.due, description: from }]
+      : picked.map(id => ({ itemId: id, title: v['t_' + id], assignees: who(v['o_' + id]), dueDate: v['d_' + id], description: from })) };
+  return call('jf.makeTasks', payload).then(r => {
+    applyTasks(r.tasks);
+    toast(r.tasks.length > 1 ? L(r.tasks.length + ' Aufgaben angelegt', r.tasks.length + ' tasks created') : L('Aufgabe angelegt: ', 'Task created: ') + r.tasks[0].title,
+      { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.tasks[0].id) } });
+    if (o.draft) jfLinkDraft(topic.id, line, r.tasks, picked);
+    else if (r.doc) { S.doc = Object.assign({}, S.doc, r.doc); render({ peek: false }); }
+  });
+}
+/** Before "Übernehmen": the form keeps the task links (saved with the minutes, so nothing is made twice). */
+function jfLinkDraft(topicId, line, tasks, picked) {
+  const e = S.protoEdit;
+  if (!e) return;
+  const t = e.model.topics.find(x => x.id === topicId);
+  if (!t) return;
+  if (line) { const i = t.items.find(x => x.id === line.id); if (i) i.taskId = tasks[0].id; }
+  else {
+    t.taskId = tasks[0].id;
+    picked.forEach((id, k) => { const i = t.items.find(x => x.id === id); if (i && tasks[k + 1]) i.taskId = tasks[k + 1].id; });
+  }
+  store.set(protoKey(e), { base: e.base, baseText: e.saved, model: e.model });
+  protoRender();
+}
+A['proto-task'] = el => jfTaskMask(false, Number(el.dataset.t), Number(el.dataset.i));
+A['proto-topic-task'] = el => jfTaskMask(false, Number(el.dataset.t));
+A['pe-task'] = el => jfTaskMask(true, Number(el.dataset.t), el.dataset.i === undefined ? undefined : Number(el.dataset.i));
 
 /* ---------------- admin: storage links ---------------- */
 function storageBox() {

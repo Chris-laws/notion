@@ -53,11 +53,17 @@ const SCHEMA = {
   // documents and jour fixe minutes: the text is a Markdown file in Drive (fileId), this is the metadata
   Docs: {
     cols: ['id', 'projectId', 'kind', 'seriesId', 'date', 'title', 'fileId', 'version', 'size', 'preview',
-      'updatedAt', 'updatedBy', 'createdBy', 'createdAt', 'lockBy', 'lockUntil', 'people', 'openItems', 'change', 'pinnedTopics'],
+      'updatedAt', 'updatedBy', 'createdBy', 'createdAt', 'lockBy', 'lockUntil', 'people', 'openItems', 'change', 'pinnedTopics', 'fileVersion'],
     // minutes: who was there ({ present, absent }) and the open action items, so lists and the
     // next meeting need no file read; change: what the latest save changed (version list)
     json: ['openItems', 'pinnedTopics'],
-    num: ['version', 'size'],
+    num: ['version', 'size', 'fileVersion'],
+  },
+  // saved texts Drive does not have yet (written by docs.flush right after the save); meta: the version before
+  DocPending: {
+    cols: ['id', 'docId', 'version', 'content', 'meta', 'at'],
+    json: ['meta'],
+    num: ['version'],
   },
   // earlier versions of a document (files in the project's .versions folder)
   DocVersions: {
