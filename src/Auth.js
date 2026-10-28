@@ -9,9 +9,12 @@ const Auth = {
     if (!email) {
       throw new Error('Keine Google-Anmeldung erkannt. Die App muss für Nutzer deiner Google-Workspace-Domain freigegeben sein.');
     }
-    const domain = Config.get('ALLOWED_DOMAIN');
-    if (domain && email.split('@')[1] !== domain.toLowerCase()) {
-      throw new Error('Diese App ist nur für @' + domain + ' freigegeben.');
+    // ALLOWED_DOMAIN: one domain, a list ("lidl.com, lidl.it") or "lidl.*" for every country domain;
+    // empty = no check here (the deployment's "anyone in the organisation" still applies)
+    const domains = Config.list('ALLOWED_DOMAIN');
+    const own = email.split('@')[1];
+    if (domains.length && !domains.some(d => (/\.\*$/.test(d) ? own.indexOf(d.slice(0, -1)) === 0 : own === d))) {
+      throw new Error('Diese App ist nur für ' + domains.map(d => '@' + d).join(', ') + ' freigegeben.');
     }
     return email;
   },

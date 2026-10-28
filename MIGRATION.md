@@ -35,7 +35,7 @@ Everything below is done with a **company account** (ideally a dedicated technic
 
 | Property | Set to |
 |---|---|
-| `ALLOWED_DOMAIN` | the company's e-mail domain (set by `setup()` from the running account; check it) |
+| `ALLOWED_DOMAIN` | who may sign in: one e-mail domain, a list (`lidl.com, lidl.it`) or a pattern for all country domains (`lidl.*`); empty = no check in the app (the deployment's "anyone in the organisation" still applies). `setup()` fills in the running account's domain only when the property is empty |
 | `ADMIN_EMAILS` | comma-separated admin addresses of the responsible team |
 | `APP_NAME` | `LidlFlow` |
 | `DEFAULT_COUNTRY`, `DEFAULT_HOURS_PER_WEEK`, `ABSENCE_WARN_PERCENT` | company defaults |
