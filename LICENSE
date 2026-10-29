@@ -1,0 +1,8 @@
+Copyright (c) 2026 the company operating LidlFlow. All rights reserved.
+
+This software is proprietary and intended for internal use within the company.
+No part of it may be copied, distributed or used outside the company without
+written permission.
+
+Third-party components used during development are listed in
+THIRD_PARTY_NOTICES.md. None of them is part of the deployed application.

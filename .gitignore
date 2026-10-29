@@ -3,3 +3,5 @@ node_modules/
 .clasprc.json
 dev/preview.html
 .DS_Store
+coverage/
+dev/local/

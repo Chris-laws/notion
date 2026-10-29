@@ -1,0 +1,34 @@
+{
+  "name": "lidlflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Task management and team calendar as a Google Apps Script web app",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node dev/test.js && node --test --test-concurrency=2 test/ && node dev/i18n-audit.js",
+    "check": "node dev/check-gas.js",
+    "preview": "node dev/build-preview.js",
+    "push": "clasp push",
+    "deploy": "clasp push && clasp deploy",
+    "i18n": "node dev/i18n-audit.js",
+    "unit": "node --test test/",
+    "coverage": "c8 --reporter=text --reporter=html --include \"src/**/*.js\" node --test test/ dev/test.js",
+    "lint": "eslint . --max-warnings 78",
+    "secrets": "node dev/secret-scan.js",
+    "load": "node dev/load-sim.js",
+    "load:quick": "node dev/load-sim.js --quick",
+    "guard": "node dev/guard.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "c8": "^10.1.3",
+    "eslint": "^9.39.5",
+    "eslint-plugin-html": "^8.2.1",
+    "eslint-plugin-sonarjs": "^1.0.4",
+    "globals": "^15.15.0",
+    "jsdom": "^24.1.3"
+  }
+}

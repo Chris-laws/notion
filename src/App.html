@@ -1,0 +1,1146 @@
+<script>
+'use strict';
+/* ==========================================================================
+   Core: state, server calls, helpers, routing, sidebar, top bar.
+   Rendering is plain template strings; clicks are delegated through
+   data-action attributes to the handlers in the A object.
+   ========================================================================== */
+
+const S = {
+  appName: 'LidlFlow',
+  me: null,
+  users: [],
+  teams: [],
+  projects: [],
+  tasks: [],
+  companyHolidays: [],
+  ai: { enabled: false },
+  route: { view: 'dash' },
+  peekId: null,
+  peekFull: false,
+  cal: { cursor: null, mode: 'week', range: 'week', teamId: '', show: { tasks: true, events: true, absences: true, holidays: true }, cache: {}, stale: {}, errors: {} },
+  cap: { teamId: null, from: null, weeks: 6, data: null, loading: false },
+  briefing: null,
+  jf: { series: [], minutes: [] }, doc: null, protoEdit: null,
+  collapsed: {},
+  busy: 0,
+};
+const A = {}; // click actions: A[name](el, event)
+const ON = { submit: {}, input: {}, change: {}, keydown: {} };
+
+/* ---------------- helpers ---------------- */
+const $ = (sel, root) => (root || document).querySelector(sel);
+const $$ = (sel, root) => Array.prototype.slice.call((root || document).querySelectorAll(sel));
+function esc(s) {
+  return String(s === undefined || s === null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+/** Escaped text in which web and mail addresses are links (only http, https and mailto: nothing that runs script). */
+function linkify(s) {
+  return String(s === undefined || s === null ? '' : s).split(/((?:https?:\/\/|mailto:)[^\s<>"']+)/).map((part, k) => {
+    if (k % 2 === 0) return esc(part);
+    const tail = /[.,;:!?)]+$/.exec(part);
+    const href = tail ? part.slice(0, -tail[0].length) : part;
+    return '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">' + esc(href) + '</a>' + esc(tail ? tail[0] : '');
+  }).join('');
+}
+function attr(obj) { return esc(JSON.stringify(obj)); }
+function debounce(fn, ms) {
+  let t;
+  return function () { const args = arguments; clearTimeout(t); t = setTimeout(() => fn.apply(null, args), ms); };
+}
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('tr:' + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('tr:' + k, JSON.stringify(v)); } catch (e) { /* private mode */ } },
+};
+/** Theme: 'system' follows the OS, 'light' / 'dark' are fixed. Set before the first render so nothing flashes. */
+let THEME = 'system';
+function setTheme(mode) {
+  mode = THEME = mode === 'light' || mode === 'dark' ? mode : 'system';
+  if (mode === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', mode);
+  store.set('theme', mode);
+  return mode;
+}
+setTheme(store.get('theme', 'system'));
+function localToday() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const TODAY = () => localToday();
+const MONTHS = ['Jan', 'Feb', 'März', 'Apr', 'Mai', 'Juni', 'Juli', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const MONTHS_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const DOW = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const DOW_LONG = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+
+function fmtDate(iso, opts) {
+  if (!iso) return '';
+  const t = TODAY();
+  const diff = Shared.diffDays(t, iso);
+  const en = LANG === 'en';
+  if (!(opts && opts.absolute)) {
+    if (diff === 0) return en ? 'Today' : 'Heute';
+    if (diff === 1) return en ? 'Tomorrow' : 'Morgen';
+    if (diff === -1) return en ? 'Yesterday' : 'Gestern';
+    if (diff > 1 && diff < 7) return DOW_LONG[Shared.weekday(iso)];
+  }
+  const [y, m, d] = iso.split('-').map(Number);
+  const year = String(y) !== t.slice(0, 4) ? ' ' + y : '';
+  return en ? MONTHS[m - 1] + ' ' + d + (year ? ',' + year : '') : d + '. ' + MONTHS[m - 1] + year;
+}
+function fmtRange(a, b) {
+  if (!b || a === b) return fmtDate(a, { absolute: true });
+  return fmtDate(a, { absolute: true }) + ' – ' + fmtDate(b, { absolute: true });
+}
+function fmtHours(h) {
+  h = Number(h) || 0;
+  if (!h) return '';
+  if (h < 1) return Math.round(h * 60) + ' min';
+  const n = (Math.round(h * 10) / 10).toString();
+  return (LANG === 'en' ? n : n.replace('.', ',')) + ' h';
+}
+function timeAgo(iso) {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return 'gerade eben';
+  if (s < 3600) return 'vor ' + Math.floor(s / 60) + ' min';
+  if (s < 86400) return 'vor ' + Math.floor(s / 3600) + ' h';
+  return fmtDate(iso.slice(0, 10), { absolute: true });
+}
+/** Country as a small code badge (flag emojis do not render on Windows). */
+function flag(cc) {
+  if (!cc) return '';
+  return '<span class="cc">' + esc(cc === '*' ? 'FIRMA' : cc) + '</span>';
+}
+
+/* ---------------- lookups ---------------- */
+const user = email => S.users.find(u => u.email === email) || { email: email, name: (email || '?').split('@')[0], color: '#9b9a97' };
+const team = id => S.teams.find(t => t.id === id);
+const project = id => S.projects.find(p => p.id === id);
+/** Temporary id of an optimistically created task -> id the server gave it. */
+const ALIAS = {};
+const task = id => { id = ALIAS[id] || id; return S.tasks.find(t => t.id === id); };
+const statusOf = k => Shared.STATUSES.find(s => s.key === k) || Shared.STATUSES[1];
+const prioOf = k => Shared.PRIORITIES.find(p => p.key === k);
+const isDone = t => t.status === 'done';
+const isMine = t => t.assignees.indexOf(S.me.email) >= 0 || (!t.assignees.length && t.createdBy === S.me.email);
+const teamLeads = t => Shared.teamLeads(t);
+const projectLeads = p => Shared.projectLeads(p);
+const teamMembers = t => teamLeads(t).concat(t.members || []).filter((e, i, a) => e && a.indexOf(e) === i);
+const myTeams = () => S.teams.filter(t => teamMembers(t).indexOf(S.me.email) >= 0);
+/** Like Access.canSetTeamRoles / canSetProjectRoles on the server (which checks again). */
+const canSetTeamRoles = t => !!(S.me.admin || teamLeads(t).indexOf(S.me.email) >= 0);
+const canSetProjectRoles = p => !!(S.me.admin || projectLeads(p).indexOf(S.me.email) >= 0 || (team(p.teamId) && teamLeads(team(p.teamId)).indexOf(S.me.email) >= 0));
+const projectMembers = p => (p.members && p.members.length ? p.members : (team(p.teamId) ? teamMembers(team(p.teamId)) : []));
+/** Like Access.canManageProject on the server (which checks again): admin, creator, team or project member. */
+const canEditProject = p => !!(S.me.admin || p.createdBy === S.me.email || (team(p.teamId) && teamMembers(team(p.teamId)).indexOf(S.me.email) >= 0) || (p.members || []).indexOf(S.me.email) >= 0);
+const subtasks = id => S.tasks.filter(t => t.parentId === id);
+const allTags = () => {
+  const set = {};
+  S.tasks.forEach(t => t.tags.forEach(x => { set[x] = true; }));
+  return Object.keys(set).sort((a, b) => a.localeCompare(b));
+};
+const TAG_COLORS = ['blue', 'green', 'purple', 'orange', 'pink', 'yellow', 'brown', 'red', 'gray'];
+function tagColor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return TAG_COLORS[h % TAG_COLORS.length];
+}
+
+/* ---------------- icons (Lucide, ISC licence) ---------------- */
+const ICONS = {
+  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  checksq: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  board: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v12"/>',
+  table: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  gauge: '<path d="M12 14 15.5 8.5"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  left: '<path d="m15 18-6-6 6-6"/>',
+  right: '<path d="m9 18 6-6-6-6"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+  flag: '<path d="M4 22V4"/><path d="M4 4h13l-2 4 2 4H4"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  snow: '<path d="M12 2v20M4 6.5l16 11M20 6.5l-16 11"/><path d="m9 4 3 2 3-2M9 20l3-2 3 2"/>',
+  db: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',
+  video: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-4v12l-6-4z"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  repeat: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  circle: '<circle cx="12" cy="12" r="9"/>',
+  status: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+  shrink: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
+  sort: '<path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>',
+  text: '<path d="M4 7V5h16v2M9 19h6M12 5v14"/>',
+  sub: '<path d="M6 3v12a3 3 0 0 0 3 3h9"/><path d="m15 15 3 3-3 3"/>',
+  msg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+  plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+  hourglass: '<path d="M5 22h14M5 2h14M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2"/>',
+  open: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  gantt: '<path d="M4 4v16"/><rect x="7" y="5" width="8" height="3.5" rx="1"/><rect x="11" y="10.5" width="9" height="3.5" rx="1"/><rect x="8" y="16" width="7" height="3.5" rx="1"/>',
+  bell: '<path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  play: '<path d="M7 4.5v15l12-7.5z"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  pie: '<path d="M21 12a9 9 0 1 1-9-9v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/>',
+  back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  monitor: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+};
+function icon(name, cls) {
+  return '<svg class="i ' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
+}
+
+/* ---------------- small renderers ---------------- */
+function initials(name) {
+  const p = String(name || '?').trim().split(/\s+/);
+  return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+}
+function avatar(email, cls) {
+  const u = user(email);
+  return '<span class="avatar ' + (cls || '') + '" style="background:' + esc(u.color || '#8b8d98') + '" title="' + esc(u.name) + '">' + esc(initials(u.name)) + '</span>';
+}
+function avatars(emails, max) {
+  max = max || 3;
+  const list = emails.slice(0, max).map(e => avatar(e)).join('');
+  const more = emails.length > max ? '<span class="avatar" style="background:var(--text-3)">+' + (emails.length - max) + '</span>' : '';
+  return '<span class="avatars">' + list + more + '</span>';
+}
+function person(email) {
+  return '<span class="person">' + avatar(email) + '<span>' + esc(user(email).name) + '</span></span>';
+}
+/** Coloured square with the first letter: identifies teams and projects. */
+function mark(entity, cls) {
+  if (!entity) return '';
+  const letter = esc((entity.name || '?').charAt(0).toUpperCase());
+  // projects wear their own colour; the team shows as a small dot in the corner
+  if (entity.teamId !== undefined) {
+    const t = team(entity.teamId);
+    return '<span class="mark proj ' + inkClass(projectColorKey(entity)) + (t ? ' in-team ' : ' ') + (cls || '') + '" style="--mc:' + projectColor(entity) +
+      (t ? ';--tc:' + colorVar(t) : '') + '">' + letter + '</span>';
+  }
+  const color = entity.color && entity.color !== 'default' ? 'var(--c-' + esc(entity.color) + ')' : 'var(--c-gray)';
+  return '<span class="mark ' + inkClass(entity.color) + ' ' + (cls || '') + '" style="background:' + color + '">' + letter + '</span>';
+}
+/** Colour key a project is shown in: its own choice, else its team's, else gray. */
+function projectColorKey(p) {
+  if (p && p.color && p.color !== 'default' && p.color !== 'gray') return p.color;
+  const t = p && team(p.teamId);
+  return t && t.color && t.color !== 'default' ? t.color : 'gray';
+}
+const projectColor = p => 'var(--c-' + esc(projectColorKey(p)) + ')';
+// light colours carry a dark letter, the others a white one (contrast check: dev/checks/contrast.js)
+const LIGHT_COLORS = ['yellow', 'orange', 'teal', 'gray', 'lime'];
+const inkClass = key => (LIGHT_COLORS.indexOf(key) >= 0 ? 'ink-dark' : '');
+const GLYPHS = {
+  backlog: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--text-3)" stroke-width="1.6" stroke-dasharray="2.4 2.2"/>',
+  todo: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--text-3)" stroke-width="1.6"/>',
+  doing: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--st-doing)" stroke-width="1.6"/><path d="M8 4a4 4 0 0 1 0 8z" fill="var(--st-doing)"/>',
+  review: '<circle cx="8" cy="8" r="6" fill="none" stroke="var(--st-review)" stroke-width="1.6"/><path d="M8 4a4 4 0 1 1-4 4h4z" fill="var(--st-review)"/>',
+  done: '<circle cx="8" cy="8" r="7" fill="var(--st-done)"/><path d="m5 8.1 2 2 4-4.2" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+};
+function glyph(key) {
+  return '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">' + (GLYPHS[key] || GLYPHS.todo) + '</svg>';
+}
+// status colours live in the semantic tokens (Styles: --st-*), the same in dots, pills, glyphs and charts
+const STATUS_COLORS = { backlog: 'var(--st-backlog)', todo: 'var(--st-todo)', doing: 'var(--st-doing)', review: 'var(--st-review)', done: 'var(--st-done)' };
+function statusTag(key) {
+  return '<span class="spill st-' + esc(key) + '">' + esc(statusOf(key).label) + '</span>';
+}
+function prioTag(key, short) {
+  const p = prioOf(key);
+  if (!p) return '';
+  const on = { urgent: 3, high: 3, medium: 2, low: 1 }[p.key];
+  if (!short) return '<span class="ppill prio-' + p.key + '" title="Priorität: ' + esc(p.label) + '">' + esc(p.label) + '</span>';
+  const bars = key === 'urgent'
+    ? '<svg class="i sm" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4" fill="currentColor" stroke="none"/><path d="M12 7v6M12 16.5h.01" stroke="#fff" stroke-width="2.4"/></svg>'
+    : '<span class="prio-bars">' + [1, 2, 3].map(i => '<i class="' + (i <= on ? 'on' : '') + '"></i>').join('') + '</span>';
+  return '<span class="prio prio-' + p.key + '" title="Priorität: ' + esc(p.label) + '">' + bars + '</span>';
+}
+/** Progress in %: set by hand (1-100) or derived from sub-tasks and status. */
+function progressOf(t) {
+  if (t.progress > 0) return Math.min(100, t.progress);
+  if (isDone(t)) return 100;
+  const subs = subtasks(t.id);
+  if (subs.length) return Math.round(subs.filter(isDone).length / subs.length * 100);
+  return { backlog: 0, todo: 0, doing: 40, review: 80 }[t.status] || 0;
+}
+function progressBar(t, o) {
+  const v = progressOf(t);
+  return '<span class="pbar' + (o && o.wide ? ' wide' : '') + '"><span class="track"><i style="width:' + v + '%"></i></span><span class="pv">' + v + '%</span></span>';
+}
+function dueTag(t) {
+  if (!t.dueDate) return '';
+  const today = TODAY();
+  const cls = !isDone(t) && t.dueDate < today ? 'overdue' : t.dueDate === today ? 'today' : '';
+  return '<span class="meta ' + cls + '">' + icon('calendar', 'sm') + esc(fmtDate(t.dueDate)) + '</span>';
+}
+function tagChip(name) {
+  return '<span class="tpill t-' + tagColor(name) + '">' + esc(name) + '</span>';
+}
+const colorVar = e => (e && e.color && e.color !== 'default' ? 'var(--c-' + esc(e.color) + ')' : 'var(--c-gray)');
+/** "Team › Projekt" in words, for tooltips and places without room. */
+function projectPath(p) {
+  const t = p && team(p.teamId);
+  return p ? (t ? t.name + ' › ' : '') + p.name : '';
+}
+/** Project icon in the project colour; the team dot in its corner tells the team apart. */
+function projectMark(p, cls) {
+  return mark(p, cls);
+}
+function projectChip(p) {
+  if (!p) return '';
+  return '<span class="person pchip" title="' + esc(projectPath(p)) + '">' + projectMark(p) + '<span>' + esc(p.name) + '</span></span>';
+}
+/** Round logo mark (LogoAssets.html). Swap the data URIs there to change the logo. */
+function logoMark() {
+  return '<img class="logo" src="' + LOGO_MARK_SRC + '" alt="" aria-hidden="true">';
+}
+// start screen shows the logo while the data loads
+(function () { const b = document.querySelector('.boot'); if (b) b.insertAdjacentHTML('afterbegin', logoMark()); })();
+/** Mark + word mark: the original image on light backgrounds, mark + light lettering on dark ones. */
+function logoFull() {
+  return '<img class="logo-full on-light" src="' + LOGO_FULL_SRC + '" alt="' + esc(S.appName) + '">' +
+    '<span class="logo-dark on-dark">' + logoMark() + '<span class="wm">' + (S.appName === 'LidlFlow' ? 'Lidl<b>Flow</b>' : esc(S.appName)) + '</span></span>';
+}
+/** Solid coloured label for a project (table, board): in the project colour, the name only. */
+function projectPill(p) {
+  if (!p) return '';
+  return '<span class="jpill ' + inkClass(projectColorKey(p)) + '" style="background:' + projectColor(p) + '" title="' + esc(projectPath(p)) + '">' + esc(p.name) + '</span>';
+}
+function teamChip(t) {
+  if (!t) return '';
+  return '<span class="person">' + mark(t) + '<span>' + esc(t.name) + '</span></span>';
+}
+
+/* ---------------- server ---------------- */
+/** Tasks that were created optimistically: temporary id -> promise of the real id. */
+const PENDING = {};
+/** opts.quiet: background work (polling) that never shows the loading bar. */
+function call(method, payload, opts) {
+  const keys = ['id', 'taskId', 'parentId'].filter(k => payload && payload[k] && PENDING[payload[k]]);
+  if (keys.length) {
+    return Promise.all(keys.map(k => PENDING[payload[k]])).then(ids => {
+      const next = Object.assign({}, payload);
+      keys.forEach((k, i) => { next[k] = ids[i]; });
+      return call(method, next, opts);
+    });
+  }
+  // reading calls are retried twice (0.6 s, 1.8 s) when Google is busy or the connection hiccups
+  const READS = /^(bootstrap|tasks\.list|calendar\.range|availability|comments\.list|ai\.briefing|ai\.status)$/;
+  if (!READS.test(method) && typeof BOOT_DONE !== 'undefined' && !BOOT_DONE) S.wroteDuringBoot = true;
+  const quiet = !!(opts && opts.quiet);
+  const attempt = n => runCall(method, payload, quiet).catch(err => {
+    const msg = (err && err.message) || '';
+    // refused before it ran (too many at once): safe to repeat, also for writes
+    const refused = /simultaneous|gleichzeitig/i.test(msg);
+    const transient = refused || /\binternal\b|server error occurred|lock|timed? ?out|Zeitüberschreitung|too many|Rate Limit|NetworkError|network|Failed to fetch|503|500/i.test(msg);
+    if (transient && (refused ? n < 3 : n < 2 && READS.test(method))) {
+      return new Promise(r => setTimeout(r, Shared.retryDelay(n, Math.random()))).then(() => attempt(n + 1));
+    }
+    throw err;
+  });
+  return attempt(0);
+}
+/** Timing of every server call (round trip and time on the server); shown with ?perf=1. */
+const PERF = [];
+const PERF_START = Date.now();
+function runCall(method, payload, quiet) {
+  S.busy++;
+  if (!quiet) S.busyLoud = (S.busyLoud || 0) + 1;
+  const done = () => { S.busy--; if (!quiet) S.busyLoud--; syncDot(); };
+  syncDot();
+  const t0 = Date.now();
+  const log = (res, ok) => {
+    PERF.push({ method: method, at: t0 - PERF_START, total: Date.now() - t0, server: res && res.ms, reads: res && res.reads, ok: ok, bytes: res && res.bytes });
+    if (S.perf) perfPanel();
+  };
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(raw => {
+        done();
+        let res;
+        try { res = JSON.parse(raw); } catch (e) { log(null, false); return reject(new Error('Ungültige Antwort vom Server')); }
+        res.bytes = raw.length;
+        log(res, res.ok);
+        if (res.ok) resolve(res.data); else reject(new Error(res.error));
+      })
+      .withFailureHandler(err => { done(); log(null, false); reject(err instanceof Error ? err : new Error(String(err))); })
+      .api(method, JSON.stringify(payload || {}));
+  });
+}
+/** Small timing table in the corner (open the app with ?perf=1). */
+function perfPanel() {
+  let p = $('#perf');
+  if (!p) { p = document.createElement('div'); p.id = 'perf'; document.body.appendChild(p); }
+  const rows = PERF.slice(-14);
+  p.innerHTML = '<b>Server-Aufrufe</b> <small>' + PERF.length + ' gesamt · Gesamtdauer bis jetzt ' + Math.max(0, ...PERF.map(x => x.at + x.total)) + ' ms</small>' +
+    '<table><tr><th>Aufruf</th><th>Start</th><th>gesamt</th><th>Server</th><th>Tab.</th><th>KB</th></tr>' + rows.map(x =>
+      '<tr class="' + (x.ok ? '' : 'err') + '"><td>' + esc(x.method) + '</td><td>' + x.at + '</td><td><b>' + x.total + '</b></td><td>' + (x.server == null ? '–' : x.server) + '</td><td>' +
+      (x.reads == null ? '–' : x.reads) + '</td><td>' + (x.bytes ? Math.round(x.bytes / 102.4) / 10 : '–') + '</td></tr>').join('') + '</table>';
+}
+/** Saving/loading feedback: pulsing dot next to the app name and a thin bar at the top (after 150 ms, no flicker). */
+let busyTimer = null;
+function syncDot() {
+  const d = $('#sync');
+  if (d) d.classList.toggle('busy', S.busy > 0);
+  let bar = $('#busy-bar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'busy-bar'; bar.setAttribute('aria-hidden', 'true'); document.body.appendChild(bar); }
+  // the bar only for what the user waits for, and only when it takes a moment
+  clearTimeout(busyTimer);
+  if (S.busyLoud > 0) busyTimer = setTimeout(() => bar.classList.toggle('on', S.busyLoud > 0), 500);
+  else bar.classList.remove('on');
+}
+function fail(err) {
+  console.error(err);
+  toast(friendlyError(err && err.message ? err.message : String(err)), { error: true });
+}
+/** Technical errors from Google become a sentence that says what happened and what to do. */
+function friendlyError(msg) {
+  if (!navigator.onLine || /NetworkError|Failed to fetch|network/i.test(msg)) return 'Keine Verbindung zum Server. Deine Änderung wurde nicht gespeichert – bitte Internet prüfen und erneut versuchen.';
+  if (/\binternal\b|server error occurred/i.test(msg)) return 'Bei Google ist gerade ein Serverfehler aufgetreten. Bitte gleich noch einmal versuchen.';
+  if (/lock|timed? ?out|Zeitüberschreitung|Service invoked too many times|Rate Limit/i.test(msg)) return 'Der Server ist gerade ausgelastet. Bitte in ein paar Sekunden erneut versuchen.';
+  if (/authoriz|permission|Berechtigung/i.test(msg) && !/Keine Berechtigung|nur/i.test(msg)) return 'Dafür fehlt die Berechtigung. Bitte die Seite neu laden oder eine Admin-Person fragen.';
+  if (/ScriptError|Exception|undefined|null/i.test(msg)) return 'Da ist etwas schiefgelaufen. Bitte die Seite neu laden. Wenn es bleibt, melde es mit dieser Meldung: ' + msg;
+  return msg;
+}
+// connection status: a banner instead of silent failures
+function netBanner() {
+  let b = $('#net-banner');
+  if (navigator.onLine) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('div'); b.id = 'net-banner'; b.className = 'net-banner'; b.setAttribute('role', 'status'); document.body.appendChild(b); }
+  b.textContent = 'Offline – Änderungen werden erst gespeichert, wenn die Verbindung wieder da ist.';
+}
+window.addEventListener('online', () => { netBanner(); toast('Wieder online.'); refresh(); });
+window.addEventListener('offline', netBanner);
+
+/** Cmd/Ctrl + K: search; Cmd/Ctrl + J: the assistant. True when it was one of them. */
+function modShortcut(e, k) {
+  if (k === 'k' || e.code === 'KeyK') { openPalette(); return true; }
+  if ((k === 'j' || e.code === 'KeyJ') && S.ai.assistant !== false) { A.asst(); return true; }
+  return false;
+}
+/* ---------------- images in texts: the marker ![name](lf:<id>) ---------------- */
+const IMG_TOKEN = /(!\[[^\]]*\]\(lf:fl_[a-z0-9]+\))/;
+/** Text with clickable links and image markers shown as small previews (loaded when they appear). */
+function richText(s) {
+  return String(s === undefined || s === null ? '' : s).split(IMG_TOKEN).map((part, k) => {
+    const m = k % 2 ? /^!\[([^\]]*)\]\(lf:(fl_[a-z0-9]+)\)$/.exec(part) : null;
+    return m ? imgThumb(m[2], m[1]) : linkify(part);
+  }).join('');
+}
+/** The image markers of a text as previews (under a description). */
+function textImages(s) {
+  const out = [];
+  String(s || '').replace(/!\[([^\]]*)\]\(lf:(fl_[a-z0-9]+)\)/g, (m, name, id) => { out.push(imgThumb(id, name)); return m; });
+  return out.join('');
+}
+const imgThumb = (id, name) => '<button type="button" class="lf-thumb" data-action="img-view" data-id="' + id + '" aria-label="' + esc(L('Bild ansehen: ', 'View image: ') + name) + '">' +
+  '<img data-lf="' + id + '" alt="' + esc(name) + '"></button>';
+// images seen in this page: at most 30 kept in memory; one that cannot be had is not asked for again
+const IMG_CACHE = {};
+const IMG_KEEP = 30;
+function imgLoad(id) {
+  if (!IMG_CACHE[id]) {
+    const ids = Object.keys(IMG_CACHE);
+    if (ids.length >= IMG_KEEP) delete IMG_CACHE[ids[0]];
+    IMG_CACHE[id] = call('files.get', { id: id }, { quiet: true }).then(f => 'data:' + f.mime + ';base64,' + f.data);
+  }
+  return IMG_CACHE[id];
+}
+function imgFill() {
+  imgFill.planned = false;
+  // the page may be gone meanwhile (closed tab, tests)
+  let list = [];
+  try { list = $$('img[data-lf]:not([src]):not([data-busy])'); } catch (e) { return; }
+  list.forEach(img => {
+    img.dataset.busy = '1';
+    imgLoad(img.dataset.lf).then(src => { img.src = src; }).catch(() => { img.alt = L('Bild nicht verfügbar', 'Image not available'); });
+  });
+}
+// previews are filled when they appear on the page: looked for once per frame, not on every change
+const imgObserver = new MutationObserver(() => {
+  // a page that is being closed schedules nothing more
+  if (imgFill.planned || !document.defaultView) return;
+  imgFill.planned = true;
+  setTimeout(imgFill, 16);
+});
+imgObserver.observe(document.documentElement, { childList: true, subtree: true });
+window.addEventListener('pagehide', () => imgObserver.disconnect());
+A['img-view'] = el => imgLoad(el.dataset.id).then(src => openModal({ title: (el.querySelector('img') || {}).alt || L('Bild', 'Image'), wide: true, noCancel: true,
+  body: '<img class="lf-big" src="' + src + '" alt="">', submitLabel: L('Schließen', 'Close'), onSubmit: () => closeModal() })).catch(fail);
+/** Where an image in this field belongs: the open task, or the project of the minutes being written. */
+function imgPlace(ta) {
+  if (ta.matches('textarea[data-on-input="peek-desc"]') && S.peekId) return { kind: 'task', taskId: S.peekId };
+  if (ta.matches('.proto-edit textarea[data-path]') && S.protoEdit) return { kind: 'project', projectId: S.protoEdit.projectId };
+  return null;
+}
+function imgDrop(files, ta) {
+  const where = imgPlace(ta);
+  if (!where || !files.length) return false;
+  // the page may draw the field anew while the image travels: then the same field of the same place
+  const path = ta.dataset.path;
+  const field = () => (document.contains(ta) ? ta : path ? $('.proto-edit textarea[data-path="' + path + '"]')
+    : S.peekId === where.taskId ? $('#peek textarea.desc') : null);
+  loadChunk('Images').then(() => files.slice(0, 5).forEach(f => imgUpload(f, where, field))).catch(fail);
+  return true;
+}
+// pasting (Strg+V) or dropping an image into a description or a line of minutes;
+// a paste that also brings text (e.g. from Word) stays text
+['paste', 'drop'].forEach(type => document.addEventListener(type, e => {
+  const ta = e.target && e.target.closest ? e.target.closest('textarea') : null;
+  const dt = e.clipboardData || e.dataTransfer;
+  if (!ta || !dt || (type === 'paste' && dt.getData && dt.getData('text/plain'))) return;
+  const files = Array.prototype.slice.call(dt.files || []).filter(f => /^image\//.test(f.type));
+  if (files.length && imgDrop(files, ta)) e.preventDefault();
+}));
+// dropping files on these fields is allowed (otherwise the browser would open the image)
+document.addEventListener('dragover', e => {
+  const ta = e.target && e.target.closest ? e.target.closest('textarea') : null;
+  if (ta && imgPlace(ta) && e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) e.preventDefault();
+});
+ON.change['img-pick'] = el => {
+  const ta = $('#peek textarea.desc');
+  if (ta) imgDrop(Array.prototype.slice.call(el.files || []), ta);
+  el.value = '';
+};
+
+/* ---------------- parts loaded on first use ---------------- */
+const CHUNKS = {};
+/** The inside of the first style or script block of a part (tags built here, so this page has none in its code). */
+function chunkPart(html, tag) {
+  const a = html.indexOf('<' + tag + '>'), b = html.lastIndexOf('</' + tag + '>');
+  return a >= 0 && b > a ? html.slice(a + tag.length + 2, b) : '';
+}
+/** Fetches a part of the page (its style and script) once, when it is first needed. */
+function loadChunk(name) {
+  if (!CHUNKS[name]) {
+    CHUNKS[name] = call('ui.chunk', { name: name }).then(r => {
+      const css = chunkPart(r.html, 'style');
+      const js = chunkPart(r.html, 'script');
+      if (css) { const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st); }
+      const sc = document.createElement('script');
+      sc.textContent = js;
+      document.head.appendChild(sc);
+    }).catch(err => { delete CHUNKS[name]; throw err; });
+  }
+  return CHUNKS[name];
+}
+A.asst = () => loadChunk('Assistant').then(() => asstOpen()).catch(fail);
+
+/* ---------------- task data ---------------- */
+function applyTasks(list) {
+  if (list && list.length) S.reportDirty = true;
+  (list || []).forEach(t => {
+    const i = S.tasks.findIndex(x => x.id === t.id);
+    if (i >= 0) S.tasks[i] = t; else S.tasks.push(t);
+  });
+}
+function dropTasks(ids, deleted) {
+  S.tasks = S.tasks.filter(t => ids.indexOf(t.id) < 0);
+  // minutes that link these tasks show them as tasks no more (deleted) or ask the server again
+  if (ids.length) jfTasksGone(ids, !!deleted);
+}
+/** Optimistic update; reverts on error. */
+function patchTask(id, patch, opts) {
+  const t = task(id);
+  if (!t) return Promise.resolve();
+  // Nobody left assigned: the task goes back to the person who created it.
+  if (patch.assignees && !patch.assignees.length) patch = Object.assign({}, patch, { assignees: [t.createdBy || S.me.email] });
+  const before = Object.assign({}, t);
+  Object.assign(t, patch);
+  if (!(opts && opts.silent)) render({ peek: !(opts && opts.keepPeek) });
+  return call('tasks.save', Object.assign({ id: id }, patch))
+    .then(changed => {
+      applyTasks(changed);
+      if (changed.length > 1) toast('Nächste Wiederholung angelegt: ' + fmtDate(changed[1].dueDate, { absolute: true }));
+      if (!(opts && opts.silent)) render({ peek: !(opts && opts.keepPeek) });
+      return changed;
+    })
+    .catch(err => { Object.assign(t, before); render(); fail(err); });
+}
+/** Shows the new task at once and swaps in the saved one when the server answers. */
+function createTask(fields, opts) {
+  // Every task belongs to someone: the creator unless another person was picked.
+  if (!fields.assignees || !fields.assignees.length) fields = Object.assign({}, fields, { assignees: [S.me.email] });
+  const tmpId ='tmp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const now = new Date().toISOString();
+  const draft = Object.assign({
+    id: tmpId, title: 'Ohne Titel', description: '', status: 'todo', priority: '', projectId: '',
+    teams: [], assignees: [], tags: [], startDate: '', dueDate: '', estimate: 0, parentId: '', recurrence: '',
+    sort: Date.now(), createdBy: S.me.email, createdAt: now, updatedAt: now, completedAt: '',
+    planDate: '', planStart: 0, progress: 0, spent: 0, timerStart: '',
+  }, fields);
+  if (!draft.title) draft.title = 'Ohne Titel';
+  S.tasks.push(draft);
+  FRESH[tmpId] = true;
+  if (opts && opts.open) openPeek(tmpId); else render();
+  const saved = call('tasks.save', fields).then(changed => changed);
+  PENDING[tmpId] = saved.then(changed => changed[0].id);
+  return saved.then(changed => {
+    const real = changed[0];
+    // Discarded while the request was running (discardIfBlank removes it on the server).
+    const gone = !S.tasks.some(t => t.id === tmpId);
+    ALIAS[tmpId] = real.id;
+    if (gone) return real;
+    if (FRESH[tmpId]) FRESH[real.id] = true;
+    S.tasks = S.tasks.filter(t => t.id !== tmpId);
+    applyTasks(changed);
+    if (S.peekId === tmpId) S.peekId = real.id;
+    if (S.comments && S.comments.taskId === tmpId) S.comments.taskId = real.id;
+    // The side panel keeps its DOM (and what is being typed); its handlers resolve the old id through ALIAS.
+    render({ peek: false });
+    return real;
+  }).catch(err => {
+    delete PENDING[tmpId];
+    S.tasks = S.tasks.filter(t => t.id !== tmpId);
+    if (S.peekId === tmpId) S.peekId = null;
+    render();
+    fail(err);
+  });
+}
+/**
+ * Delete with "Rückgängig" instead of a confirmation dialog: the task (and its sub-tasks) disappear at once,
+ * the server delete follows after a few seconds unless the user takes it back.
+ */
+const PENDING_DELETES = {};
+function deleteWithUndo(t) {
+  const ids = [t.id];
+  for (let i = 0; i < ids.length; i++) S.tasks.forEach(x => { if (x.parentId === ids[i] && ids.indexOf(x.id) < 0) ids.push(x.id); });
+  const removed = S.tasks.filter(x => ids.indexOf(x.id) >= 0);
+  dropTasks(ids, true);
+  if (ids.indexOf(S.peekId) >= 0) { S.peekId = null; S.peekFull = false; }
+  render();
+  const send = () => {
+    delete PENDING_DELETES[t.id];
+    call('tasks.remove', { id: t.id }).catch(err => { S.tasks = S.tasks.concat(removed); ids.forEach(id => { delete JF_DEAD[id]; }); render(); fail(err); });
+  };
+  const timer = setTimeout(send, 6000);
+  PENDING_DELETES[t.id] = { timer: timer, send: send };
+  toast('„' + t.title + '“ gelöscht', { duration: 6000, action: { label: 'Rückgängig', fn: () => {
+    clearTimeout(timer);
+    delete PENDING_DELETES[t.id];
+    S.tasks = S.tasks.concat(removed);
+    ids.forEach(id => { delete JF_DEAD[id]; });
+    render();
+  } } });
+}
+// leaving the page: send deletes that are still waiting for their undo window
+window.addEventListener('pagehide', () => Object.keys(PENDING_DELETES).forEach(id => { clearTimeout(PENDING_DELETES[id].timer); PENDING_DELETES[id].send(); }));
+
+/** Tasks created in this session; untouched ones are thrown away when their panel closes. */
+const FRESH = {};
+function discardIfBlank(id) {
+  const t = id && task(id);
+  if (!t || !FRESH[t.id]) return;
+  const blank = (!t.title || t.title === 'Ohne Titel') && !String(t.description || '').trim() && !subtasks(t.id).length;
+  delete FRESH[t.id];
+  if (!blank) return;
+  dropTasks([t.id]);
+  // call() waits for the real id if the task is still being created.
+  call('tasks.remove', { id: t.id }).catch(() => {});
+}
+/** Defaults for "+ Neu" depending on where the user is. */
+function contextDefaults(extra) {
+  const r = S.route;
+  const f = {};
+  if (r.view === 'project') f.projectId = r.id;
+  if (r.view === 'team') f.teams = [r.id];
+  if (r.view === 'home' || r.view === 'dash' || r.view === 'planner') f.assignees = [S.me.email];
+  return Object.assign(f, extra || {});
+}
+
+/* ---------------- routing ---------------- */
+function go(view, id, opts) {
+  if (typeof jfLeave === 'function') jfLeave(view, id);
+  S.route = { view: view, id: id || null };
+  if (!(opts && opts.keepPeek)) { discardIfBlank(S.peekId); S.peekId = null; }
+  store.set('route', S.route);
+  $('#app').classList.remove('side-open');
+  try {
+    if (google.script.history) google.script.history.push(S.route, { view: view, id: id || '' });
+  } catch (e) { /* preview */ }
+  render({ resetScroll: true });
+}
+A.nav = el => go(el.dataset.view, el.dataset.id);
+A['sidebar-open'] = () => $('#app').classList.add('side-open');
+A['sidebar-close'] = () => $('#app').classList.remove('side-open');
+
+/* ---------------- rendering ---------------- */
+function render(opts) {
+  opts = opts || {};
+  if (!S.me) return;
+  const view = $('#view');
+  // resetScroll: a new page (with fade-in); top: same page, new period or view (back to the top)
+  const fromTop = opts.resetScroll || opts.top;
+  const top = fromTop ? 0 : view.scrollTop;
+  const board = $('.board', view);
+  const left = board ? board.scrollLeft : 0;
+  renderSidebar();
+  renderTopbar();
+  const drafts = captureForms(view);
+  const inner = {};
+  $$('[data-keep-scroll]', view).forEach(el => { inner[el.dataset.keepScroll] = el.scrollTop; inner[el.dataset.keepScroll + ':x'] = el.scrollLeft; });
+  const html = Views.render();
+  // Only route changes play the page fade-in; data updates swap content in place.
+  view.classList.toggle('enter', !!opts.resetScroll);
+  const swapped = html === null || setHtml(view, html);
+  restoreForms(view, drafts);
+  view.scrollTop = top;
+  if (swapped) {
+    $$('[data-keep-scroll]', view).forEach(el => {
+      const k = el.dataset.keepScroll;
+      if (inner[k] !== undefined && !fromTop) { el.scrollTop = inner[k]; el.scrollLeft = inner[k + ':x']; }
+      else el.scrollTop = 0;
+    });
+  }
+  const nb = $('.board', view);
+  if (nb && !opts.resetScroll) nb.scrollLeft = left;
+  if (opts.peek !== false) renderPeek();
+  // after() binds listeners to the fresh markup, so skip it when nothing was replaced.
+  if (swapped && Views.after) Views.after();
+}
+
+/** Replaces an element's content only when the markup changed (no flicker; hover, focus and scroll survive). */
+function setHtml(el, html) {
+  if (el.__html === html) return false;
+  el.innerHTML = html;
+  el.__html = html;
+  return true;
+}
+
+/** Keeps what the user typed into a form when data arriving in the background re-renders the page. */
+function captureForms(root) {
+  return $$('form[data-touched]', root).map(f => ({
+    key: f.getAttribute('data-on-submit'),
+    focus: document.activeElement && f.contains(document.activeElement) ? document.activeElement.name : null,
+    fields: $$('[name]', f).map(el => [el.name, el.type === 'checkbox' || el.type === 'radio' ? el.value : null, el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value]),
+  }));
+}
+function restoreForms(root, drafts) {
+  drafts.forEach(d => {
+    const f = $('form[data-on-submit="' + d.key + '"]', root);
+    if (!f) return;
+    f.setAttribute('data-touched', '1');
+    d.fields.forEach(x => {
+      const el = x[1] === null ? $('[name="' + x[0] + '"]', f) : $('[name="' + x[0] + '"][value="' + x[1] + '"]', f);
+      if (!el) return;
+      if (x[1] === null) el.value = x[2]; else el.checked = x[2];
+    });
+    if (d.focus && f.elements[d.focus] && f.elements[d.focus].focus) f.elements[d.focus].focus();
+  });
+}
+document.addEventListener('input', e => {
+  const f = e.target.closest && e.target.closest('#view form');
+  if (f) f.setAttribute('data-touched', '1');
+});
+
+function renderSidebar() {
+  const r = S.route;
+  const active = (v, id) => (r.view === v && (id === undefined || r.id === id) ? ' active' : '');
+  const mineOpen = S.tasks.filter(t => isMine(t) && !isDone(t)).length;
+  const navItem = (view, ic, label, extra, id) =>
+    '<button class="nav-item' + active(view, id) + '" data-action="nav" data-view="' + view + '"' + (id ? ' data-id="' + esc(id) + '"' : '') + ' title="' + esc(String(label).replace(/<[^>]*>/g, '')) + '">' +
+    ic + '<span class="nav-label">' + label + '</span>' + (extra || '') + '</button>';
+  S.rail = S.rail === undefined ? store.get('rail', true) : S.rail;
+  $('#sidebar').classList.toggle('rail', !!S.rail);
+  const warn = (S.warnings || []).length ? '<span class="alert" title="Team-Abwesenheit über der Warnschwelle"></span>' : '';
+
+  const teamsHtml = S.teams.slice().sort((a, b) => a.name.localeCompare(b.name)).map(t => {
+    const collapsed = S.collapsed[t.id];
+    const projects = S.projects.filter(p => p.teamId === t.id && p.status !== 'done');
+    // projects hang on a line in the team's colour, so it is clear which team they belong to
+    return '<div class="team-grp' + (collapsed ? ' collapsed' : '') + '" style="--tc:' + colorVar(t) + '"><div class="team-row">' +
+      '<button class="chev-btn" data-action="toggle-team" data-id="' + esc(t.id) + '" aria-label="Ein-/ausklappen">' + icon('chevron', 'sm chev') + '</button>' +
+      navItem('team', mark(t), esc(t.name), '', t.id) + '</div>' +
+      (collapsed ? '' : '<div class="team-projects">' + projects.map(p => '<div class="nav-sub">' + navItem('project', mark(p), esc(p.name), '', p.id) + '</div>').join('') +
+        '<div class="nav-sub"><button class="nav-item faint" data-action="project-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + '<span class="nav-label">Neues Projekt</span></button></div></div>') +
+      '</div>';
+  }).join('');
+
+  setHtml($('#sidebar'),
+    '<div class="side-head"><button class="brand" data-action="nav" data-view="dash" title="' + esc(S.appName) + '">' +
+    '<span class="brand-full">' + logoFull() + '</span><span class="brand-mark">' + logoMark() + '</span></button>' +
+    '<span id="sync" class="sync-dot" title="Wird gespeichert …"></span>' +
+    '<button class="icon-btn rail-toggle" data-action="rail-toggle" title="Seitenleiste ein-/ausklappen">' + icon('menu') + '</button></div>' +
+    '<div class="side-scroll">' +
+    '<button class="side-search side-ai" data-action="assistant" title="KI-Assistent: Aufgaben, Termine und Urlaub per Text anlegen">' + icon('sparkle', 'sm') + '<span class="grow">KI-Assistent</span></button>' +
+    navItem('dash', icon('home'), 'Übersicht') +
+    navItem('home', icon('checksq'), 'Meine Aufgaben', mineOpen ? '<span class="count">' + mineOpen + '</span>' : '') +
+    navItem('all', icon('inbox'), 'Alle Aufgaben') +
+    navItem('calendar', icon('calendar'), 'Kalender') +
+    navItem('capacity', icon('users'), 'Verfügbarkeit', warn) +
+    '<div class="side-section"><span>Teams</span><button class="icon-btn sm" data-action="team-new" title="Neues Team">' + icon('plus', 'sm') + '</button></div>' +
+    (teamsHtml || '<div class="faint" style="padding:4px 10px;font-size:13px">Noch keine Teams.</div>') +
+    '</div>' +
+    '<div class="side-foot"><button class="me-row" data-action="nav" data-view="settings">' + avatar(S.me.email, 'lg') +
+    '<div class="me-meta"><div style="font-weight:500">' + esc(S.me.name) + '</div><div class="faint">' +
+    esc((S.me.region || S.me.country || '') + ' · Einstellungen') + '</div></div></button></div>');
+  syncDot();
+}
+const APP_VERSION = '1.14 · 24.10.2026';
+/** Help: short guide, shortcuts, quick-add syntax, version. Opens with the "?" button or key. */
+A.help = () => {
+  const en = LANG === 'en';
+  const L = (de, e) => (en ? e : de);
+  const k = IS_MAC ? 'Cmd' : L('Strg', 'Ctrl');
+  const row = (keys, what) => '<tr><td>' + keys.map(x => '<kbd>' + x + '</kbd>').join(' ') + '</td><td>' + what + '</td></tr>';
+  openModal({
+    title: L('Hilfe', 'Help'), submitLabel: L('Verstanden', 'Got it'),
+    body: '<div class="help" translate="no">' +
+      '<h4>' + L('So funktioniert ', 'How this works: ') + esc(S.appName) + '</h4><ol>' +
+      L('<li><b>Team anlegen</b> (Seitenleiste → Teams → +) und Kolleg:innen unter <i>Mitglieder</i> hinzufügen.</li>' +
+        '<li><b>Aufgaben anlegen</b> über „Neue Aufgabe“ oder die Suche. Jede Aufgabe gehört einer Person, ohne Auswahl dir.</li>' +
+        '<li><b>Planen</b> im Kalender: Aufgaben aus der linken Liste ins Wochenraster ziehen.</li>' +
+        '<li><b>Urlaub eintragen</b> im Kalender oder unter Verfügbarkeit. Feiertage kommen automatisch aus Land und Region in deinem Profil.</li>' +
+        '<li><b>Überblick</b> auf der Übersicht: Schnellreport für Tag, Woche oder Monat (mit Warnungen und Empfehlungen), Fokus heute, Auslastung der nächsten Wochen.</li>' +
+        '<li><b>KI-Assistent</b> (oben links): in eigenen Worten schreiben, z. B. „Anna morgen Angebot prüfen, 2h, ich bin Mo–Mi im Urlaub“. Du prüfst die Vorschau und legst alles mit einem Klick an.</li>',
+      '<li><b>Create a team</b> (sidebar → Teams → +) and add colleagues under <i>Members</i>.</li>' +
+        '<li><b>Create tasks</b> with “New task” or the search. Every task belongs to someone, to you if nobody is picked.</li>' +
+        '<li><b>Plan</b> in the calendar: drag tasks from the list on the left into the week grid.</li>' +
+        '<li><b>Add vacation</b> in the calendar or under Availability. Public holidays come from the country and region in your profile.</li>' +
+        '<li><b>Overview</b> on the dashboard: quick report for the day, week or month (with warnings and tips), today’s focus, workload for the next weeks.</li>' +
+        '<li><b>AI assistant</b> (top left): write in your own words, e.g. “Anna review offer tomorrow, 2h, I am off Mon–Wed”. Check the preview and create everything in one click.</li>') + '</ol>' +
+      '<h4>' + L('Tastenkürzel', 'Keyboard shortcuts') + '</h4><table class="keys">' +
+      row([k, 'K'], L('Suchen oder neue Aufgabe anlegen', 'Search or create a task')) + row(['N'], L('Neue Aufgabe', 'New task')) +
+      row(['Esc'], L('Fenster oder Detailansicht schließen', 'Close a window or the task panel')) + row(['?'], L('Diese Hilfe', 'This help')) +
+      row(['1', '–', '5'], L('Kalender: Woche, Tag, Monat, Agenda, Heatmap', 'Calendar: week, day, month, agenda, heatmap')) +
+      row(['T'], L('Kalender: heute', 'Calendar: today')) + row(['←', '→'], L('Kalender: vor und zurück', 'Calendar: back and forward')) + '</table>' +
+      '<h4>' + L('Schnell-Eingabe in der Suche', 'Quick add in the search') + '</h4><p class="hint">' +
+      L('Einfach mitschreiben, die App erkennt es: ', 'Just type it, the app picks it up: ') +
+      '<code>' + L('morgen', 'morgen (tomorrow)') + '</code>, <code>15.11.</code>, <code>@anna</code> ' + L('(zuweisen)', '(assign)') + ', <code>#website</code> ' +
+      L('(Projekt oder Tag)', '(project or tag)') + ', <code>+team</code>, <code>!hoch</code> ' + L('(Priorität)', '(priority)') + ', <code>2h</code> ' +
+      L('(Aufwand)', '(estimate)') + ', <code>jeden montag</code> ' + L('(Wiederholung)', '(repeat)') + '.</p>' +
+      '<h4>' + L('Fragen oder Ideen?', 'Questions or ideas?') + '</h4><p class="hint">' +
+      L('Wende dich an deine Admin-Person. Sie sieht unter Einstellungen alle Personen und Firmen-Feiertage.', 'Ask your admin. Admins see all people and company holidays under Settings.') + '</p>' +
+      '<p class="hint">Version ' + APP_VERSION + '</p></div>',
+    onSubmit: () => true,
+  });
+};
+const IS_MAC =/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const SEARCH_HINT = 'Suchen oder neue Aufgabe anlegen (Tastenkürzel: ' + (IS_MAC ? 'Cmd' : 'Strg') + ' + K)';
+/** Theme and language: always top right (top bar, or the header card on calendar and availability). */
+function prefControls() {
+  return '<div class="prefs"><button class="icon-btn theme-btn" data-action="help" title="Hilfe und Tastenkürzel" aria-label="Hilfe und Tastenkürzel">' + icon('help') + '</button>' + themeButton() +
+    '<div class="lang-sw" role="group" aria-label="Sprache">' + ['de', 'en'].map(l =>
+      '<button class="' + (LANG === l ? 'on' : '') + '" data-action="lang" data-lang="' + l + '">' + l.toUpperCase() + '</button>').join('') + '</div></div>';
+}
+const THEMES = [['system', 'monitor', 'Design: wie System'], ['light', 'sun', 'Design: Hell'], ['dark', 'moon', 'Design: Dunkel']];
+function themeButton() {
+  const cur = THEMES.find(x => x[0] === THEME) || THEMES[0];
+  return '<button class="icon-btn theme-btn" data-action="theme" title="' + cur[2] + '" aria-label="' + cur[2] + '">' + icon(cur[1]) + '</button>';
+}
+A.theme = () => {
+  const i = THEMES.findIndex(x => x[0] === THEME);
+  const mode = setTheme(THEMES[(i + 1) % THEMES.length][0]);
+  render({ peek: false });
+  toast(THEMES.find(x => x[0] === mode)[2]);
+};
+A['rail-toggle'] =() => { S.rail = !S.rail; store.set('rail', S.rail); renderSidebar(); };
+A['toggle-team'] = el => { S.collapsed[el.dataset.id] = !S.collapsed[el.dataset.id]; store.set('collapsed', S.collapsed); renderSidebar(); };
+
+function renderTopbar() {
+  const r = S.route;
+  const crumbs = [];
+  const labels = { dash: 'Übersicht', home: 'Meine Aufgaben', all: 'Alle Aufgaben', calendar: 'Kalender', capacity: 'Verfügbarkeit', settings: 'Einstellungen' };
+  if (labels[r.view]) crumbs.push({ html: esc(labels[r.view]) });
+  if (r.view === 'team' && team(r.id)) crumbs.push({ html: mark(team(r.id)) + esc(team(r.id).name) });
+  if (r.view === 'project' && project(r.id)) {
+    const p = project(r.id);
+    const t = team(p.teamId);
+    if (t) crumbs.push({ html: mark(t) + esc(t.name), view: 'team', id: t.id });
+    crumbs.push({ html: mark(p) + esc(p.name) });
+  }
+  // The calendar needs the height: no search or "new task" bar there (phones keep the menu button).
+  const cal = r.view === 'calendar' || r.view === 'capacity';
+  $('#app').classList.toggle('no-topbar', cal);
+  setHtml($('#topbar'),
+    '<button class="icon-btn menu-btn" data-action="sidebar-open" aria-label="Menü">' + icon('menu') + '</button>' +
+    '<nav class="crumbs">' + crumbs.map((c, i) => (i ? '<span class="sep">/</span>' : '') +
+      (c.view ? '<button data-action="nav" data-view="' + c.view + '" data-id="' + esc(c.id) + '">' + c.html + '</button>'
+        : '<button class="current">' + c.html + '</button>')).join('') + '</nav>' +
+    (cal ? '<div class="spacer"></div>' : '<button class="top-search" data-action="palette" title="' + SEARCH_HINT + '">' + icon('search', 'sm') + '<span>Aufgaben, Projekte und Personen suchen …</span></button>') +
+    (S.ai.assistant !== false ? '<button class="btn sm primary ask-ai" data-action="asst" title="' + esc(L('KI-Assistent (Strg/⌘ + J)', 'AI assistant (Ctrl/⌘ + J)')) + '" aria-label="Ask AI">' +
+      icon('sparkle', 'sm') + '<span>Ask AI</span></button>' : '') +
+    (['home', 'all', 'dash', 'calendar', 'capacity'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : '') + prefControls());
+}
+
+/* ---------------- global events ---------------- */
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action]');
+  if (!el || el.disabled) return;
+  const fn = A[el.dataset.action];
+  if (fn) {
+    if (el.tagName === 'A' || el.tagName === 'BUTTON') e.preventDefault();
+    fn(el, e);
+  }
+});
+['submit', 'input', 'change', 'keydown'].forEach(type => {
+  document.addEventListener(type, e => {
+    const el = e.target.closest ? e.target.closest('[data-on-' + type + ']') : null;
+    if (!el) return;
+    const fn = ON[type][el.getAttribute('data-on-' + type)];
+    if (fn) {
+      if (type === 'submit') e.preventDefault();
+      fn(el, e);
+    }
+  });
+});
+/**
+ * Shortcuts. Letters work with or without Shift/Caps Lock and on any keyboard layout (e.code as fallback);
+ * nothing fires while typing in a field or with a dialog open.
+ */
+window.addEventListener('keydown', e => {
+  const a = document.activeElement;
+  const typing = !!a && (/INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.isContentEditable);
+  const k = String(e.key || '').toLowerCase();
+  if ((e.metaKey || e.ctrlKey) && modShortcut(e, k)) { e.preventDefault(); return; }
+  if (e.key === 'Escape') {
+    if (closeTopLayer()) { e.preventDefault(); return; }
+    if (S.peekId && !typing) { closePeek(); return; }
+  }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey || !S.me) return;
+  if ($('#modal-root').children.length || $('#palette-root').children.length || $('#people-root').children.length) return;
+  const letter = /^Key[A-Z]$/.test(e.code || '') ? e.code.slice(3).toLowerCase() : k;
+  if (k === '?' || (e.shiftKey && (e.code === 'Slash' || e.code === 'Minus')) || e.key === 'F1') { e.preventDefault(); A.help(); return; }
+  if (S.route.view === 'calendar') {
+    const m = CAL_VIEWS.map(v => v[0])[Number(e.key) - 1];
+    if (m) { A['cal-mode']({ dataset: { v: m } }); return; }
+    if (e.key === 'ArrowLeft') { A['cal-prev'](); return; }
+    if (e.key === 'ArrowRight') { A['cal-next'](); return; }
+  }
+  if (letter === 't') { e.preventDefault(); if (S.route.view !== 'calendar') go('calendar'); A['cal-today'](); return; }
+  if (letter === 'n') { e.preventDefault(); A['new-task'](); return; }
+  if (letter === 'c' || k === '/') { e.preventDefault(); openPalette(); }
+}, true);
+// keyboard focus belongs to the app, not to the Google frame around it
+window.addEventListener('mouseenter', () => { if (document.activeElement === document.body) window.focus(); });
+
+/* ---------------- background sync ---------------- */
+function editing() {
+  const a = document.activeElement;
+  return (a && /INPUT|TEXTAREA/.test(a.tagName)) || $('#popover-root').children.length || $('#modal-root').children.length || dragState.id;
+}
+let pollFailures = 0;
+/** Background refresh: tasks plus teams, projects, people and jour fixe when anything changed. */
+function refresh() {
+  if (document.visibilityState !== 'visible' || editing() || S.busy) return Promise.resolve();
+  return call('tasks.list', { ver: S.tasksVer || '', full: true }, { quiet: true }).then(res => {
+    pollFailures = 0;
+    if (res.same || editing() || S.busy) return;
+    if (S.tasks.some(t => PENDING[t.id])) return;
+    const known = {};
+    S.teams.forEach(t => { known[t.id] = true; });
+    const joined = (res.teams || []).filter(t => !known[t.id] && teamMembers(t).indexOf(S.me.email) >= 0);
+    // Only redraw when someone else actually changed something.
+    const before = JSON.stringify([S.tasks, S.teams, S.projects, S.jf]);
+    const now = {};
+    res.tasks.forEach(t => { now[t.id] = true; });
+    const gone = S.tasks.filter(t => !now[t.id] && !PENDING[t.id]).map(t => t.id);
+    S.tasks = res.tasks;
+    if (gone.length) jfTasksGone(gone, false);
+    if (res.teams) Object.assign(S, { teams: res.teams, projects: res.projects, users: res.users, jf: res.jf });
+    S.tasksVer = res.ver;
+    joined.forEach(t => toast(L('Du wurdest zum Team „' + t.name + '“ hinzugefügt', 'You were added to the team “' + t.name + '”')));
+    if (JSON.stringify([S.tasks, S.teams, S.projects, S.jf]) === before) return;
+    S.reportDirty = true;
+    render();
+  }).catch(() => { pollFailures++; /* next round, a bit later */ });
+}
+// polling: every 60 s (±25 %) while someone works here, every 5 min after 10 idle minutes, slower after failures
+let lastActive = Date.now();
+['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { lastActive = Date.now(); }, { passive: true, capture: true }));
+function pollDelayNow(rand) {
+  const idle = Date.now() - lastActive > 10 * 60000;
+  return Shared.pollDelay(idle ? 300 : 60, pollFailures, rand);
+}
+function schedulePoll() { setTimeout(() => { refresh(); schedulePoll(); }, pollDelayNow(Math.random())); }
+schedulePoll();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { lastActive = Date.now(); refresh(); } });
+
+/* ---------------- skeletons: placeholders shaped like the content that is on its way ---------------- */
+const SKW = ['72%', '54%', '86%', '61%', '78%', '47%', '69%', '58%'];
+const sk = (w, h, cls) => '<span class="sk' + (cls ? ' ' + cls : '') + '" style="width:' + (w || '100%') + (h ? ';height:' + h : '') + '"></span>';
+const skBox = (inner, cls, style) => '<div class="sk-box' + (cls ? ' ' + cls : '') + '"' + (style ? ' style="' + style + '"' : '') + ' role="status" aria-busy="true" aria-label="Wird geladen …">' + inner + '</div>';
+const skRep = (n, f) => { let s = ''; for (let i = 0; i < n; i++) s += f(i); return s; };
+const skPct = (i, min, span) => (min + (i * 17) % span) + '%';
+function skLines(n, h) { return skBox(skRep(n || 3, i => '<div class="sk-line">' + sk(SKW[i % 8], h) + '</div>')); }
+/** list rows: check, title, chips, avatar */
+function skRows(n) {
+  return skBox(skRep(n || 6, i => '<div class="sk-row">' + sk('16px', '16px', 'round') + sk(skPct(i, 22, 30), '12px') +
+    '<span class="grow"></span>' + sk('58px', '18px', 'pill') + sk('22px', '22px', 'round') + '</div>'));
+}
+function skTable(n, cols) {
+  cols = cols || 5;
+  const row = (i, head) => '<div class="sk-tr' + (head ? ' head' : '') + '">' +
+    skRep(cols, c => sk(head ? (c ? '50%' : '40%') : c ? skPct(i + c, 35, 45) : SKW[i % 8], head ? '10px' : '12px')) + '</div>';
+  return skBox(row(0, true) + skRep(n || 8, i => row(i)), 'sk-table', '--cols:' + cols);
+}
+function skBoard(cols) {
+  return skBox(skRep(cols || 4, c => '<div class="sk-col"><div class="sk-line">' + sk('46%', '11px') + '</div>' +
+    skRep(3 - (c % 2), i => '<div class="sk-card">' + sk(SKW[(c + i) % 8], '12px') + sk('40%', '10px') +
+      '<div class="sk-foot">' + sk('52px', '16px', 'pill') + sk('20px', '20px', 'round') + '</div></div>') + '</div>'), 'sk-board');
+}
+function skTiles(n) {
+  return skBox(skRep(n || 4, () => '<div class="sk-tile">' + sk('30px', '30px', 'sq') + sk('46%', '10px') + sk('34%', '22px') + '</div>'), 'sk-tiles');
+}
+function skGantt(n) {
+  return skBox(skRep(n || 7, i => '<div class="sk-gr">' + sk(skPct(i, 10, 12), '11px') +
+    '<span class="sk sk-gbar" style="margin-left:' + skPct(i, 6, 50) + ';width:' + skPct(i, 14, 26) + '"></span></div>'), 'sk-gantt');
+}
+function skCalGrid(cols, rows) {
+  return skBox(skRep(cols * rows, i => '<div class="sk-cell">' + sk('24%', '10px') + (i % 3 === 0 ? sk(SKW[i % 8], '14px', 'pill') : '') + '</div>'), 'sk-cal', '--cols:' + cols);
+}
+function skPeople(n) {
+  return skBox(skRep(n || 4, i => '<div class="sk-row">' + sk('34px', '34px', 'round') + '<div class="sk-stack">' + sk(skPct(i, 30, 30), '12px') + sk('45%', '10px') + '</div>' +
+    sk('70px', '12px') + '</div>'));
+}
+function skCards(n) {
+  return skBox(skRep(n || 3, i => '<div class="sk-pcard"><div class="sk-row tight">' + sk('26px', '26px', 'sq') + sk('50%', '13px') + '</div>' + sk(SKW[i % 8], '10px') +
+    sk('100%', '6px', 'pill') + '<div class="sk-foot">' + sk('30%', '10px') + sk('60px', '20px', 'pill') + '</div></div>'), 'sk-pcards');
+}
+/** Whole page while the app starts: shaped like the page that will open (saved route and layout). */
+function skPage(route) {
+  const v = route.view || 'dash';
+  const head = '<div class="sk-head">' + sk('220px', '24px') + sk('320px', '12px') + '</div>';
+  const card = inner => '<div class="card-w">' + inner + '</div>';
+  const tabs = (n, w) => '<div class="sk-tabs">' + skRep(n, () => sk(w, '26px', 'pill')) + '</div>';
+  if (v === 'dash') {
+    return '<div class="page wide sk-page">' + head + skTiles(4) + '<div class="sk-2">' + card('<div class="sk-line">' + sk('34%', '13px') + '</div>' + skRows(5)) +
+      card('<div class="sk-line">' + sk('40%', '13px') + '</div>' + skLines(4)) + '</div>' + card(skCards(3)) + '</div>';
+  }
+  if (v === 'calendar') return '<div class="page wide sk-page">' + head + card(skCalGrid(7, 5)) + '</div>';
+  if (v === 'capacity') return '<div class="page wide sk-page">' + head + card(skTable(7, 7)) + '</div>';
+  if (v === 'settings' || v === 'admin') return '<div class="page sk-page">' + head + card(skLines(6, '14px')) + card(skPeople(3)) + '</div>';
+  if (v === 'team') return '<div class="page wide sk-page">' + head + tabs(3, '96px') + card(skCards(3)) + '</div>';
+  const prefs = (store.get('db', {}) || {})[v + ':' + (route.id || '')] || {};
+  const layout = prefs.layout || (v === 'home' ? 'list' : 'board');
+  const body = layout === 'board' ? skBoard(4) : layout === 'table' ? card(skTable(9, 6)) : layout === 'gantt' ? card(skGantt(8))
+    : layout === 'calendar' ? card(skCalGrid(7, 5)) : card(skRows(9));
+  if (v === 'project') return '<div class="page wide sk-page"><div class="sk-banner">' + sk('40%', '24px') + sk('55%', '12px') + '</div>' + tabs(3, '86px') + body + '</div>';
+  return '<div class="page wide sk-page">' + head + tabs(v === 'home' ? 6 : 4, '96px') + body + '</div>';
+}
+function skSidebar() {
+  return '<div class="sk-side">' + sk('130px', '28px') + sk('100%', '34px') + skRep(6, i => '<div class="sk-row tight">' + sk('16px', '16px', 'sq') + sk(skPct(i, 40, 35), '12px') + '</div>') +
+    '<div class="sk-line" style="margin-top:14px">' + sk('40%', '10px') + '</div>' + skRep(4, i => '<div class="sk-row tight">' + sk('18px', '18px', 'sq') + sk(skPct(i, 35, 40), '12px') + '</div>') + '</div>';
+}
+
+/* ---------------- start ---------------- */
+/*
+ * Start: the bootstrap request leaves right away (not after fonts and images).
+ * The last start data of this user is kept in the browser, so the app shows at
+ * once from that copy and swaps in the fresh data when it arrives.
+ */
+const SNAP_MAX_AGE = 7 * 864e5;
+// var on purpose: call() reads it with typeof before this line has run
+// eslint-disable-next-line no-var
+var BOOT_DONE = false;
+const BOOT_REQ = call('bootstrap');
+BOOT_REQ.then(() => { BOOT_DONE = true; }, () => { BOOT_DONE = true; });
+function readSnap() {
+  const snap = store.get('snap', null);
+  return snap && BOOT_USER && snap.user === BOOT_USER && Date.now() - snap.at < SNAP_MAX_AGE && snap.d ? snap.d : null;
+}
+function saveSnap(d) {
+  try {
+    const raw = JSON.stringify({ user: BOOT_USER, at: Date.now(), d: d });
+    // keep well below the ~5 MB browser limit; a too big copy is simply not kept
+    if (raw.length < 2e6) localStorage.setItem('tr:snap', raw); else localStorage.removeItem('tr:snap');
+  } catch (e) { /* storage full or private mode */ }
+}
+function applyBoot(d) {
+  Object.assign(S, d);
+  S.appName = d.appName || S.appName;
+  document.title = S.appName;
+  $('#app').classList.remove('is-loading');
+}
+function boot() {
+  S.collapsed = store.get('collapsed', {});
+  try { localStorage.removeItem('tr:dashLayout'); } catch (e) { /* layout switch removed */ }
+  let started = false;
+  let params = {};
+  const openLinkedTask = () => {
+    if (!params.task) return;
+    if (task(params.task)) { openPeek(params.task); params.task = null; }
+    else if (!S.fromSnap) { toast('Diese Aufgabe gibt es nicht mehr oder du hast keinen Zugriff darauf.', { warn: true }); params.task = null; }
+  };
+  const start = p => {
+    started = true;
+    params = p;
+    if (params.perf === '1') { S.perf = true; perfPanel(); }
+    calPrefetch();
+    const last = store.get('route', null);
+    if (params.view) S.route = { view: params.view, id: params.id || null };
+    else if (last && last.view && (!last.id || team(last.id) || project(last.id))) S.route = last;
+    render({ resetScroll: true });
+    openLinkedTask();
+  };
+  const go0 = () => { try { google.script.url.getLocation(loc => start(loc.parameter || {})); } catch (e) { start({}); } };
+  const fail0 = err => {
+    $('#app').classList.remove('is-loading');
+    $('#sidebar').innerHTML = '';
+    $('#view').innerHTML = '<div class="page"><div class="nf">' + logoMark() + '<h1>App konnte nicht geladen werden</h1>' +
+      '<p>' + esc(friendlyError(err.message || String(err))) + '</p>' +
+      '<div class="nf-acts"><button class="btn primary" onclick="location.reload()">Erneut versuchen</button></div></div></div>';
+  };
+  const snap = readSnap();
+  if (snap) { S.fromSnap = true; applyBoot(snap); go0(); }
+  BOOT_REQ.then(d => {
+    saveSnap(d);
+    if (!S.fromSnap) { applyBoot(d); go0(); return; }
+    // fresh data replaces the copy; tasks still being created here are kept on top
+    const pending = S.tasks.filter(t => PENDING[t.id]);
+    S.fromSnap = false;
+    applyBoot(d);
+    if (pending.length) S.tasks = S.tasks.concat(pending);
+    // the copy may point at a team or calendar scope that is gone meanwhile
+    if (S.cap.teamId && !team(S.cap.teamId)) { S.cap.teamId = null; S.cap.data = null; }
+    if (S.cal.teamId && !team(S.cal.teamId)) S.cal.teamId = '';
+    S.reportDirty = true;
+    if (started) { render(); openLinkedTask(); }
+    // something was saved while the start data was on its way: fetch the list once more
+    if (S.wroteDuringBoot) { S.tasksVer = ''; setTimeout(refresh, 300); }
+  }).catch(err => {
+    const offline = /network|netzwerk|failed to fetch|timed? ?out|zeitüberschreitung|verbindung|503|502/i.test((err && err.message) || '');
+    if (S.fromSnap && offline) { toast('Keine Verbindung – du siehst den zuletzt geladenen Stand.', { warn: true }); return; }
+    // no access (any more) or another server answer: the copy must not stay visible
+    try { localStorage.removeItem('tr:snap'); } catch (e) { /* ignore */ }
+    S.fromSnap = false;
+    fail0(err);
+  });
+  if (google.script.history) google.script.history.setChangeHandler(ev => {
+    if (ev.state && ev.state.view) { S.route = ev.state; render({ resetScroll: true }); }
+  });
+}
+// all scripts are parsed by then; fonts and images may still load
+document.addEventListener('DOMContentLoaded', boot);
+// placeholders shaped like the page that will open, drawn right away (before fonts and data)
+(function () {
+  const saved = store.get('route', null);
+  $('#sidebar').innerHTML = skSidebar();
+  $('#view').innerHTML = skPage(saved && saved.view ? saved : { view: 'dash' });
+})();
+</script>

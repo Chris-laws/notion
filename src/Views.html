@@ -1,0 +1,2072 @@
+<script>
+/* ==========================================================================
+   Pages and database layouts (list, board, table, calendar), team calendar,
+   capacity planning, teams, projects and settings.
+   ========================================================================== */
+
+const Views = {
+  render() {
+    const r = S.route;
+    switch (r.view) {
+      case 'dash': return dashPage();
+      case 'home': return homePage();
+      case 'planner': S.route = { view: 'calendar', id: null }; S.cal.mode = 'day'; return calendarPage();
+      case 'all': return allPage();
+      case 'team': return team(r.id) ? teamPage(team(r.id)) : notFound();
+      case 'project': return project(r.id) ? projectPage(project(r.id)) : notFound();
+      case 'calendar': return calendarPage();
+      case 'capacity': return capacityPage();
+      case 'settings': return settingsPage();
+      default: return notFound();
+    }
+  },
+  after() { bindDrag(); bindCalSelect(); bindPlanner(); bindGantt(); bindPtabs(); },
+};
+/** 404: unknown link, deleted team/project/task. */
+function notFound() {
+  return '<div class="page"><div class="nf">' + logoMark() + '<div class="nf-code">404</div><h1>Diese Seite gibt es nicht (mehr)</h1>' +
+    '<p>Vielleicht wurde das Team, Projekt oder die Aufgabe gelöscht, oder der Link ist unvollständig.</p>' +
+    '<div class="nf-acts"><button class="btn primary" data-action="nav" data-view="dash">Zur Übersicht</button>' +
+    '<button class="btn outline" data-action="nav" data-view="home">Meine Aufgaben</button>' +
+    '<button class="btn outline" data-action="palette">' + icon('search', 'sm') + 'Suchen</button></div></div></div>';
+}
+
+/* ---------------- database (task collection) ---------------- */
+const LAYOUTS = [
+  { key: 'list', label: 'Liste', ic: 'list' },
+  { key: 'table', label: 'Tabelle', ic: 'table' },
+  { key: 'board', label: 'Board', ic: 'board' },
+  { key: 'calendar', label: 'Kalender', ic: 'calendar' },
+  { key: 'gantt', label: 'Gantt', ic: 'gantt' },
+];
+const GROUPS = [
+  { key: 'status', label: 'Status' }, { key: 'priority', label: 'Priorität' },
+  { key: 'assignee', label: 'Person' }, { key: 'project', label: 'Projekt' },
+];
+function dbKey() { return S.route.view + ':' + (S.route.id || ''); }
+function defaultPrefs() {
+  const home = S.route.view === 'home';
+  return {
+    layout: home ? 'list' : 'board', groupBy: 'status', listGroup: home ? 'due' : 'status', people: [], prio: [], projects: [], statuses: [],
+    quick: 'open', showDone: !home, search: '', sort: { key: 'dueDate', dir: 1 }, rows: 50, page: 0, collapsedCols: {},
+  };
+}
+function prefs() {
+  if (!S.db) S.db = store.get('db', {});
+  const k = dbKey();
+  if (!S.db[k]) S.db[k] = defaultPrefs();
+  const p = S.db[k];
+  // older saved prefs: fill in new fields, one "who" value becomes the people list
+  const d = defaultPrefs();
+  Object.keys(d).forEach(x => { if (p[x] === undefined) p[x] = d[x]; });
+  if (p.who && p.who !== 'all') p.people = [p.who === 'me' ? '__me' : p.who === 'none' ? '__none' : p.who];
+  delete p.who;
+  if (!LAYOUTS.some(l => l.key === p.layout)) p.layout = 'list';
+  return p;
+}
+/** "Meine Aufgaben" quick tabs (smart lists). */
+const QUICK = [['open', 'Alle offenen'], ['today', 'Heute'], ['upcoming', 'Anstehend'], ['overdue', 'Überfällig'], ['nodate', 'Ohne Datum'], ['done', 'Erledigt']];
+const LIST_GROUPS = [['due', 'Fälligkeit'], ['status', 'Status'], ['priority', 'Priorität'], ['project', 'Projekt']];
+function setPrefs(patch) {
+  Object.assign(prefs(), patch);
+  store.set('db', S.db);
+  render();
+}
+/** Every list, count and tab goes through Shared.taskQuery, so they always agree. */
+function queryTasks(tasks, p, opts) {
+  const mine = S.route.view === 'home';
+  return Shared.taskQuery(tasks, mine ? Object.assign({}, p, { people: [] }) : p, {
+    me: S.me.email, today: TODAY(), quickTabs: mine, includeSub: mine || !!(opts && opts.includeSub), allDone: p.layout === 'board',
+  });
+}
+function bySort(a, b) { return (a.sort || 0) - (b.sort || 0) || (a.createdAt < b.createdAt ? -1 : 1); }
+function rankPrio(t) { return (prioOf(t.priority) || { rank: 9 }).rank; }
+
+function database(tasks, opts) {
+  const p = prefs();
+  opts = opts || {};
+  // "Meine Aufgaben" are mine anyway: no person filter there, smart quick tabs instead
+  const mine = S.route.view === 'home';
+  const res = queryTasks(tasks, p, opts);
+  const sortable = p.layout === 'table' || p.layout === 'gantt';
+  const cnt = n => (n ? '<span class="tn">' + n + '</span>' : '');
+  const sw = '<div class="vsw">' + LAYOUTS.map(l =>
+    '<button class="' + (p.layout === l.key ? 'on' : '') + '" data-action="layout" data-v="' + l.key + '" title="' + l.label + '">' + icon(l.ic) + '</button>').join('') + '</div>';
+  const titleRow = opts.title
+    ? '<div class="dbh-top"><div><h1 class="page-title">' + esc(opts.title) + '</h1>' + (opts.sub ? '<p class="page-sub">' + opts.sub + '</p>' : '') + '</div>' +
+      '<div class="dbh-r">' + sw + '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>'
+    : '';
+  const quickTabs = mine ? '<div class="qtabs">' + QUICK.map(q => {
+    const n = res.counts[q[0]];
+    return '<button class="' + (res.quick === q[0] ? 'on' : '') + (q[0] === 'overdue' && n ? ' warn' : '') + '" data-action="db-quick" data-k="' + q[0] + '">' + q[1] + '<span class="n">' + n + '</span></button>';
+  }).join('') + '</div>' : '';
+  const listGroup = LIST_GROUPS.find(g => g[0] === p.listGroup) || LIST_GROUPS[0];
+  const tools = quickTabs + '<div class="dbh-tools">' +
+    (mine ? '' : '<button class="tbtn' + (p.people.length ? ' on' : '') + '" data-action="db-who">' + icon('user', 'sm') + 'Person' + cnt(p.people.length) + '</button>') +
+    '<button class="tbtn' + (p.prio.length ? ' on' : '') + '" data-action="db-prio">' + icon('flag', 'sm') + 'Priorität' + cnt(p.prio.length) + '</button>' +
+    (opts.hideProject ? '' : '<button class="tbtn' + (p.projects.length ? ' on' : '') + '" data-action="db-proj">' + icon('folder', 'sm') + 'Projekt' + cnt(p.projects.length) + '</button>') +
+    '<button class="tbtn' + (p.statuses.length ? ' on' : '') + '" data-action="db-status">' + icon('status', 'sm') + 'Status' + cnt(p.statuses.length) + '</button>' +
+    (sortable ? '<button class="tbtn" data-action="db-sort">' + icon('sort', 'sm') + 'Sortierung' + cnt(1) + '</button>' : '') +
+    (p.layout === 'board' ? '<button class="tbtn" data-action="db-group">' + icon('layers', 'sm') + 'Gruppe: ' + esc(GROUPS.find(g => g.key === p.groupBy).label) + '</button>' : '') +
+    (p.layout === 'list' ? '<button class="tbtn" data-action="db-lgroup">' + icon('layers', 'sm') + 'Gruppe: ' + esc(listGroup[1]) + '</button>' : '') +
+    (p.layout !== 'board' && !mine ? '<button class="tbtn' + (res.hidesDone ? '' : ' on') + '" data-action="db-done"' + (p.statuses.indexOf('done') >= 0 ? ' title="Der Status-Filter „Erledigt“ zeigt erledigte Aufgaben immer an"' : '') + '>' + icon('checksq', 'sm') + 'Erledigte</button>' : '') +
+    '<input class="db-search' + (p.search ? ' open' : '') + '" placeholder="Suchen…" value="' + esc(p.search) + '" data-on-input="db-search">' +
+    '<button class="icon-btn" data-action="db-search-open" title="Suchen">' + icon('search') + '</button>' +
+    '<span class="grow"></span>' + (opts.title ? '' : sw) +
+    '<span class="vlbl">Gespeicherte Ansichten</span><button class="tbtn sel" data-action="view-menu">' + esc(p.view || 'Standard') + icon('chevron', 'sm') + '</button>' +
+    '<button class="icon-btn" data-action="view-save" title="Aktuelle Ansicht speichern">' + icon('plus') + '</button></div>';
+  // active filters as chips; people are one chip each plus "+" to add more
+  const chips = [];
+  if (!mine && p.people.length) {
+    p.people.forEach(e => chips.push('<button class="fchip" data-action="db-unperson" data-v="' + esc(e) + '">' +
+      (e === '__me' ? icon('user', 'sm') + 'Mir zugewiesen' : e === '__none' ? icon('circle', 'sm') + 'Nicht zugewiesen' : avatar(e) + esc(user(e).name)) + icon('x', 'sm') + '</button>'));
+    chips.push('<button class="fchip add" data-action="db-who" title="Person hinzufügen">' + icon('plus', 'sm') + '</button>');
+  }
+  if (p.prio.length) chips.push('<button class="fchip" data-action="db-clear" data-k="prio">' + icon('flag', 'sm') + esc(p.prio.map(k => (prioOf(k) || { label: 'Keine' }).label).join(', ')) + icon('x', 'sm') + '</button>');
+  if (p.projects.length) chips.push('<button class="fchip" data-action="db-clear" data-k="projects">' + icon('folder', 'sm') + esc(p.projects.map(id => (project(id) || { name: 'Ohne Projekt' }).name).join(', ')) + icon('x', 'sm') + '</button>');
+  if (p.statuses.length) chips.push('<button class="fchip" data-action="db-clear" data-k="statuses">' + icon('status', 'sm') + esc(p.statuses.map(k => (Shared.STATUSES.find(s => s.key === k) || {}).label).join(', ')) + icon('x', 'sm') + '</button>');
+  const chipsHtml = chips.length ? '<div class="filter-chips">' + chips.join('') + '</div>' : '';
+
+  let body;
+  const list = res.list;
+  if (p.layout === 'board') body = boardHtml(list, p, opts);
+  else if (p.layout === 'table') body = tableHtml(list, p, opts);
+  else if (p.layout === 'calendar') body = taskCalendarHtml(list, opts);
+  else if (p.layout === 'gantt') body = ganttHtml(list, p, opts);
+  else body = listHtml(list, opts);
+  return '<div class="card-w dbh' + (opts.title ? ' titled' : '') + '">' + titleRow + tools + '</div>' +
+    '<div class="fit-body db-body" data-keep-scroll="db">' + chipsHtml + body + '</div>';
+}
+/* saved views: filter, layout and sorting per page, kept in this browser */
+function savedViews() {
+  const all = store.get('views', {});
+  return all[dbKey()] || [];
+}
+A['view-menu'] = el => {
+  const list = savedViews();
+  openMenu(el, [{ value: '', html: '<span>Standard</span>', search: '' }].concat(list.map(v => ({ value: v.name, html: '<span>' + esc(v.name) + '</span>', search: v.name, deletable: true }))), {
+    search: false, selected: [prefs().view || ''],
+    onDelete: name => {
+      const all = store.get('views', {});
+      const kept = (all[dbKey()] || []).filter(x => x.name !== name);
+      const gone = (all[dbKey()] || []).find(x => x.name === name);
+      all[dbKey()] = kept;
+      store.set('views', all);
+      if (prefs().view === name) { prefs().view = ''; store.set('db', S.db); }
+      render({ peek: false });
+      toast('Ansicht „' + name + '“ gelöscht', { action: { label: 'Rückgängig', fn: () => {
+        const again = store.get('views', {});
+        again[dbKey()] = (again[dbKey()] || []).concat([gone]);
+        store.set('views', again);
+        render({ peek: false });
+      } } });
+    },
+    onPick: name => {
+      const d = defaultPrefs();
+      const v = list.find(x => x.name === name);
+      S.db[dbKey()] = Object.assign(d, v ? v.p : {}, { view: name });
+      store.set('db', S.db);
+      render();
+    },
+  });
+};
+A['view-save'] = () => {
+  openModal({
+    title: 'Ansicht speichern', submitLabel: 'Speichern',
+    body: field('Name', '<input class="input" name="name" required maxlength="40" placeholder="z. B. Meine offenen Aufgaben">') +
+      '<p class="hint">Gespeichert werden Layout, Filter, Gruppierung und Sortierung dieser Seite, nur in diesem Browser.</p>',
+    onSubmit: v => {
+      const name = String(v.name || '').trim();
+      if (!name) return false;
+      const all = store.get('views', {});
+      const list = (all[dbKey()] || []).filter(x => x.name !== name);
+      const cur = Object.assign({}, prefs());
+      delete cur.view; delete cur.page;
+      list.push({ name: name, p: cur });
+      all[dbKey()] = list;
+      store.set('views', all);
+      prefs().view = name;
+      store.set('db', S.db);
+      render();
+      toast('Ansicht „' + name + '“ gespeichert');
+    },
+  });
+};
+A['db-sort'] = el => {
+  const keys = [['dueDate', 'Fälligkeit'], ['startDate', 'Start'], ['priority', 'Priorität'], ['status', 'Status'], ['title', 'Titel'], ['assignees', 'Zugewiesen'], ['projectId', 'Projekt'], ['progress', 'Fortschritt'], ['estimate', 'Aufwand']];
+  const s = prefs().sort || { key: 'dueDate', dir: 1 };
+  openMenu(el, keys.map(k => ({ value: k[0], html: '<span>' + k[1] + '</span>' + (s.key === k[0] ? '<small>' + (s.dir > 0 ? 'aufsteigend' : 'absteigend') + '</small>' : ''), search: k[1] })),
+    { search: false, selected: [s.key], onPick: v => setPrefs({ sort: { key: v, dir: s.key === v ? -s.dir : 1 } }) });
+};
+A.layout = el => setPrefs({ layout: el.dataset.v });
+A['db-done'] = () => setPrefs({ showDone: !prefs().showDone });
+A['db-clear'] = el => setPrefs({ [el.dataset.k]: [] });
+A['db-unperson'] = el => setPrefs({ people: prefs().people.filter(e => e !== el.dataset.v) });
+A['db-quick'] = el => setPrefs({ quick: el.dataset.k });
+A['db-lgroup'] = el => openMenu(el, LIST_GROUPS.map(g => ({ value: g[0], html: '<span>' + g[1] + '</span>', search: g[1] })),
+  { selected: [prefs().listGroup], search: false, onPick: v => setPrefs({ listGroup: v }) });
+const multiFilter = key => (v, sel) => { prefs()[key] = sel; store.set('db', S.db); render(); };
+A['db-proj'] = el => {
+  const items = [{ value: '', html: '<span class="faint">Ohne Projekt</span>', search: 'ohne kein' }];
+  S.teams.forEach(tm => {
+    const ps = S.projects.filter(x => x.teamId === tm.id);
+    if (!ps.length) return;
+    items.push({ label: tm.name, search: '' });
+    ps.forEach(x => items.push({ value: x.id, html: projectChip(x), search: x.name + ' ' + tm.name }));
+  });
+  openMenu(el, items, { multi: true, search: true, placeholder: 'Projekt suchen…', selected: prefs().projects, onPick: multiFilter('projects') });
+};
+A['db-status'] = el => openMenu(el, Shared.STATUSES.map(s => ({ value: s.key, html: statusTag(s.key), search: s.label })),
+  { multi: true, search: false, selected: prefs().statuses, onPick: multiFilter('statuses') });
+A['db-search-open'] = () => { const i = $('.db-search'); i.classList.add('open'); i.focus(); };
+ON.input['db-search'] = debounce(el => {
+  prefs().search = el.value;
+  store.set('db', S.db);
+  const pos = el.selectionStart;
+  render();
+  const n = $('.db-search');
+  if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+}, 200);
+/** Person filter: type a few letters, pick several people; they show up as chips with a "+" to add more. */
+A['db-who'] = () => peopleModal({
+  title: 'Nach Personen filtern', sub: 'Gezeigt werden Aufgaben, die einer der gewählten Personen zugewiesen sind.', selected: prefs().people.slice(),
+  extra: [{ value: '__me', name: 'Mir zugewiesen', icon: 'user' }, { value: '__none', name: 'Nicht zugewiesen', icon: 'circle' }],
+  invite: false, addLabel: 'Filtern', emptyText: 'Kein Personenfilter – alle Aufgaben werden gezeigt.',
+  onChange: list => { prefs().people = list; store.set('db', S.db); render(); },
+});
+A['db-prio'] = el => openMenu(el, Shared.PRIORITIES.map(p => ({ value: p.key, html: prioTag(p.key), search: p.label }))
+  .concat([{ value: '', html: '<span class="faint">Keine</span>', search: 'keine' }]),
+{ multi: true, search: false, selected: prefs().prio, onPick: (v, sel) => { prefs().prio = sel; store.set('db', S.db); render(); } });
+A['db-group'] = el => openMenu(el, GROUPS.map(g => ({ value: g.key, html: '<span>' + g.label + '</span>', search: g.label })),
+  { selected: [prefs().groupBy], search: false, onPick: v => setPrefs({ groupBy: v }) });
+
+/* ----- card ----- */
+function metaHtml(t, opts) {
+  const subs = subtasks(t.id);
+  const parts = [];
+  if (t.priority) parts.push(prioTag(t.priority, true));
+  if (t.dueDate && !(opts && opts.skipDue)) parts.push(dueTag(t));
+  if (subs.length) parts.push('<span class="meta">' + icon('sub', 'sm') + subs.filter(isDone).length + '/' + subs.length + '</span>');
+  if (t.estimate && !(opts && opts.skipEst)) parts.push('<span class="meta">' + icon('hourglass', 'sm') + esc(fmtHours(t.estimate)) + '</span>');
+  if (t.recurrence) parts.push('<span class="meta" title="Wiederholt sich">' + icon('repeat', 'sm') + '</span>');
+  if (opts && opts.withTags) t.tags.slice(0, 2).forEach(x => parts.push(tagChip(x)));
+  return parts.join('');
+}
+/** "Überfällig seit 4 Wo. 6 T." */
+function agoText(days) {
+  if (days < 14) return days + (days === 1 ? ' Tag' : ' Tage');
+  const w = Math.floor(days / 7), d = days % 7;
+  return w + ' Wo.' + (d ? ' ' + d + ' T.' : '');
+}
+function fmtShort(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  return d + '.' + m + '.' + String(y).slice(2);
+}
+function cardHtml(t, opts) {
+  const pr = t.priority && prioOf(t.priority);
+  const p = !(opts && opts.hideProject) && t.projectId && project(t.projectId);
+  const tm = !p && t.teams.length && team(t.teams[0]);
+  const subs = subtasks(t.id);
+  const today = TODAY();
+  const over = !isDone(t) && t.dueDate && t.dueDate < today;
+  const dates = t.dueDate
+    ? '<div class="cdates"><span class="cdate' + (over ? ' over' : t.dueDate === today ? ' today' : '') + '">' + icon('calendar', 'sm') +
+      esc(t.startDate && t.startDate !== t.dueDate ? fmtRange(t.startDate, t.dueDate) : fmtDate(t.dueDate, { absolute: true })) + '</span>' +
+      (over ? '<span class="cover">Überfällig seit ' + agoText(Shared.diffDays(t.dueDate, today)) + '</span>' : '') + '</div>' : '';
+  const tags = t.tags.slice(0, 3).map(tagChip).join('');
+  const pv = progressOf(t);
+  return '<div class="card' + (S.peekId === t.id ? ' selected' : '') + '" style="--cc:' + STATUS_COLORS[t.status] + '" draggable="true" data-drag-id="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '">' +
+    '<div class="card-top">' + (pr ? '<span class="cprio prio-' + pr.key + '">' + esc(pr.label) + '</span>' : '') +
+    (p ? projectPill(p) : tm ? '<span class="jpill" style="background:var(--c-' + esc(tm.color || 'gray') + ')">' + esc(tm.name) + '</span>' : '') + '</div>' +
+    '<div class="card-title' + (isDone(t) ? ' done' : '') + '"><span>' + esc(t.title) + '</span></div>' +
+    dates + (tags ? '<div class="ctags">' + tags + '</div>' : '') +
+    (subs.length || pv > 0 && !isDone(t) ? '<div class="cprog"><span class="track"><i style="width:' + pv + '%"></i></span><span class="pv">' +
+      (subs.length ? subs.filter(isDone).length + '/' + subs.length + ' · ' : '') + pv + '%</span></div>' : '') +
+    '<div class="card-foot"><span class="cavs">' + (t.assignees.length ? avatars(t.assignees) : '') + '</span><span class="cmeta">' +
+    (t.estimate ? '<span class="meta">' + icon('hourglass', 'sm') + esc(fmtHours(t.estimate)) + '</span>' : '') +
+    (t.recurrence ? '<span class="meta" title="Wiederholt sich">' + icon('repeat', 'sm') + '</span>' : '') + '</span></div>' +
+    '</div>';
+}
+A['open-task'] = el => openPeek(el.dataset.id);
+A['toggle-done'] = (el, e) => {
+  e.stopPropagation();
+  const t = task(el.dataset.id);
+  if (!t) return;
+  patchTask(t.id, { status: isDone(t) ? 'todo' : 'done' });
+};
+
+/* ----- board ----- */
+const cdot = c => '<span class="cdot" style="background:' + c + '"></span>';
+function boardColumns(tasks, p) {
+  const PC = { urgent: 'var(--danger)', high: 'var(--c-orange)', medium: 'var(--c-yellow)', low: 'var(--c-gray)' };
+  if (p.groupBy === 'priority') {
+    return Shared.PRIORITIES.map(x => ({ value: x.key, label: x.label, color: PC[x.key], preset: { priority: x.key } }))
+      .concat([{ value: '', label: 'Keine Priorität', color: 'var(--text-3)', preset: { priority: '' } }])
+      .map(c => Object.assign(c, { tasks: tasks.filter(t => (t.priority || '') === c.value) }));
+  }
+  if (p.groupBy === 'assignee') {
+    const emails = [S.me.email];
+    tasks.forEach(t => t.assignees.forEach(e => { if (emails.indexOf(e) < 0) emails.push(e); }));
+    return emails.map(e => ({ value: e, label: user(e).name, color: user(e).color || 'var(--c-gray)', preset: { assignees: [e] }, tasks: tasks.filter(t => t.assignees.indexOf(e) >= 0) }))
+      .concat([{ value: '', label: 'Nicht zugewiesen', color: 'var(--text-3)', preset: { assignees: [] }, tasks: tasks.filter(t => !t.assignees.length) }]);
+  }
+  if (p.groupBy === 'project') {
+    const ids = [];
+    tasks.forEach(t => { if (t.projectId && ids.indexOf(t.projectId) < 0 && project(t.projectId)) ids.push(t.projectId); });
+    const pc = id => 'var(--c-' + (project(id).color && project(id).color !== 'default' ? project(id).color : 'gray') + ')';
+    return ids.map(id => ({ value: id, label: project(id).name, color: pc(id), preset: { projectId: id }, tasks: tasks.filter(t => t.projectId === id) }))
+      .concat([{ value: '', label: 'Ohne Projekt', color: 'var(--text-3)', preset: { projectId: '' }, tasks: tasks.filter(t => !t.projectId) }]);
+  }
+  return Shared.STATUSES.map(s => ({ value: s.key, label: s.label, color: STATUS_COLORS[s.key], preset: { status: s.key }, tasks: tasks.filter(t => t.status === s.key) }));
+}
+function boardHtml(tasks, p, opts) {
+  const cols = boardColumns(tasks, p);
+  return '<div class="board">' + cols.map(c => {
+    const list = c.tasks.slice().sort(bySort);
+    const key = p.groupBy + ':' + c.value;
+    const dz = 'data-drop-group="' + esc(p.groupBy) + '" data-drop-value="' + esc(c.value) + '"';
+    if (p.collapsedCols[key]) {
+      return '<div class="col collapsed" ' + dz + '><button class="col-open" data-action="col-toggle" data-k="' + esc(key) + '" title="Spalte aufklappen">' + icon('chevron', 'sm') +
+        cdot(c.color) + '<span class="vt">' + esc(c.label) + '</span><span class="n">' + list.length + '</span></button></div>';
+    }
+    return '<div class="col" ' + dz + '>' +
+      '<div class="col-head"><button class="icon-btn sm" data-action="col-toggle" data-k="' + esc(key) + '" title="Spalte einklappen">' + icon('chevron', 'sm chev') + '</button>' +
+      cdot(c.color) + '<span class="cn">' + esc(c.label) + '</span><span class="n">' + list.length + '</span>' +
+      '<button class="icon-btn sm" data-action="new-task" data-preset="' + attr(c.preset) + '" title="Neue Aufgabe">' + icon('plus', 'sm') + '</button></div>' +
+      '<div class="col-cards">' + list.map(t => cardHtml(t, opts)).join('') + '</div>' +
+      '<button class="add-row" data-action="new-task" data-preset="' + attr(c.preset) + '">' + icon('plus', 'sm') + 'Aufgabe hinzufügen</button></div>';
+  }).join('') + '</div>';
+}
+A['col-toggle'] = el => { const p = prefs(); p.collapsedCols[el.dataset.k] = !p.collapsedCols[el.dataset.k]; store.set('db', S.db); render(); };
+
+/* ----- drag & drop (board + calendar) ----- */
+const dragState = { id: null, from: null };
+function bindDrag() {
+  $$('[data-drag-id]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      dragState.id = el.dataset.dragId;
+      const col = el.closest('[data-drop-value]');
+      dragState.from = col ? col.dataset.dropValue : null;
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', dragState.id); } catch (err) { /* IE */ }
+      setTimeout(() => el.classList.add('dragging'), 0);
+    });
+    el.addEventListener('dragend', () => { el.classList.remove('dragging'); dragState.id = null; $$('.drop').forEach(x => x.classList.remove('drop')); });
+  });
+  $$('[data-drop-value], [data-drop-date]').forEach(zone => {
+    zone.addEventListener('dragover', e => { if (dragState.id) { e.preventDefault(); zone.classList.add('drop'); } });
+    zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drop'); });
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drop');
+      const id = dragState.id;
+      dragState.id = null;
+      const t = task(id);
+      if (!t) return;
+      if (zone.dataset.dropDate) return dropOnDate(t, zone.dataset.dropDate);
+      dropOnColumn(t, zone, e.clientY);
+    });
+  });
+}
+function dropOnDate(t, date) {
+  if (t.dueDate === date) return;
+  const patch = { dueDate: date };
+  if (t.startDate && t.dueDate) patch.startDate = Shared.addDays(t.startDate, Shared.diffDays(t.dueDate, date));
+  patchTask(t.id, patch);
+}
+function dropOnColumn(t, zone, y) {
+  const field = zone.dataset.dropGroup;
+  const value = zone.dataset.dropValue;
+  const cards = $$('.card', zone).filter(c => c.dataset.dragId !== t.id);
+  let idx = cards.findIndex(c => { const r = c.getBoundingClientRect(); return y < r.top + r.height / 2; });
+  if (idx < 0) idx = cards.length;
+  const before = cards[idx - 1] && task(cards[idx - 1].dataset.dragId);
+  const after = cards[idx] && task(cards[idx].dataset.dragId);
+  let sort;
+  if (before && after) sort = (before.sort + after.sort) / 2;
+  else if (before) sort = before.sort + 1000;
+  else if (after) sort = after.sort - 1000;
+  else sort = Date.now();
+  const patch = { sort: sort };
+  if (field === 'status') patch.status = value;
+  if (field === 'priority') patch.priority = value;
+  if (field === 'project') patch.projectId = value;
+  if (field === 'assignee') {
+    let list = t.assignees.filter(e => e !== dragState.from);
+    if (value && list.indexOf(value) < 0) list.push(value);
+    if (!value) list = [];
+    patch.assignees = list;
+  }
+  patchTask(t.id, patch);
+}
+
+/* ----- table ----- */
+const COLUMNS = [
+  { key: 'status', label: 'Status', cell: t => statusTag(t.status) },
+  { key: 'priority', label: 'Priorität', cell: t => prioTag(t.priority) },
+  { key: 'projectId', label: 'Projekt', cell: t => projectPill(project(t.projectId)) || '<span class="faint">Kein Projekt</span>' },
+  { key: 'assignees', label: 'Zugewiesen', cell: t => (t.assignees.length ? avatars(t.assignees, 4) : '') + '<span class="add-p" title="Person hinzufügen">' + icon('plus', 'sm') + '</span>' },
+  { key: 'startDate', label: 'Start', cell: t => (t.startDate ? '<span class="dtc">' + esc(fmtShort(t.startDate)) + '</span>' : '<span class="faint">Kein Start</span>') },
+  { key: 'dueDate', label: 'Fällig', cell: t => (t.dueDate
+    ? '<span class="dtc' + (!isDone(t) && t.dueDate < TODAY() ? ' over' : '') + '">' + esc(fmtShort(t.dueDate)) + '</span>' + (t.recurrence ? icon('repeat', 'sm faint') : '')
+    : '<span class="faint">Kein Datum</span>') },
+  { key: 'tags', label: 'Tags', cell: t => t.tags.map(tagChip).join('') },
+  { key: 'progress', label: 'Fortschritt', cell: t => progressBar(t) },
+  { key: 'estimate', label: 'Aufwand', cell: t => esc(fmtHours(t.estimate)) },
+];
+function sortValue(t, key) {
+  switch (key) {
+    case 'title': return t.title.toLowerCase();
+    case 'status': return Shared.STATUSES.findIndex(s => s.key === t.status);
+    case 'priority': return rankPrio(t);
+    case 'dueDate': return t.dueDate || '9999';
+    case 'startDate': return t.startDate || '9999';
+    case 'assignees': return t.assignees.map(e => user(e).name).join(',') || '~';
+    case 'projectId': return t.projectId ? (project(t.projectId) || {}).name || '' : '~';
+    case 'estimate': return t.estimate || 0;
+    case 'progress': return progressOf(t);
+    default: return '';
+  }
+}
+function sortTasks(tasks, p) {
+  const s = p.sort || { key: 'dueDate', dir: 1 };
+  return tasks.slice().sort((a, b) => {
+    const x = sortValue(a, s.key), y = sortValue(b, s.key);
+    return (x < y ? -1 : x > y ? 1 : 0) * s.dir || bySort(a, b);
+  });
+}
+function tableHtml(tasks, p, opts) {
+  const s = p.sort || { key: 'dueDate', dir: 1 };
+  const list = sortTasks(tasks, p);
+  const rows = p.rows || 50;
+  const pages = Math.max(1, Math.ceil(list.length / rows));
+  const pg = Math.min(p.page || 0, pages - 1);
+  const shown = list.slice(pg * rows, pg * rows + rows);
+  const cols = COLUMNS.filter(c => !(opts.hideProject && c.key === 'projectId'));
+  const ind = k => (s.key === k ? '<span class="sort-ind">' + (s.dir > 0 ? '▲' : '▼') + '</span>' : '');
+  return '<div class="table-wrap"><div class="tscroll"><table class="db"><thead><tr><th class="ck"></th>' +
+    '<th data-action="sort" data-k="title" style="min-width:280px">Aufgabe' + ind('title') + '</th>' +
+    cols.map(c => '<th data-action="sort" data-k="' + c.key + '">' + c.label + ind(c.key) + '</th>').join('') +
+    '</tr></thead><tbody>' + shown.map(t => {
+      const subs = subtasks(t.id);
+      return '<tr><td class="ck"><span class="check' + (isDone(t) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(t.id) + '" role="checkbox" aria-checked="' + isDone(t) + '"></span></td>' +
+        '<td><div class="title-cell" data-action="open-task" data-id="' + esc(t.id) + '">' +
+        '<span class="tt' + (isDone(t) ? ' done' : '') + '">' + esc(t.title) + '</span>' +
+        (subs.length ? '<span class="subc" title="Unteraufgaben">' + icon('sub', 'sm') + subs.length + '</span>' : '') + '</div></td>' +
+        cols.map(c => '<td><div class="cell" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + c.key + '">' + c.cell(t) + '</div></td>').join('') +
+        '</tr>';
+    }).join('') +
+    '</tbody></table></div>' +
+    '<div class="tfoot"><span>' + (list.length ? pg * rows + 1 : 0) + ' bis ' + Math.min(list.length, pg * rows + rows) + ' von ' + list.length + ' Aufgaben</span>' +
+    '<span class="trows">Zeilen <select data-on-change="db-rows">' + [25, 50, 100, 200].map(n => '<option' + (n === rows ? ' selected' : '') + '>' + n + '</option>').join('') + '</select></span>' +
+    '<span class="grow"></span><button class="icon-btn sm" data-action="db-page" data-d="-1"' + (pg === 0 ? ' disabled' : '') + '>' + icon('left', 'sm') + '</button>' +
+    '<span class="pgn">' + (pg + 1) + ' / ' + pages + '</span>' +
+    '<button class="icon-btn sm" data-action="db-page" data-d="1"' + (pg >= pages - 1 ? ' disabled' : '') + '>' + icon('right', 'sm') + '</button></div></div>' +
+    '<button class="add-row" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>';
+}
+ON.change['db-rows'] = el => setPrefs({ rows: Number(el.value) || 50, page: 0 });
+A['db-page'] = el => setPrefs({ page: Math.max(0, (prefs().page || 0) + Number(el.dataset.d)) });
+A.sort = el => {
+  const p = prefs();
+  const k = el.dataset.k;
+  setPrefs({ sort: { key: k, dir: p.sort && p.sort.key === k ? -p.sort.dir : 1 } });
+};
+
+/* ----- gantt ----- */
+const GZ = { week: [44, 56, 'Woche'], month: [30, 90, 'Monat'], quarter: [12, 200, 'Quartal'] };
+const GT_ROW = 40;
+function ganttHtml(tasks, p, opts) {
+  if (!S.gantt) S.gantt = { start: null, zoom: 'month', hideList: false };
+  const g = S.gantt, today = TODAY();
+  const z = GZ[g.zoom] || GZ.month, px = z[0], n = z[1];
+  if (!g.start) g.start = Shared.addDays(today, -14);
+  const start = g.start;
+  const key = p.sort && p.sort.key !== 'dueDate' ? p.sort : null;
+  const dated = tasks.filter(t => t.startDate || t.dueDate)
+    .sort((a, b) => key ? sortTasks([a, b], p)[0] === a ? -1 : 1 : (a.startDate || a.dueDate).localeCompare(b.startDate || b.dueDate) || bySort(a, b));
+  const undated = tasks.filter(t => !t.startDate && !t.dueDate && !isDone(t));
+  const rows = dated.concat(undated);
+  const W = n * px;
+  const off = d => Shared.diffDays(start, d);
+  const months = [];
+  for (let i = 0; i < n; i++) {
+    const d = Shared.addDays(start, i), m = d.slice(0, 7);
+    if (!months.length || months[months.length - 1].m !== m) months.push({ m: m, from: i, n: 0 });
+    months[months.length - 1].n++;
+  }
+  let days = '', weekend = '';
+  for (let i = 0; i < n; i++) {
+    const d = Shared.addDays(start, i), wd = Shared.weekday(d), we = wd === 0 || wd === 6;
+    days += '<div class="gt-d' + (d === today ? ' today' : '') + (we ? ' we' : '') + '" style="left:' + i * px + 'px;width:' + px + 'px">' +
+      (px >= 28 ? '<b>' + Number(d.slice(8)) + '</b><small>' + DOW[wd] + '</small>' : (wd === 1 ? '<b>' + Number(d.slice(8)) + '</b>' : '')) + '</div>';
+    if (we) weekend += '<div class="gt-we" style="left:' + i * px + 'px;width:' + px + 'px"></div>';
+  }
+  const bar = t => {
+    const bs = t.startDate || t.dueDate, be = t.dueDate || t.startDate;
+    if (!bs) return '';
+    const s0 = Math.max(0, off(bs)), e0 = Math.min(n - 1, off(be));
+    if (e0 < 0 || s0 > n - 1) return '';
+    const w = (e0 - s0 + 1) * px;
+    const over = !isDone(t) && be < today;
+    const pv = progressOf(t);
+    return '<div class="gt-bar' + (over ? ' over' : '') + (isDone(t) ? ' done' : '') + (off(bs) < 0 ? ' cl' : '') + '" data-gid="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) +
+      '" style="left:' + s0 * px + 'px;width:' + Math.max(w - 3, 10) + 'px;--bc:' + STATUS_COLORS[t.status] + '">' +
+      '<i class="gb-fill" style="width:' + pv + '%"></i>' +
+      '<span class="gb-in">' + (w > 90 && t.assignees.length ? avatars(t.assignees, 2) : '') + (w > 60 ? '<span class="gb-t">' + esc(t.title) + '</span>' : '') +
+      (w > 130 ? '<span class="gb-p">' + pv + '%</span>' : '') + '</span><b class="gb-rs" data-gid="' + esc(t.id) + '"></b></div>';
+  };
+  const left = rows.map(t => '<div class="gt-lr' + (isDone(t) ? ' done' : '') + '" data-action="open-task" data-id="' + esc(t.id) + '">' + cdot(STATUS_COLORS[t.status]) +
+    '<span class="tt">' + esc(t.title) + '</span>' + (subtasks(t.id).length ? '<span class="subc">' + icon('sub', 'sm') + subtasks(t.id).length + '</span>' : '') + '</div>').join('');
+  const right = rows.map(t => '<div class="gt-r">' + bar(t) + '</div>').join('');
+  const tl = off(today);
+  const shift = k => 'data-action="gt-shift" data-d="' + k + '"';
+  return '<div class="card-w gt"><div class="gt-top"><h3 style="margin:0">Gantt-Diagramm</h3>' +
+    '<button class="icon-btn" ' + shift(-Math.round(n / 2)) + ' title="Zurück">' + icon('left') + icon('left') + '</button>' +
+    '<button class="icon-btn" ' + shift(-7) + '>' + icon('left') + '</button>' +
+    '<button class="btn outline sm" data-action="gt-today">Heute</button>' +
+    '<button class="icon-btn" ' + shift(7) + '>' + icon('right') + '</button>' +
+    '<button class="icon-btn" ' + shift(Math.round(n / 2)) + ' title="Vor">' + icon('right') + icon('right') + '</button>' +
+    '<div class="seg" style="margin-left:6px">' + Object.keys(GZ).map(k => '<button class="' + (g.zoom === k ? 'on' : '') + '" data-action="gt-zoom" data-k="' + k + '">' + GZ[k][2] + '</button>').join('') + '</div>' +
+    '<button class="tbtn" data-action="gt-list">' + icon('list', 'sm') + (g.hideList ? 'Liste einblenden' : 'Liste ausblenden') + '</button>' +
+    '<span class="grow"></span><span class="hint">Balken ziehen verschiebt den Zeitraum, der rechte Rand ändert das Fälligkeitsdatum.</span></div>' +
+    (rows.length ? '<div class="gt-body">' + (g.hideList ? '' : '<div class="gt-left"><div class="gt-lh">Aufgaben</div>' + left + '</div>') +
+      '<div class="gt-right"><div class="gt-scroll" style="width:' + W + 'px;--px:' + px + 'px">' +
+      '<div class="gt-head"><div class="gt-m">' + months.map(m => '<span style="left:' + m.from * px + 'px;width:' + m.n * px + 'px">' + MONTHS_LONG[Number(m.m.slice(5)) - 1] + ' ' + m.m.slice(0, 4) + '</span>').join('') + '</div><div class="gt-ds">' + days + '</div></div>' +
+      '<div class="gt-rows" style="height:' + rows.length * GT_ROW + 'px">' + weekend + right +
+      (tl >= 0 && tl < n ? '<div class="gt-today" style="left:' + (tl * px + px / 2) + 'px"></div>' : '') + '</div></div></div></div>'
+      : '<div class="empty">' + icon('gantt') + '<div>Keine Aufgaben mit Datum.</div></div>') + '</div>';
+}
+A['gt-shift'] = el => { S.gantt.start = Shared.addDays(S.gantt.start, Number(el.dataset.d)); render(); };
+A['gt-today'] = () => { S.gantt.start = Shared.addDays(TODAY(), -14); render(); };
+A['gt-zoom'] = el => { S.gantt.zoom = el.dataset.k; S.gantt.start = Shared.addDays(TODAY(), el.dataset.k === 'quarter' ? -30 : -14); render(); };
+A['gt-list'] = () => { S.gantt.hideList = !S.gantt.hideList; render(); };
+
+const gtDrag = { id: null, mode: null, x: 0, dx: 0, moved: false };
+function gtTip(bar) {
+  let tip = $('#gt-tip');
+  if (!bar) { if (tip) tip.hidden = true; return; }
+  const t = task(bar.dataset.gid);
+  if (!t) return;
+  if (!tip) { tip = document.createElement('div'); tip.id = 'gt-tip'; document.body.appendChild(tip); }
+  tip.hidden = false;
+  tip.innerHTML = '<b>' + esc(t.title) + '</b><div class="row">' + statusTag(t.status) + prioTag(t.priority) + '</div>' +
+    (t.startDate ? '<div class="l">' + icon('clock', 'sm') + 'Start ' + esc(fmtDate(t.startDate, { absolute: true })) + '</div>' : '') +
+    (t.dueDate ? '<div class="l">' + icon('calendar', 'sm') + 'Fällig ' + esc(fmtDate(t.dueDate, { absolute: true })) + '</div>' : '') +
+    progressBar(t, { wide: true }) +
+    (t.assignees.length ? '<div class="l">' + avatars(t.assignees, 4) + esc(t.assignees.map(e => user(e).name.split(' ')[0]).join(', ')) + '</div>' : '') +
+    (t.description ? '<p>' + esc(t.description.replace(/!\[([^\]]*)\]\(lf:fl_[a-z0-9]+\)/g, '[$1]').slice(0, 110)) + (t.description.length > 110 ? '…' : '') + '</p>' : '');
+  const r = bar.getBoundingClientRect();
+  tip.style.left = Math.min(window.innerWidth - 300, Math.max(8, r.left + 12)) + 'px';
+  tip.style.top = (r.bottom + 8 + 190 > window.innerHeight ? r.top - 8 - tip.offsetHeight : r.bottom + 8) + 'px';
+}
+function bindGantt() {
+  gtTip(null);
+  $$('.gt-bar').forEach(bar => {
+    bar.addEventListener('mouseenter', () => { if (!gtDrag.id) gtTip(bar); });
+    bar.addEventListener('mouseleave', () => gtTip(null));
+    bar.addEventListener('click', e => { if (gtDrag.moved) { e.stopPropagation(); e.preventDefault(); gtDrag.moved = false; } }, true);
+    bar.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      gtDrag.id = bar.dataset.gid; gtDrag.mode = e.target.classList.contains('gb-rs') ? 'end' : 'move';
+      gtDrag.x = e.clientX; gtDrag.dx = 0; gtDrag.moved = false; gtDrag.bar = bar;
+      gtTip(null);
+      e.preventDefault();
+    });
+  });
+}
+document.addEventListener('mousemove', e => {
+  if (!gtDrag.id) return;
+  const px = Number(getComputedStyle(gtDrag.bar.closest('.gt-scroll')).getPropertyValue('--px').replace('px', '')) || 30;
+  gtDrag.dx = Math.round((e.clientX - gtDrag.x) / px) * px;
+  if (Math.abs(e.clientX - gtDrag.x) > 4) gtDrag.moved = true;
+  if (gtDrag.mode === 'move') gtDrag.bar.style.transform = 'translateX(' + gtDrag.dx + 'px)';
+  else gtDrag.bar.style.width = Math.max(10, gtDrag.bar.offsetWidth + (gtDrag.dx - (gtDrag.last || 0))) + 'px', gtDrag.last = gtDrag.dx;
+});
+document.addEventListener('mouseup', () => {
+  if (!gtDrag.id) return;
+  const id = gtDrag.id, bar = gtDrag.bar;
+  const px = Number(getComputedStyle(bar.closest('.gt-scroll')).getPropertyValue('--px').replace('px', '')) || 30;
+  const days = Math.round(gtDrag.dx / px);
+  const mode = gtDrag.mode;
+  gtDrag.id = null; gtDrag.last = 0;
+  setTimeout(() => { gtDrag.moved = false; }, 50);
+  const t = task(id);
+  if (!t || !days) { render(); return; }
+  const patch = {};
+  if (mode === 'move') {
+    if (t.startDate) patch.startDate = Shared.addDays(t.startDate, days);
+    if (t.dueDate) patch.dueDate = Shared.addDays(t.dueDate, days);
+  } else {
+    const nd = Shared.addDays(t.dueDate || t.startDate, days);
+    if (t.startDate && nd < t.startDate) { render(); return; }
+    patch.dueDate = nd;
+  }
+  patchTask(id, patch);
+});
+
+/* ----- list ----- */
+function listRow(t, opts) {
+  const p = !(opts && opts.hideProject) && t.projectId && project(t.projectId);
+  return '<div class="lrow" data-action="open-task" data-id="' + esc(t.id) + '">' +
+    '<span class="check' + (isDone(t) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(t.id) + '" role="checkbox" aria-checked="' + isDone(t) + '" title="Erledigt"></span>' +
+    '<div class="t"><span class="title' + (isDone(t) ? ' done' : '') + '">' + esc(t.title) + '</span>' +
+    (t.parentId && task(t.parentId) ? '<span class="parent">↳ ' + esc(task(t.parentId).title) + '</span>' : '') + '</div>' +
+    '<div class="side">' + metaHtml(t, Object.assign({ withTags: true }, opts)) + (p ? '<span class="meta">' + projectChip(p) + '</span>' : '') +
+    (t.assignees.length ? avatars(t.assignees) : '') +
+    '<button class="add-p" data-action="prop" data-id="' + esc(t.id) + '" data-field="assignees" title="Person hinzufügen">' + icon('plus', 'sm') + '</button></div></div>';
+}
+function listHtml(tasks, opts) {
+  const today = TODAY();
+  const weekEnd = Shared.addDays(Shared.mondayOf(today), 6);
+  const tomorrow = Shared.addDays(today, 1);
+  const by = prefs().listGroup;
+  let groups;
+  if (by === 'due') {
+    groups = [
+      { label: 'Überfällig', danger: true, f: t => !isDone(t) && t.dueDate && t.dueDate < today },
+      { label: 'Heute', f: t => !isDone(t) && t.dueDate === today },
+      { label: 'Morgen', f: t => !isDone(t) && t.dueDate === tomorrow },
+      { label: 'Diese Woche', f: t => !isDone(t) && t.dueDate > tomorrow && t.dueDate <= weekEnd },
+      { label: 'Später', f: t => !isDone(t) && t.dueDate > weekEnd && t.dueDate > tomorrow },
+      { label: 'Ohne Datum', f: t => !isDone(t) && !t.dueDate },
+      { label: 'Erledigt', f: isDone },
+    ];
+  } else if (by === 'priority') {
+    groups = Shared.PRIORITIES.map(x => ({ label: x.label, f: t => t.priority === x.key }))
+      .concat([{ label: 'Keine Priorität', f: t => !t.priority }]);
+  } else if (by === 'project') {
+    groups = S.projects.map(x => ({ label: x.name, f: t => t.projectId === x.id })).concat([{ label: 'Ohne Projekt', f: t => !t.projectId || !project(t.projectId) }]);
+  } else {
+    groups = Shared.STATUSES.map(s => ({ label: s.label, glyph: s.key, f: t => t.status === s.key }));
+  }
+  const html = groups.map(g => {
+    const list = tasks.filter(g.f).sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999') || rankPrio(a) - rankPrio(b) || bySort(a, b));
+    if (!list.length) return '';
+    return '<div class="group"><div class="group-head' + (g.danger ? ' danger' : '') + '">' + (g.glyph ? glyph(g.glyph) : '') + esc(g.label) + '<span class="n">' + list.length + '</span></div>' +
+      list.map(t => listRow(t, opts)).join('') + '</div>';
+  }).join('');
+  return html || emptyState(opts.empty);
+}
+function emptyState(text) {
+  return '<div class="empty">' + icon('checksq') + '<div>' + esc(text || 'Keine Aufgaben hier.') + '</div><br>' +
+    '<button class="btn outline" data-action="palette">' + icon('plus', 'sm') + 'Aufgabe anlegen</button></div>';
+}
+
+/* ---------------- calendar data ---------------- */
+function monthDays(cursor) {
+  const first = cursor.slice(0, 8) + '01';
+  const start = Shared.mondayOf(first);
+  const end = Shared.addDays(Shared.mondayOf(Shared.endOfMonth(first)), 6);
+  const days = [];
+  for (let d = start; d <= end; d = Shared.addDays(d, 1)) days.push(d);
+  return days;
+}
+function calCursor() {
+  if (!S.cal.cursor) S.cal.cursor = TODAY().slice(0, 8) + '01';
+  return S.cal.cursor;
+}
+function calKey(from, to, teamId) { return from + '|' + to + '|' + (teamId || ''); }
+/** Returns cached range data or starts loading it (and re-renders when done). */
+function calEnsure(from, to, teamId) {
+  const key = calKey(from, to, teamId);
+  const hit = S.cal.cache[key];
+  if (hit && hit !== 'loading') return hit;
+  if (hit === 'loading') return calStale(from, to, teamId);
+  // a wider range of the same scope (loaded at start) answers smaller ones without another server call
+  for (const k in S.cal.cache) {
+    const p = k.split('|');
+    if (p[2] !== (teamId || '') || p[0] > from || p[1] < to) continue;
+    const wide = S.cal.cache[k];
+    if (wide === 'loading') return calStale(from, to, teamId);
+    return (S.cal.cache[key] = sliceRange(wide, from, to));
+  }
+  // after a failure: wait for "try again" instead of asking the server on every render
+  if (!S.cal.errors[key]) {
+    S.cal.cache[key] = 'loading';
+    call('calendar.range', { from: from, to: to, teamId: teamId || '' })
+      .then(d => {
+        S.cal.cache[key] = d;
+        // old copies go once nothing is loading any more
+        if (!Object.keys(S.cal.cache).some(k => S.cal.cache[k] === 'loading')) S.cal.stale = {};
+        render({ peek: false });
+      })
+      .catch(err => {
+        delete S.cal.cache[key];
+        S.cal.errors[key] = friendlyError((err && err.message) || String(err));
+        render({ peek: false });
+      });
+  }
+  return calStale(from, to, teamId);
+}
+/** The last copy from before a reload (same range or a wider one), shown until fresh data arrives; null if none. */
+function calStale(from, to, teamId) {
+  const exact = S.cal.stale[calKey(from, to, teamId)];
+  if (exact) return exact;
+  for (const k in S.cal.stale) {
+    const p = k.split('|');
+    if (p[2] === (teamId || '') && p[0] <= from && p[1] >= to) return sliceRange(S.cal.stale[k], from, to);
+  }
+  return null;
+}
+function sliceRange(d, from, to) {
+  const overlaps = x => x.startDate <= to && (x.endDate || x.startDate) >= from;
+  return Object.assign({}, d, {
+    from: from, to: to,
+    events: d.events.filter(overlaps), absences: d.absences.filter(overlaps),
+    holidays: d.holidays.filter(h => h.date >= from && h.date <= to),
+    warnings: (d.warnings || []).filter(w => w.date >= from && w.date <= to),
+  });
+}
+/** At start: one wide personal range (5 weeks back, 4 months ahead) feeds dashboard, calendar and side panels. */
+function calPrefetch() {
+  const t = TODAY();
+  calEnsure(Shared.addDays(t, -35), Shared.addDays(t, 120), '');
+}
+/**
+ * After a change: fetch the calendar data again, but keep showing the last copy until the fresh
+ * one is in (no placeholders flashing up while the server answers).
+ */
+function calInvalidate() {
+  Object.keys(S.cal.cache).forEach(k => { if (S.cal.cache[k] !== 'loading') S.cal.stale[k] = S.cal.cache[k]; });
+  S.cal.cache = {};
+  S.cal.errors = {};
+  calPrefetch();
+}
+function calReload() { calInvalidate(); S.cap.data = null; S.briefing = null; render(); }
+function calFind(kind, id) {
+  let hit = null;
+  Object.keys(S.cal.cache).forEach(k => {
+    const d = S.cal.cache[k];
+    if (d && d[kind]) hit = hit || d[kind].find(x => x.id === id);
+  });
+  return hit;
+}
+const absenceType = k => Shared.ABSENCE_TYPES.find(x => x.key === k) || Shared.ABSENCE_TYPES[3];
+function dayBox(date) {
+  return '<div class="d"><b>' + Number(date.slice(8)) + '</b><small>' + MONTHS[Number(date.slice(5, 7)) - 1] + '</small></div>';
+}
+
+/* ---------------- month grid ---------------- */
+/**
+ * o: { cursor, tasks, data, people (emails in scope or null = everyone), show, teamId, select }
+ */
+function monthHtml(o) {
+  const days = monthDays(o.cursor);
+  const month = o.cursor.slice(0, 7);
+  const today = TODAY();
+  const data = o.data || { events: [], holidays: [], absences: [], warnings: [] };
+  const show = o.show || { tasks: true, events: true, absences: true, holidays: true };
+  const inScope = e => !o.people || o.people.indexOf(e) >= 0;
+  return '<div class="cal' + (o.data ? '' : ' sk-on') + '">' + [1, 2, 3, 4, 5, 6, 0].map(i => DOW[i]).map(d => '<div class="cal-dow">' + d + '</div>').join('') +
+    days.map(d => {
+      const wd = Shared.weekday(d);
+      const weekend = wd === 0 || wd === 6;
+      const hol = data.holidays.filter(h => h.date === d && h.affects.some(inScope));
+      const warn = (data.warnings || []).filter(w => w.date === d && (!o.teamId || w.teamId === o.teamId));
+      const awayEmails = [];
+      if (show.absences && !weekend) {
+        data.absences.filter(a => a.startDate <= d && a.endDate >= d && inScope(a.email)).forEach(a => { if (awayEmails.indexOf(a.email) < 0) awayEmails.push(a.email); });
+        if (show.holidays) hol.forEach(h => h.affects.filter(inScope).forEach(e => { if (awayEmails.indexOf(e) < 0) awayEmails.push(e); }));
+      }
+      const items = [];
+      if (show.events) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d).forEach(e => {
+        items.push('<div class="ev event' + (e.type === 'milestone' ? ' milestone' : '') + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '"><span>' + esc(evLabel(e)) + '</span></div>');
+      });
+      if (show.tasks) (o.tasks || []).filter(t => t.dueDate === d).sort((a, b) => rankPrio(a) - rankPrio(b)).forEach(t => {
+        items.push('<div class="ev task' + (isDone(t) ? ' done' : '') + '" draggable="true" data-drag-id="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" title="' + esc(t.title) + '">' +
+          glyph(t.status) + '<span>' + esc(t.title) + '</span></div>');
+      });
+      const max = 3;
+      const holLabel = show.holidays && hol.length
+        ? '<span class="hol" title="' + esc(hol.map(h => holName(h) + ' (' + h.country + ')').join(', ')) + '">' + esc(holName(hol[0])) + (hol.length > 1 ? ' +' + (hol.length - 1) : '') + '</span>' : '';
+      const badge = warn.length
+        ? '<span class="wbadge" title="' + esc(warn.map(w => w.teamName + ': ' + w.absent + ' von ' + w.total + ' abwesend').join('\n')) + '">' +
+          esc((o.teamId ? '' : warn[0].teamName + ' ') + warn[0].absent + '/' + warn[0].total + ' weg') + '</span>' : '';
+      const cls = ['cal-day', d.slice(0, 7) !== month ? 'other' : '', d === today ? 'today' : '', weekend ? 'weekend' : '', warn.length ? 'warn' : ''].join(' ');
+      return '<div class="' + cls + '" data-drop-date="' + d + '" data-sel-date="' + d + '" data-action="cal-day" data-date="' + d + '">' +
+        '<div class="daytop"><span class="daynum">' + Number(d.slice(8)) + '</span>' + holLabel + badge + '</div>' +
+        (awayEmails.length ? '<div class="away" data-action="day-away" data-date="' + d + '" title="' + esc(awayEmails.map(e => user(e).name).join(', ')) + '">' +
+          avatars(awayEmails, 4) + '<span>' + awayEmails.length + ' abwesend</span></div>' : '') +
+        items.slice(0, max).join('') + (items.length > max ? '<div class="ev more">+' + (items.length - max) + ' weitere</div>' : '') + '</div>';
+    }).join('') + '</div>';
+}
+A['cal-day'] = (el, e) => {
+  if (calSel.justSelected) { calSel.justSelected = false; return; }
+  if (e.target.closest('.ev, .away')) return;
+  const date = el.dataset.date;
+  if (S.route.view === 'calendar') {
+    openMenu(el, [
+      { value: 'absence', html: icon('plane', 'sm') + '<span>Urlaub / Abwesenheit eintragen</span>', search: '' },
+      { value: 'task', html: icon('checksq', 'sm') + '<span>Aufgabe am ' + esc(fmtDate(date, { absolute: true })) + '</span>', search: '' },
+      { value: 'event', html: icon('calendar', 'sm') + '<span>Termin oder Meilenstein</span>', search: '' },
+    ], {
+      search: false, onPick: v => {
+        if (v === 'task') newTaskModal(contextDefaults({ dueDate: date }));
+        if (v === 'event') eventModal(null, date);
+        if (v === 'absence') absenceModal({ type: 'vacation', email: S.me.email, startDate: date, endDate: date });
+      },
+    });
+    return;
+  }
+  newTaskModal(contextDefaults({ dueDate: date }));
+};
+A['day-away'] = (el, e) => {
+  e.stopPropagation();
+  const d = el.dataset.date;
+  const items = [];
+  Object.keys(S.cal.cache).forEach(k => {
+    const data = S.cal.cache[k];
+    if (!data || !data.absences) return;
+    data.absences.filter(a => a.startDate <= d && a.endDate >= d).forEach(a => {
+      if (!items.some(x => x.value === a.id)) {
+        items.push({ value: a.id, html: avatar(a.email) + '<span>' + esc(user(a.email).name) + '</span><small>' + esc(absenceType(a.type).label) + '</small>', search: user(a.email).name });
+      }
+    });
+    data.holidays.filter(h => h.date === d).forEach(h => h.affects.forEach(em => {
+      const key = 'h:' + em + h.name;
+      if (!items.some(x => x.value === key)) items.push({ value: key, html: avatar(em) + '<span>' + esc(user(em).name) + '</span><small>' + esc(holName(h)) + '</small>', search: user(em).name });
+    }));
+  });
+  openMenu(el, items, { search: items.length > 6, onPick: v => { if (v.indexOf('h:') !== 0) absenceModal(calFind('absences', v)); } });
+};
+/** Which calendar view is active (database calendars are always the month grid). */
+function calMode() { return S.route.view === 'calendar' || S.route.view === 'planner' ? S.cal.mode || 'week' : 'month'; }
+function calStep(dir) {
+  focusDate();
+  const m = calMode();
+  if (m === 'month') S.cal.cursor = Shared.addMonths(calCursor(), dir);
+  else if (m === 'week') S.plan.date = Shared.addDays(focusDate(), dir * 7);
+  else if (m === 'day' || m === 'planner') S.plan.date = Shared.addDays(focusDate(), dir);
+  render({ top: true });
+}
+A['cal-prev'] = () => calStep(-1);
+A['cal-next'] = () => calStep(1);
+A['cal-today'] = () => { S.cal.cursor = TODAY().slice(0, 8) + '01'; focusDate(); S.plan.date = TODAY(); render({ top: true }); };
+window.addEventListener('resize', debounce(() => { if (S.route && S.route.view === 'calendar') render({ peek: false }); }, 150));
+function weekTitle(days) {
+  const a = days[0], b = days[days.length - 1];
+  return 'KW ' + Shared.isoWeek(a) + ' · ' + fmtRange(a, b);
+}
+/** Shown above the calendar when loading its data failed; "try again" asks the server once more. */
+function calErrorBox() {
+  const msgs = Object.keys(S.cal.errors).map(k => S.cal.errors[k]);
+  if (!msgs.length) return '';
+  return '<div class="banner danger cal-error" role="alert">' + icon('alert') + '<div><b>Die Kalenderdaten konnten nicht geladen werden.</b> ' + esc(msgs[0]) + '</div>' +
+    '<button type="button" class="btn sm" data-action="cal-retry">Erneut versuchen</button></div>';
+}
+A['cal-retry'] = () => { S.cal.errors = {}; render({ peek: false }); };
+function calNav(title, o) {
+  const c = calCursor();
+  o = o || {};
+  return '<div class="cal-head"><div class="cal-title">' + (title || MONTHS_LONG[Number(c.slice(5, 7)) - 1] + ' ' + c.slice(0, 4)) + '</div>' +
+    '<button class="icon-btn" data-action="cal-prev" aria-label="Zurück">' + icon('left') + '</button>' +
+    '<button class="icon-btn" data-action="cal-next" aria-label="Weiter">' + icon('right') + '</button>' +
+    '<button class="btn outline sm" data-action="cal-today">Heute</button>' + (o.extra || '') + '</div>' + calErrorBox();
+}
+
+/* Drag across days to enter a vacation (team calendar only). */
+const calSel = { start: null, end: null, active: false, justSelected: false };
+function paintSel() {
+  const a = calSel.start < calSel.end ? calSel.start : calSel.end;
+  const b = calSel.start < calSel.end ? calSel.end : calSel.start;
+  $$('[data-sel-date]').forEach(c => c.classList.toggle('sel', calSel.active && c.dataset.selDate >= a && c.dataset.selDate <= b));
+}
+function bindCalSelect() {
+  if (S.route.view !== 'calendar') return;
+  $$('[data-sel-date]').forEach(cell => {
+    cell.addEventListener('mousedown', e => {
+      if (e.button !== 0 || e.target.closest('.ev, .away')) return;
+      calSel.start = calSel.end = cell.dataset.selDate;
+      calSel.active = true;
+    });
+    cell.addEventListener('mouseenter', () => {
+      if (!calSel.active) return;
+      calSel.end = cell.dataset.selDate;
+      paintSel();
+    });
+  });
+}
+document.addEventListener('mouseup', () => {
+  if (!calSel.active) return;
+  calSel.active = false;
+  if (calSel.start && calSel.end && calSel.start !== calSel.end) {
+    const a = calSel.start < calSel.end ? calSel.start : calSel.end;
+    const b = calSel.start < calSel.end ? calSel.end : calSel.start;
+    calSel.justSelected = true;
+    setTimeout(() => { calSel.justSelected = false; }, 300);
+    absenceModal({ type: 'vacation', email: S.me.email, startDate: a, endDate: b });
+  }
+  paintSel();
+});
+
+/** Calendar layout of a task database: tasks + absences/holidays of the people involved. */
+function taskCalendarHtml(tasks, opts) {
+  const days = monthDays(calCursor());
+  const data = calEnsure(days[0], days[days.length - 1], '');
+  const undated = tasks.filter(t => !t.dueDate && !isDone(t)).length;
+  return calNav() + monthHtml({ cursor: calCursor(), tasks: tasks, data: data, people: opts.people, teamId: opts.teamId, show: { tasks: true, holidays: true, absences: true, events: false } }) +
+    (undated ? '<p class="hint" style="margin-top:10px">' + undated + ' offene Aufgabe(n) ohne Fälligkeitsdatum sind hier nicht zu sehen.</p>' : '');
+}
+
+/* ---------------- pages ---------------- */
+/** extra: more of the header under the subtitle (e.g. the absence warning of a team). */
+function pageHead(title, sub, lead, actions, extra) {
+  return '<header class="ph"><div class="page-head">' + (lead || '') + '<h1 class="page-title">' + esc(title) + '</h1>' +
+    (actions ? '<div class="page-actions">' + actions + '</div>' : '') + '</div>' +
+    (sub ? '<p class="page-sub">' + sub + '</p>' : '') + (extra || '') + '</header>';
+}
+function stat(label, val, warn, sub) {
+  return '<div class="stat' + (warn ? ' warn' : '') + '"><div class="lbl">' + esc(label) + '</div><div class="val">' + val + '</div>' +
+    (sub ? '<div class="hint">' + esc(sub) + '</div>' : '') + '</div>';
+}
+
+/* ---------------- dashboard, agenda, day planner ---------------- */
+function myPeopleList() { return uniq(myTeams().reduce((a, tm) => a.concat(teamMembers(tm)), [S.me.email])); }
+function trowHtml(t) {
+  return '<div class="trow" data-action="open-task" data-id="' + esc(t.id) + '">' +
+    '<span class="check' + (isDone(t) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(t.id) + '" role="checkbox" aria-checked="' + isDone(t) + '"></span>' +
+    '<span class="tt' + (isDone(t) ? ' done' : '') + '">' + esc(t.title) + '</span>' + metaHtml(t, {}) +
+    (t.assignees.length ? avatars(t.assignees, 2) : '') + '</div>';
+}
+function briefingData() {
+  if (!S.briefing) {
+    S.briefing = 'loading';
+    call('ai.briefing', { lang: LANG }).then(b => { S.briefing = b; S.warnings = b.teamWarnings || []; render({ peek: false }); })
+      .catch(() => { S.briefing = { text: 'Das Briefing konnte gerade nicht geladen werden.', focus: [], teamWarnings: [], source: 'error', failed: true }; render({ peek: false }); });
+  }
+  return S.briefing && S.briefing !== 'loading' ? S.briefing : null;
+}
+
+/** Agenda: days with something going on, grouped by date. */
+/**
+ * Agenda: one block per day with a clear header (Heute / Morgen / weekday + date, count).
+ * Inside a day: who is away and holidays as one quiet line, then events, then tasks by priority.
+ * Overdue tasks come first in their own group (dashboard only). Empty days are left out.
+ */
+function agendaHtml(data, from, n, o) {
+  const inScope = e => !o.people || o.people.indexOf(e) >= 0;
+  const show = o.show || { tasks: true, events: true, absences: true, holidays: true };
+  const today = TODAY();
+  const tomorrow = Shared.addDays(today, 1);
+  const last = Shared.addDays(from, n - 1);
+  const tasks = (o.tasks || []).filter(t => !isDone(t));
+  const taskRow = (t, over) => '<div class="ag2-row task' + (over ? ' over' : '') + '" data-action="open-task" data-id="' + esc(t.id) + '">' + glyph(t.status) +
+    '<span class="tt">' + esc(t.title) + '</span>' +
+    (t.projectId && project(t.projectId) ? '<span class="ag2-proj">' + projectChip(project(t.projectId)) + '</span>' : '') +
+    (t.priority ? prioTag(t.priority, true) : '') +
+    (over ? '<span class="ag2-late">' + esc(fmtDate(t.dueDate, { absolute: true })) + '</span>' : '') +
+    (t.assignees.length ? avatars(t.assignees, 2) : '') + '</div>';
+  const byPrio = (a, b) => rankPrio(a) - rankPrio(b) || bySort(a, b);
+  let out = '', month = '';
+  // overdue: own group on top instead of being mixed into today
+  const overdue = show.tasks && !o.skipOverdue ? tasks.filter(t => t.dueDate && t.dueDate < from).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || byPrio(a, b)) : [];
+  if (overdue.length) {
+    out += '<section class="ag2-day over"><div class="ag2-head"><b>Überfällig</b><span class="n">' + overdue.length + '</span></div>' +
+      overdue.slice(0, 6).map(t => taskRow(t, true)).join('') +
+      (overdue.length > 6 ? '<div class="ag2-more">+ ' + (overdue.length - 6) + ' weitere</div>' : '') + '</section>';
+  }
+  for (let i = 0; i < n; i++) {
+    const d = Shared.addDays(from, i);
+    const wd = Shared.weekday(d);
+    const lines = [];
+    // who is away: one line per day, multi-day absences only on their first day in view
+    if (show.absences) {
+      const away = data.absences.filter(a => inScope(a.email) && a.startDate <= d && a.endDate >= d && (a.startDate === d || i === 0));
+      if (away.length) {
+        lines.push('<div class="ag2-note away">' + icon('plane', 'sm') + '<span class="lbl">Abwesend</span><span class="who">' + away.map(a =>
+          '<span class="ag2-person">' + avatar(a.email) + '<span>' + esc(user(a.email).name.split(' ')[0]) + '</span><small><span>' + esc(absenceType(a.type).label) + '</span>' +
+          (a.endDate > d ? ' · <span>' + esc(L('bis ', 'until ') + fmtDate(a.endDate, { absolute: true })) + '</span>' : '') + '</small></span>').join('') + '</span></div>');
+      }
+      (data.warnings || []).filter(w => w.date === d && (!o.teamId || w.teamId === o.teamId)).forEach(w =>
+        lines.push('<div class="ag2-note warn">' + icon('alert', 'sm') + '<span>' + esc(w.teamName) + ': ' + esc(L(w.absent + ' von ' + w.total + ' abwesend', w.absent + ' of ' + w.total + ' away')) + '</span></div>'));
+    }
+    if (show.holidays) {
+      const hol = data.holidays.filter(h => h.date === d && h.affects.some(inScope));
+      if (hol.length) lines.push('<div class="ag2-note hol">' + icon('flag', 'sm') + '<span class="lbl">Feiertag</span><span class="who">' +
+        hol.map(h => '<span class="ag2-person">' + flag(h.country) + '<span>' + esc(holName(h)) + '</span></span>').join('') + '</span></div>');
+    }
+    const rows = [];
+    if (show.events) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d && (e.startDate === d || i === 0)).forEach(e =>
+      rows.push('<div class="ag2-row event" data-action="event-edit" data-id="' + esc(e.id) + '">' + icon(e.type === 'milestone' ? 'flag' : 'calendar', 'sm') +
+        '<span class="tt">' + esc(evLabel(e)) + '</span>' + (e.endDate && e.endDate !== e.startDate ? '<span class="meta">' + esc(fmtRange(e.startDate, e.endDate)) + '</span>' : '') + '</div>'));
+    if (show.tasks) tasks.filter(t => t.dueDate === d).sort(byPrio).forEach(t => rows.push(taskRow(t, false)));
+    if (!lines.length && !rows.length) continue;
+    const m = d.slice(0, 7);
+    if (m !== month && !o.compact && d.slice(0, 7) !== today.slice(0, 7)) out += '<div class="ag-month">' + MONTHS_LONG[Number(m.slice(5)) - 1] + ' ' + m.slice(0, 4) + '</div>';
+    month = m;
+    const name = d === today ? 'Heute' : d === tomorrow ? 'Morgen' : DOW_LONG[wd];
+    out += '<section class="ag2-day' + (d === today ? ' today' : '') + '"><div class="ag2-head"><b>' + name + '</b><span class="date">' + esc(fmtDate(d, { absolute: true })) + '</span>' +
+      (rows.length ? '<span class="n">' + rows.length + '</span>' : '') + '</div>' + lines.join('') + rows.join('') + '</section>';
+  }
+  return '<div class="agenda ag2">' + (out || '<div class="ag-empty">' + icon('check', 'sm') + '<span>' +
+    L('Bis ' + fmtDate(last, { absolute: true }) + ' steht nichts an.', 'Nothing coming up until ' + fmtDate(last, { absolute: true }) + '.') + '</span></div>') + '</div>';
+}
+
+/**
+ * "Woche im Blick": this and next week, Mon–Fri. Answers "can I plan with my team?":
+ * events and milestones, who of my teams is away, holidays, understaffed days (red).
+ * Tasks are only a small "n fällig" count – the list itself lives in "Heute dran".
+ */
+function weekGlanceCard(t, people) {
+  // on the weekend this week is over: start with the next one
+  const weekend = Shared.weekday(t) === 0 || Shared.weekday(t) === 6;
+  const mon = Shared.addDays(Shared.mondayOf(t), weekend ? 7 : 0);
+  const data = calEnsure(mon, Shared.addDays(mon, 13), '');
+  const myTeamIds = myTeams().map(x => x.id);
+  const warnDays = data ? (data.warnings || []).filter(w => w.date >= t && myTeamIds.indexOf(w.teamId) >= 0) : [];
+  const status = !data ? '' : warnDays.length
+    ? '<span class="wg-status bad">' + icon('alert', 'sm') + '<span>' + L(warnDays.length + (warnDays.length === 1 ? ' Tag unterbesetzt' : ' Tage unterbesetzt'), warnDays.length + (warnDays.length === 1 ? ' day understaffed' : ' days understaffed')) + '</span></span>'
+    : '<span class="wg-status ok">' + icon('check', 'sm') + '<span>Alle Teams gut besetzt</span></span>';
+  const head = '<h3>' + icon('calendar', 'sm') + 'Woche im Blick' + status + '<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>';
+  if (!data) return '<div class="card-w w-12 wg">' + head + skCalGrid(5, 2) + '</div>';
+  const mine = S.tasks.filter(x => isMine(x) && !isDone(x) && x.dueDate);
+  const inScope = e => people.indexOf(e) >= 0;
+  const cell = d => {
+    const past = d < t;
+    const wd = Shared.weekday(d);
+    const events = data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d);
+    const hol = data.holidays.filter(h => h.date === d && h.affects.some(inScope));
+    const away = [];
+    data.absences.filter(a => inScope(a.email) && a.startDate <= d && a.endDate >= d).forEach(a => { if (away.indexOf(a.email) < 0) away.push(a.email); });
+    hol.forEach(h => h.affects.filter(inScope).forEach(e => { if (away.indexOf(e) < 0) away.push(e); }));
+    const warn = (data.warnings || []).filter(w => w.date === d && myTeamIds.indexOf(w.teamId) >= 0);
+    const due = mine.filter(x => x.dueDate === d).length;
+    const lines = [];
+    events.slice(0, 2).forEach(e => lines.push('<div class="wg-ev' + (e.type === 'milestone' ? ' ms' : '') + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '">' +
+      icon(e.type === 'milestone' ? 'flag' : 'calendar', 'sm') + '<span>' + esc(evLabel(e)) + '</span></div>'));
+    if (events.length > 2) lines.push('<div class="wg-more">+ ' + (events.length - 2) + ' weitere</div>');
+    hol.slice(0, 1).forEach(h => lines.push('<div class="wg-hol" title="' + esc(hol.map(x => holName(x) + ' (' + x.country + ')').join(', ')) + '">' + flag(h.country) + '<span>' + esc(holName(h)) + '</span></div>'));
+    if (away.length) lines.push('<div class="wg-away" title="' + esc(away.map(e => user(e).name).join(', ')) + '"><span class="lbl">' + L('Weg', 'Away') + '</span>' + avatars(away, 4) + '</div>');
+    if (warn.length) lines.push('<div class="wg-warn">' + icon('alert', 'sm') + '<span>' + esc(warn.map(w => w.teamName + ' ' + w.absent + '/' + w.total).join(', ')) + '</span></div>');
+    return '<div class="wg-day' + (d === t ? ' today' : '') + (past ? ' past' : '') + (warn.length ? ' under' : '') + '" data-action="glance-day" data-date="' + d + '">' +
+      '<div class="wg-dh"><b>' + (d === t ? 'Heute' : DOW[wd]) + '</b><span>' + esc(fmtDate(d, { absolute: true })) + '</span>' +
+      (due ? '<span class="wg-due' + (past ? ' late' : '') + '" title="' + esc(L('Deine fälligen Aufgaben', 'Your tasks due')) + '">' + esc(L(due + ' fällig', due + ' due')) + '</span>' : '') + '</div>' +
+      (lines.length ? lines.join('') : '<div class="wg-free">' + L('frei', 'clear') + '</div>') + '</div>';
+  };
+  const week = (start, label) => '<div class="wg-week"><div class="wg-wl">' + label + '</div><div class="wg-row">' +
+    [0, 1, 2, 3, 4].map(i => cell(Shared.addDays(start, i))).join('') + '</div></div>';
+  return '<div class="card-w w-12 wg">' + head + week(mon, weekend ? 'Nächste Woche' : 'Diese Woche') + week(Shared.addDays(mon, 7), weekend ? 'Übernächste Woche' : 'Nächste Woche') + '</div>';
+}
+A['glance-day'] = (el, e) => {
+  if (e && e.target.closest('[data-action="event-edit"]')) return;
+  S.cal.mode = 'day';
+  if (!S.plan) S.plan = { date: TODAY(), filter: 'due' };
+  S.plan.date = el.dataset.date;
+  go('calendar');
+};
+
+function dashPage() {
+  const h = new Date().getHours();
+  const hello = h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
+  const t = TODAY();
+  const rep = reportData();
+  const b = rep && !rep.failed ? { utilization: rep.kpis.utilization, available: true } : null;
+  const open = S.tasks.filter(x => isMine(x) && !isDone(x));
+  const people = myPeopleList();
+  const util = b ? b.utilization : 0;
+  // grouped by team so "Data › n" and "Forecast › m" stand together
+  const teamOrder = id => (team(id) ? team(id).name : '');
+  const projects = S.projects.filter(p => p.status !== 'done' && myTeams().some(x => x.id === p.teamId))
+    .sort((a, b) => teamOrder(a.teamId).localeCompare(teamOrder(b.teamId)) || a.name.localeCompare(b.name));
+  const loadCard = workloadCard(t);
+  const doneCard = doneWeeksCard(t);
+  // header numbers
+  const my = S.tasks.filter(isMine);
+  const weekStart = Shared.mondayOf(t);
+  const newWeek = my.filter(x => x.createdAt && x.createdAt.slice(0, 10) >= weekStart).length;
+  const doneWeek = my.filter(x => isDone(x) && x.completedAt && x.completedAt.slice(0, 10) >= weekStart).length;
+  const dueSoon = open.filter(x => x.dueDate && x.dueDate >= t && x.dueDate <= Shared.addDays(t, 3)).length;
+  const overdueN = open.filter(x => x.dueDate && x.dueDate < t).length;
+  const stile = (cls, ic, badge, label, val, view) => '<button class="stile ' + cls + '" data-action="nav" data-view="' + view + '"><span class="sr"><span class="sic">' + icon(ic, 'lg') + '</span>' +
+    '<span class="sbadge">' + esc(badge) + '</span></span><span class="sl">' + label + '</span><span class="sv">' + val + '</span></button>';
+  // project overview
+  if (!S.dashProj || !projects.some(x => x.id === S.dashProj)) S.dashProj = projects.length ? projects[0].id : '';
+  const sp = project(S.dashProj);
+  const projCard = (() => {
+    if (!sp) return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Meine Projekte</h3><div class="empty-w">In deinen Teams gibt es noch keine Projekte.</div></div>';
+    const ptasks = S.tasks.filter(x => x.projectId === sp.id && !x.parentId);
+    const pdone = ptasks.filter(isDone).length;
+    const ppct = ptasks.length ? Math.round(pdone / ptasks.length * 100) : 0;
+    const pc = projectColor(sp);
+    const st = Shared.PROJECT_STATUSES.find(x => x.key === sp.status) || Shared.PROJECT_STATUSES[1];
+    const counts = Shared.STATUSES.map(x => '<div class="sc"><b>' + ptasks.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
+    const next = ptasks.filter(x => !isDone(x) && x.dueDate).sort((x, y) => x.dueDate.localeCompare(y.dueDate)).slice(0, 3);
+    return '<div class="card-w"><h3>' + icon('folder', 'sm') + 'Meine Projekte<button class="btn white sm more2" data-action="proj-all">Alle Projekte</button></h3>' +
+      '<div class="ptabs-wrap"><button class="ptabs-arrow l" data-action="ptabs-scroll" data-d="-1" aria-label="Nach links" title="Nach links">' + icon('left', 'sm') + '</button>' +
+      '<div class="ptabs" data-keep-scroll="ptabs">' + projects.map(x => '<button class="' + (x.id === sp.id ? 'on' : '') + '" data-action="dash-proj" data-id="' + esc(x.id) + '" title="' + esc(projectPath(x)) + '">' + projectMark(x) + esc(x.name) + '</button>').join('') + '</div>' +
+      '<button class="ptabs-arrow r" data-action="ptabs-scroll" data-d="1" aria-label="Nach rechts" title="Nach rechts">' + icon('right', 'sm') + '</button></div>' +
+      '<div class="pbanner ' + inkClass(projectColorKey(sp)) + '" style="--pc:' + pc + '">' +
+      '<div class="pb-t" title="' + esc(projectPath(sp)) + '">' + projectMark(sp, 'md') + '<h4>' + esc(sp.name) + '</h4><span class="pb-chip">' + esc(st.label) + '</span></div>' +
+      '<p>' + esc(sp.description || 'Keine Beschreibung.') + '</p></div>' +
+      '<div class="pstats"><div class="pst"><div class="l">Stand<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Details</button></div><div class="v"><b>' + ppct + '%</b><span class="track"><i style="width:' + ppct + '%"></i></span></div></div>' +
+      '<div class="pst"><div class="l">Abgeschlossen<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Liste</button></div><div class="v"><b>' + pdone + '/' + ptasks.length + '</b><small>' + ppct + ' % geschafft</small></div></div>' +
+      '<div class="pst"><div class="l">Beteiligte<button data-action="nav" data-view="project" data-id="' + esc(sp.id) + '">Personen</button></div><div class="v">' + avatars(projectMembers(sp), 5) + '</div></div></div>' +
+      '<div class="pgrid"><div class="pbox"><div class="l">Nach Status</div><div class="scs">' + counts + '</div></div>' +
+      '<div class="pbox"><div class="l">Nächste Fristen</div>' + (next.length ? next.map(x => '<div class="nx" data-action="open-task" data-id="' + esc(x.id) + '"><span class="tt">' + esc(x.title) + '</span>' + dueTag(x) + '</div>').join('') : '<div class="hint">Keine offenen Fristen.</div>') + '</div></div></div>';
+  })();
+  // today's focus
+  const focus = open.filter(x => (x.dueDate && x.dueDate <= t) || x.planDate === t).sort(Shared.focusOrder);
+  const fcard = x => {
+    const over = x.dueDate && x.dueDate < t;
+    return '<div class="fcard" data-action="open-task" data-id="' + esc(x.id) + '"><span class="check" data-action="toggle-done" data-id="' + esc(x.id) + '" role="checkbox" aria-checked="false" title="Als erledigt markieren"></span>' +
+      '<div class="fc-main"><div class="fc-t"><span>' + esc(x.title) + '</span>' + (over ? '<span class="fc-over">Überfällig</span>' : '') + '</div>' +
+      '<div class="fc-m">' + statusTag(x.status) + prioTag(x.priority) + (x.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(x.estimate)) + '</span>' : '') +
+      (x.dueDate ? '<span class="fc-d">Fällig ' + esc(fmtDate(x.dueDate, { absolute: true })) + '</span>' : '') + '</div></div></div>';
+  };
+  const focusCard = '<div class="card-w focus-card"><h3>' + icon('bolt', 'sm') + 'Heute dran<button class="btn white sm more2" data-action="nav" data-view="home">Alle (' + focus.length + ')</button></h3>' +
+    '<p class="hint" style="margin:-6px 0 12px"><span>Überfälliges zuerst, dann alles, was für heute ansteht</span>' + (b && b.available ? ' · <span>Auslastung ' + util + ' %</span>' : '') + '</p>' +
+    (focus.length ? '<div class="fcards">' + focus.slice(0, 6).map(fcard).join('') + '</div>' : '<div class="empty-w">Für heute ist nichts offen. Neues legst du über „Neue Aufgabe“ an.</div>') + '</div>';
+  return '<div class="page wide">' +
+    '<div class="card-w dash-top"><div class="du">' + avatar(S.me.email, 'xl') + '<div><h1><span>' + hello + '</span>, ' + esc(S.me.name.split(' ')[0]) + '!</h1><div class="date">' + esc(DOW_LONG[Shared.weekday(t)] + ', ' + fmtDate(t, { absolute: true })) + '</div></div></div>' +
+    '<div class="dr"><button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
+    '<button class="btn white" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button></div></div>' +
+    '<div class="fit-body" data-keep-scroll="fit">' + onboardingHtml() + reportCard() +
+    '<div class="stiles">' + stile('', 'checksq', newWeek ? '+' + newWeek + ' seit Montag' : 'Seit Montag nichts Neues', 'Meine Aufgaben', my.length, 'home') +
+    stile('green', 'check', doneWeek ? doneWeek + ' seit Montag' : 'Seit Montag noch keine', 'Abgeschlossen', my.filter(isDone).length, 'home') +
+    stile('yellow', 'clock', dueSoon ? dueSoon + ' in den nächsten 3 Tagen' : 'Keine Frist in 3 Tagen', 'Offen', open.length, 'home') +
+    stile(overdueN ? 'red hot' : 'red', 'alert', overdueN ? 'Bitte ansehen' : 'Im Zeitplan', 'Überfällig', overdueN, 'home') + '</div>' +
+    '<div class="dash-grid"><div class="w-8">' + projCard + '</div><div class="w-4">' + focusCard + '</div>' +
+    weekGlanceCard(t, people) +
+    loadCard + doneCard +
+    '</div></div></div>';
+}
+
+/* ---------------- quick report (day / week / month) ---------------- */
+function reportData() {
+  if (!S.report) S.report = { range: store.get('reportRange', 'week'), data: {}, fresh: false };
+  // tasks changed since the last report: drop it and ask the server to skip its 5-minute cache
+  if (S.reportDirty) { S.reportDirty = false; S.report.data = {}; S.report.fresh = true; }
+  const r = S.report.range, key = r + ':' + LANG;
+  if (S.report.data[key] === undefined) {
+    const fresh = S.report.fresh;
+    S.report.fresh = false;
+    S.report.data[key] = 'loading';
+    call('ai.report', { range: r, lang: LANG, fresh: fresh })
+      .then(d => { S.report.data[key] = d; S.warnings = d.warnings || []; if (S.route.view === 'dash') render({ peek: false }); })
+      .catch(() => { S.report.data[key] = { failed: true, kpis: {}, bullets: [], actions: [], warnings: [], text: 'Der Report konnte gerade nicht geladen werden.' }; render({ peek: false }); });
+  }
+  const d = S.report.data[key];
+  return d && d !== 'loading' ? d : null;
+}
+function reportCard() {
+  const d = reportData();
+  const r = S.report.range;
+  const RANGES = { day: 'Heute', week: 'Diese Woche', month: 'Dieser Monat' };
+  // one slim line: title, period as a small menu, source and refresh on the right
+  const head = '<div class="rep-head"><h3>' + icon('sparkle', 'sm') + 'Schnellreport</h3>' +
+    '<button class="rep-range" data-action="report-range-menu" title="Zeitraum wählen">' + RANGES[r] + icon('chevron', 'sm') + '</button>' +
+    '<span class="grow"></span>' +
+    (d && !d.failed ? '<span class="rep-src">' + (d.source === 'ai' ? 'Gemini' : 'Automatisch') + ' · ' + esc(timeAgo(d.at)) + '</span>' : '') +
+    '<button class="icon-btn sm" data-action="report-reload" title="Aktualisieren" aria-label="Aktualisieren">' + icon('repeat', 'sm') + '</button></div>';
+  if (!d) return '<div class="card-w rep">' + head + skLines(3) + '</div>';
+  const warns = d.warnings || [];
+  const news = d.news || [];
+  const pts = d.points || [];
+  const NI = { task: 'checksq', comment: 'msg', absence: 'plane', project: 'folder', holiday: 'globe' };
+  const link = p => (p.taskId ? ' data-action="open-task" data-id="' + esc(p.taskId) + '" class="link"' : p.view ? ' data-action="nav" data-view="' + esc(p.view) + '" class="link"' : '');
+  return '<div class="card-w rep">' + head +
+    '<p class="rep-text">' + esc(d.text) +
+    (warns.length ? ' <button class="linkbtn warn" data-action="nav" data-view="capacity">' + icon('alert', 'sm') + esc(L(warns.length + (warns.length > 1 ? ' Team-Warnungen' : ' Team-Warnung'), warns.length + (warns.length > 1 ? ' team warnings' : ' team warning'))) + '</button>' : '') + '</p>' +
+    (pts.length ? '<ul class="rep-pts">' + pts.map(p => '<li' + link(p) + ' title="' + esc(p.text) + '">' + esc(p.text) + '</li>').join('') + '</ul>' : '') +
+    (news.length ? '<details class="rep-news"' + (S.report.newsOpen ? ' open' : '') + ' data-on-toggle="rep-news"><summary>Neu seit deinem letzten Besuch <span class="n">' + news.length + '</span></summary><ul>' + news.map(n =>
+      '<li' + link(n) + '>' + icon(NI[n.kind] || 'sparkle', 'sm') + '<span>' + esc(n.text) + '</span></li>').join('') + '</ul></details>' : '') +
+    (d.source !== 'ai' && !d.failed ? '<div class="rep-dummy">Automatische Zusammenfassung · mit Gemini-Schlüssel entscheidet die KI, was wichtig ist</div>' : '') +
+    '</div>';
+}
+A['report-range-menu'] = el => openMenu(el, [['day', 'Heute'], ['week', 'Diese Woche'], ['month', 'Dieser Monat']].map(x => ({ value: x[0], html: '<span>' + x[1] + '</span>', search: x[1] })),
+  { selected: [S.report.range], search: false, onPick: v => A['report-range']({ dataset: { v: v } }) });
+document.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('rep-news')) S.report.newsOpen = e.target.open; }, true);A['report-range'] = el => { S.report.range = el.dataset.v; store.set('reportRange', el.dataset.v); render({ peek: false }); };
+A['report-reload'] = () => { S.reportDirty = true; render({ peek: false }); };
+A['report-go'] = el => {
+  go(el.dataset.view);
+  if (el.dataset.quick) setPrefs({ quick: el.dataset.quick });
+};
+
+/** First start: while there is no team yet, the dashboard says what to do first. */
+function onboardingHtml() {
+  if (S.teams.length) return '';
+  const step = (n, title, text, btn) => '<div class="ob-step"><span class="ob-n">' + n + '</span><div><b>' + title + '</b><p>' + text + '</p>' + btn + '</div></div>';
+  return '<div class="card-w onboarding"><h3>' + icon('sparkle', 'sm') + 'Willkommen bei ' + esc(S.appName) + ' – so geht’s los</h3><div class="ob-steps">' +
+    step(1, 'Profil prüfen', 'Land, Region und Arbeitszeit bestimmen Feiertage und deine Kapazität.', '<button class="btn sm outline" data-action="nav" data-view="settings">Zum Profil</button>') +
+    step(2, 'Team anlegen', 'Lege ein Team an und füge Kolleg:innen hinzu.', '<button class="btn sm primary" data-action="team-new">Team anlegen</button>') +
+    step(3, 'Erste Aufgabe', 'Schreib einfach los, z. B. „Angebot prüfen morgen !hoch“.', '<button class="btn sm outline" data-action="new-task">Neue Aufgabe</button>') +
+    '</div><button class="linkbtn" data-action="help">Kurzanleitung und Tastenkürzel</button></div>';
+}
+
+/**
+ * Workload, next 4 weeks: hours of my open tasks (by plan date, else due date; overdue counts now)
+ * against my real capacity (weekly hours on my workdays, minus vacation and public holidays).
+ */
+function workloadCard(t) {
+  const mon = Shared.mondayOf(t);
+  const end = Shared.addDays(mon, 27);
+  const data = calEnsure(mon, end, '');
+  if (!data) {
+    return '<div class="card-w w-6 wl"><h3>' + icon('gauge', 'sm') + 'Auslastung nächste 4 Wochen</h3>' +
+      skBox(skRep(4, i => '<div class="sk-row tight">' + sk('64px', '11px') + '<span class="grow">' + sk(skPct(i, 30, 60), '14px', 'pill') + '</span>' + sk('54px', '11px') + '</div>')) + '</div>';
+  }
+  const me = S.me.email;
+  const workDays = String(S.me.workDays || '1,2,3,4,5').split(',').filter(Boolean).map(Number);
+  const perDay = (Number(S.me.hoursPerWeek) || 40) / Math.max(1, workDays.length);
+  const open = S.tasks.filter(x => isMine(x) && !isDone(x));
+  const weeks = [0, 1, 2, 3].map(i => {
+    const from = Shared.addDays(mon, i * 7), to = Shared.addDays(from, 6);
+    // working days of the profile; a day off counts once (vacation wins over a holiday on the same day)
+    let cap = 0, off = 0, vac = 0, hol = 0;
+    for (let d = from; d <= to; d = Shared.addDays(d, 1)) {
+      if (workDays.indexOf(Shared.weekday(d)) < 0) continue;
+      const isVac = data && data.absences.some(a => a.email === me && a.startDate <= d && a.endDate >= d);
+      const isHol = !isVac && data && data.holidays.some(h => h.date === d && (h.affects || []).indexOf(me) >= 0);
+      if (isVac) { vac++; off++; } else if (isHol) { hol++; off++; } else cap += perDay;
+    }
+    const when = x => x.planDate || x.dueDate;
+    const tasks = open.filter(x => { const w = when(x); return w && (i === 0 ? w <= to : w >= from && w <= to); });
+    const hours = tasks.reduce((s2, x) => s2 + (Number(x.estimate) || 0), 0);
+    const pct = cap ? Math.round(hours / cap * 100) : 0;
+    const why = vac ? 'Urlaub' : 'Feiertage';
+    let state;
+    if (!cap && off) state = hours ? ['danger', 'Kein Zeitfenster'] : ['off', why];
+    else state = pct > 100 ? ['danger', 'Überlastet'] : pct >= 80 ? ['warn', 'Knapp'] : ['ok', 'Im Rahmen'];
+    const note = off && cap ? [vac ? vac + (vac === 1 ? ' Tag Urlaub' : ' Tage Urlaub') : '', hol ? hol + (hol === 1 ? ' Feiertag' : ' Feiertage') : ''].filter(Boolean).join(', ') : '';
+    return { from: from, cap: cap, hours: hours, off: off, vac: vac, hol: hol, why: why, note: note, n: tasks.length, noEst: tasks.filter(x => !x.estimate).length, pct: pct, state: state };
+  });
+  const max = Math.max(1, ...weeks.map(w => Math.max(w.cap, w.hours)));
+  const rows = weeks.map(w => '<button class="wl-row" data-action="nav" data-view="capacity" title="' +
+    esc(w.n + ' Aufgaben · ' + fmtNum(w.hours) + ' h geplant · ' + fmtNum(w.cap) + ' h verfügbar' + (w.off ? ' · ' + w.off + ' Tage frei' : '') + (w.noEst ? ' · ' + w.noEst + ' ohne Aufwand' : '')) + '">' +
+    '<span class="wl-wk"><b>KW ' + Shared.isoWeek(w.from) + '</b><small>' + esc(fmtDate(w.from, { absolute: true })) + '</small></span>' +
+    (!w.cap && w.off
+      ? '<span class="wl-track away"><span>' + esc(w.why) + ' · ' + w.off + (w.off === 1 ? ' Tag' : ' Tage') + '</span></span>' +
+        '<span class="wl-val">' + (w.hours ? '<b>' + fmtNum(w.hours) + ' h</b> geplant' : '0 h verfügbar') + '</span>'
+      : '<span class="wl-track"><i class="wl-fill ' + w.state[0] + '" style="width:' + Math.min(100, w.hours / max * 100) + '%"></i>' +
+        '<i class="wl-cap" style="left:' + (w.cap / max * 100) + '%"></i>' + (w.note ? '<em class="wl-note">' + esc(w.note) + '</em>' : '') + '</span>' +
+        '<span class="wl-val"><b>' + fmtNum(w.hours) + '</b> / ' + fmtNum(w.cap) + ' h' + (w.noEst ? '<small>' + w.noEst + ' ohne Aufwand</small>' : '') + '</span>') +
+    '<span class="wl-chip ' + w.state[0] + '">' + w.state[1] + '</span></button>').join('');
+  return '<div class="card-w w-6 wl"><h3>' + icon('gauge', 'sm') + 'Auslastung nächste 4 Wochen<a class="more" data-action="nav" data-view="capacity">Verfügbarkeit</a></h3>' +
+    '<p class="hint" style="margin:-6px 0 10px">Geplanter Aufwand deiner offenen Aufgaben gegen deine Arbeitszeit, Urlaub und Feiertage schon abgezogen. Der Strich ist deine Kapazität.</p>' +
+    rows + '</div>';
+}
+
+/** Tasks I finished per week, last 8 weeks, with the trend against the week before. */
+function doneWeeksCard(t) {
+  const mon = Shared.mondayOf(t);
+  const done = S.tasks.filter(x => isDone(x) && x.completedAt && isMine(x)).map(x => x.completedAt.slice(0, 10));
+  const weeks = [];
+  for (let i = 7; i >= 0; i--) {
+    const from = Shared.addDays(mon, -7 * i), to = Shared.addDays(from, 6);
+    weeks.push({ from: from, n: done.filter(d => d >= from && d <= to).length, now: i === 0 });
+  }
+  const max = Math.max(1, ...weeks.map(w => w.n));
+  const cur = weeks[7].n, prev = weeks[6].n, diff = cur - prev;
+  const avg = Math.round(weeks.slice(0, 7).reduce((s2, w) => s2 + w.n, 0) / 7 * 10) / 10;
+  const trend = diff > 0 ? '<span class="dw-trend up">▲ ' + diff + ' mehr als letzte Woche</span>'
+    : diff < 0 ? '<span class="dw-trend down">▼ ' + (-diff) + ' weniger als letzte Woche</span>' : '<span class="dw-trend">wie letzte Woche</span>';
+  const bars = weeks.map(w => '<div class="dw-col' + (w.now ? ' now' : '') + '" title="' + esc('KW ' + Shared.isoWeek(w.from) + ': ' + w.n + ' erledigt') + '">' +
+    '<span class="dw-n">' + w.n + '</span><span class="dw-bar"><i style="height:' + (w.n / max * 100) + '%"></i></span>' +
+    '<small>KW ' + Shared.isoWeek(w.from) + '</small></div>').join('');
+  return '<div class="card-w w-6 dw"><h3>' + icon('check', 'sm') + 'Erledigt pro Woche</h3>' +
+    '<div class="dw-head"><b>' + cur + '</b><span>diese Woche</span>' + trend + '<span class="dw-avg">Ø ' + fmtNum(avg) + ' pro Woche</span></div>' +
+    (weeks.some(w => w.n) ? '<div class="dw-chart">' + bars + '</div>'
+      : '<div class="empty-w">Noch nichts erledigt. Sobald du Aufgaben abhakst, siehst du hier deinen Wochenverlauf.</div>') + '</div>';
+}
+/** Project tabs on the dashboard: one row; arrows appear when it does not fit, wheel and swipe scroll sideways. */
+function bindPtabs() {
+  const row = $('.ptabs');
+  if (!row) return;
+  const wrap = row.parentNode;
+  const arrows = () => {
+    wrap.classList.toggle('can-l', row.scrollLeft > 2);
+    wrap.classList.toggle('can-r', row.scrollLeft + row.clientWidth < row.scrollWidth - 2);
+  };
+  const on = $('button.on', row);
+  if (on && (on.offsetLeft < row.scrollLeft || on.offsetLeft + on.offsetWidth > row.scrollLeft + row.clientWidth)) {
+    row.scrollLeft = on.offsetLeft - 8;
+  }
+  row.addEventListener('scroll', arrows);
+  row.updateArrows = arrows;
+  row.addEventListener('wheel', e => {
+    if (row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    row.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+  arrows();
+}
+A['ptabs-scroll'] = el => {
+  const row = $('.ptabs');
+  row.scrollLeft += Number(el.dataset.d) * row.clientWidth * 0.7;
+  if (row.updateArrows) row.updateArrows();
+};
+A['proj-all'] =() => { const sp = project(S.dashProj); S.teamTab = 'projects'; go('team', sp ? sp.teamId : (S.teams[0] || {}).id); };
+A['dash-proj'] = el => { S.dashProj = el.dataset.id; render(); };
+A['dash-heat'] = () => { S.cal.mode = 'heatmap'; go('calendar'); };
+A['brief-reload'] = () => { S.briefing = null; render({ peek: false }); };
+A['warn-open'] = el => { S.cap.teamId = el.dataset.team; S.cap.data = null; go('capacity'); };
+A['cal-agenda'] = () => { S.cal.mode = 'agenda'; go('calendar'); };
+
+function homePage() {
+  const mine = S.tasks.filter(isMine);
+  return '<div class="page wide">' +
+    database(mine, { title: 'Meine Aufgaben', sub: 'Alles, was dir zugewiesen ist: persönlich, über Teams und in Projekten.', people: [S.me.email], empty: 'Nichts offen. Neue Aufgaben legst du über „Neue Aufgabe“ an.' }) + '</div>';
+}
+
+/* day planner: pick tasks from the list, drop them on the time line */
+const PL = { from: 6 * 60, to: 21 * 60, hh: 44 };
+function plDur(t) { return Math.max(15, Math.round((Number(t.estimate) || 0.5) * 60 / 5) * 5); }
+function fmtClock(min) { return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
+const plPx = m => (m - PL.from) / 60 * PL.hh;
+function focusDate() {
+  if (!S.plan) S.plan = { date: TODAY(), filter: 'due' };
+  return S.plan.date;
+}
+/** Start minute of an event with a clock time ("09:30"), else null: it belongs to the all-day row. */
+function evStart(e) {
+  const m = /^(\d\d):(\d\d)$/.exec(e.time || '');
+  return m && (!e.endDate || e.endDate === e.startDate) ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+function evBlockHtml(ev, style) {
+  const e = ev.ev;
+  return '<div class="blk-p blk-ev" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '" style="' + style + '">' +
+    '<div class="bt">' + esc(evLabel(e)) + '</div><div class="bm">' + fmtClock(ev.s) + ' – ' + fmtClock(ev.e) + '</div></div>';
+}
+/** Time blocks of one day (tasks and meetings sorted by start), overlapping blocks share the width. */
+function blocksHtml(planned, events) {
+  let cluster = [], clusterEnd = 0;
+  const flush = () => { cluster.forEach(c => { c.n = cluster.reduce((m, x) => Math.max(m, x.lane + 1), 1); }); };
+  const evs = planned.map(t => ({ t: t, s: t.planStart, e: t.planStart + plDur(t), lane: 0, n: 1 }))
+    .concat((events || []).map(e => ({ ev: e, s: evStart(e), e: evStart(e) + Math.max(15, Number(e.duration) || 30), lane: 0, n: 1 })))
+    .sort((a, c) => a.s - c.s);
+  const laneEnds = [];
+  evs.forEach(ev => {
+    if (ev.s >= clusterEnd) { flush(); cluster = []; laneEnds.length = 0; clusterEnd = 0; }
+    let l = laneEnds.findIndex(x => x <= ev.s);
+    if (l < 0) { l = laneEnds.length; laneEnds.push(0); }
+    laneEnds[l] = ev.e; ev.lane = l; cluster.push(ev); clusterEnd = Math.max(clusterEnd, ev.e);
+  });
+  flush();
+  return evs.map(ev => {
+    const t = ev.t, top = plPx(Math.max(ev.s, PL.from)), height = Math.max(plPx(Math.min(ev.e, PL.to)) - top, 26);
+    const style = 'top:' + top + 'px;height:' + height + 'px;left:calc(6px + (100% - 12px) * ' + ev.lane + ' / ' + ev.n + ');width:calc((100% - 12px) / ' + ev.n + ' - 4px)';
+    if (ev.ev) return evBlockHtml(ev, style);
+    return '<div class="blk-p p-' + esc(t.priority || 'none') + (isDone(t) ? ' done' : '') + '" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" style="' + style + '">' +
+      '<div class="bt">' + esc(t.title) + '</div>' + (height > 40 ? '<div class="bm">' + fmtClock(ev.s) + ' – ' + fmtClock(ev.e) + '</div>' : '') +
+      '<div class="bx"><button data-action="blk-len" data-id="' + esc(t.id) + '" data-d="-15" title="15 Min. kürzer">−</button><button data-action="blk-len" data-id="' + esc(t.id) + '" data-d="15" title="15 Min. länger">+</button>' +
+      '<button data-action="blk-unplan" data-id="' + esc(t.id) + '" title="Aus dem Plan nehmen">×</button></div></div>';
+  }).join('');
+}
+function hourLabels() {
+  const hours = [];
+  for (let h = PL.from / 60; h < PL.to / 60; h++) hours.push('<div class="hl">' + String(h).padStart(2, '0') + ':00</div>');
+  return hours.join('');
+}
+function nowLineHtml(d) {
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  return d === TODAY() && nowMin >= PL.from && nowMin <= PL.to ? '<div class="tl-now" style="top:' + plPx(nowMin) + 'px"></div>' : '';
+}
+/** Holiday, team-warning and absence chips of one day. */
+function dayFlags(data, d, o) {
+  const flags = [];
+  if (!data) return flags;
+  const inScope = o.people ? (e => o.people.indexOf(e) >= 0) : (e => e === S.me.email || people_(e));
+  data.holidays.filter(h => h.date === d && h.affects.some(inScope)).forEach(h => flags.push('<span class="chip warn" title="' + esc(holName(h) + ' (' + h.country + ')') + '">' + flag(h.country) + esc(holName(h)) + '</span>'));
+  (data.warnings || []).filter(w => w.date === d && (!o.teamId || w.teamId === o.teamId)).forEach(w => flags.push('<span class="chip danger">' + icon('alert', 'sm') + esc(w.teamName + ' ' + w.absent + '/' + w.total + ' weg') + '</span>'));
+  const away = uniq(data.absences.filter(a => a.startDate <= d && a.endDate >= d && inScope(a.email)).map(a => a.email));
+  if (away.length) flags.push('<span class="chip" title="' + esc(away.map(e => user(e).name).join(', ')) + '">' + avatars(away, 3) + away.length + ' abwesend</span>');
+  return flags;
+}
+/** "Meine Aufgaben" next to the week/day grid: drag a task onto the time line to plan it. */
+function planListHtml(until, days) {
+  const mine = S.tasks.filter(isMine);
+  let cand = mine.filter(x => !isDone(x) && days.indexOf(x.planDate) < 0);
+  if (S.plan.filter === 'due') cand = cand.filter(x => x.dueDate && x.dueDate <= until);
+  else if (S.plan.filter === 'free') cand = cand.filter(x => !x.planDate);
+  cand.sort((a, c) => (a.dueDate || '9').localeCompare(c.dueDate || '9') || rankPrio(a) - rankPrio(c));
+  const item = t => '<div class="pl-item" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '">' + glyph(t.status) + '<div class="tt">' + esc(t.title) + '<div>' + metaHtml(t, { skipEst: true }) + '</div></div><span class="dur">' + fmtHours(plDur(t) / 60) + '</span></div>';
+  const fbtn = (k, l) => '<button class="' + (S.plan.filter === k ? 'on' : '') + '" data-action="pl-filter" data-k="' + k + '">' + l + '</button>';
+  return '<div class="card-w pl-list" data-plan-return><div class="pl-head"><h3>Meine Aufgaben <span class="n">' + cand.length + '</span></h3>' +
+    '<div class="seg">' + fbtn('due', 'Fällig') + fbtn('free', 'Ungeplant') + fbtn('all', 'Alle offenen') + '</div>' +
+    '<p class="pl-hint">Auf den Kalender ziehen, um einen Zeitblock zu planen.</p></div>' +
+    '<div class="pl-scroll" data-keep-scroll="pl">' + (cand.length ? cand.slice(0, 80).map(item).join('') : '<div class="empty-w">Nichts zu planen.</div>') + '</div></div>';
+}
+
+/** Week / day: one column per day with a time line, all-day strip on top. */
+function timeGridHtml(days, o) {
+  const data = o.data;
+  const today = TODAY();
+  const inScope = o.people ? (x => x.assignees.some(e => o.people.indexOf(e) >= 0) || x.teams.indexOf(o.teamId) >= 0) : isMine;
+  const head = days.map(d => {
+    const wd = Shared.weekday(d);
+    const fl = dayFlags(data, d, o);
+    return '<div class="wk-h' + (d === today ? ' today' : '') + (wd === 0 || wd === 6 ? ' weekend' : '') + '"><div class="wk-dn"><small>' + DOW[wd] + '</small><b>' + Number(d.slice(8)) + '</b></div>' +
+      (fl.length ? '<div class="wk-fl">' + fl.join('') + '</div>' : '') + '</div>';
+  }).join('');
+  const allday = days.map(d => {
+    const items = [];
+    if (o.show.events && data) data.events.filter(e => e.startDate <= d && (e.endDate || e.startDate) >= d && evStart(e) === null).forEach(e =>
+      items.push('<div class="wk-chip event" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '">' + esc(evLabel(e)) + '</div>'));
+    if (o.show.tasks) o.tasks.filter(t => t.dueDate === d && t.planDate !== d && !isDone(t) && inScope(t)).forEach(t =>
+      items.push('<div class="wk-chip" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" title="Auf die Zeitleiste ziehen, um zu planen">' + glyph(t.status) + '<span>' + esc(t.title) + '</span></div>'));
+    return '<div class="wk-a' + (d === today ? ' today' : '') + '" data-drop-date="' + d + '">' + items.slice(0, 4).join('') + (items.length > 4 ? '<div class="wk-more">+' + (items.length - 4) + ' weitere</div>' : '') + '</div>';
+  }).join('');
+  const cols = days.map(d => {
+    const wd = Shared.weekday(d);
+    const planned = S.tasks.filter(t => t.planDate === d && inScope(t));
+    const timed = o.show.events && data ? data.events.filter(e => e.startDate === d && evStart(e) !== null) : [];
+    return '<div class="wk-col' + (d === today ? ' today' : '') + (wd === 0 || wd === 6 ? ' weekend' : '') + '" data-plan-date="' + d + '" data-action="wk-slot" data-date="' + d + '" title="Klicken, um hier eine Aufgabe einzuplanen">' + blocksHtml(planned, timed) + nowLineHtml(d) + '</div>';
+  }).join('');
+  const h = (PL.to - PL.from) / 60 * PL.hh;
+  return '<div class="card-w wk' + (data ? '' : ' sk-on') + '" data-keep-scroll="wk" style="--cols:' + days.length + ';--hh:' + PL.hh + 'px;--tlh:' + h + 'px">' +
+    '<div class="wk-corner"></div>' + head + '<div class="wk-corner a">ganztägig</div>' + allday +
+    '<div class="wk-gutter" style="height:' + h + 'px">' + hourLabels() + '</div>' + cols + '</div>';
+}
+A['wk-slot'] = (el, e) => {
+  if (e.target.closest('.blk-p')) return;
+  const y = e.clientY - el.getBoundingClientRect().top;
+  const min = Math.max(PL.from, Math.min(PL.to - 30, PL.from + Math.floor(y / PL.hh * 2) * 30));
+  newTaskModal(contextDefaults({ assignees: [S.me.email], dueDate: el.dataset.date, planDate: el.dataset.date, planStart: min }));
+};
+
+/** Heatmap: finished tasks per day over the last 52 weeks. */
+function heatmapHtml(people) {
+  const t = TODAY();
+  const start = Shared.addDays(Shared.mondayOf(t), -51 * 7);
+  const inScope = people ? (x => x.assignees.some(e => people.indexOf(e) >= 0)) : isMine;
+  const counts = {};
+  S.tasks.filter(x => isDone(x) && x.completedAt && inScope(x)).forEach(x => { const d = x.completedAt.slice(0, 10); counts[d] = (counts[d] || 0) + 1; });
+  let total = 0, active = 0, best = 0, bestDay = '', run = 0, streak = 0;
+  const cells = [], months = [];
+  for (let i = 0; i < 52 * 7; i++) {
+    const d = Shared.addDays(start, i), c = counts[d] || 0, wd = Shared.weekday(d);
+    if (d > t) { cells.push('<i style="visibility:hidden"></i>'); continue; }
+    total += c; if (c) active++;
+    if (c > best) { best = c; bestDay = d; }
+    if (wd !== 0 && wd !== 6) { run = c ? run + 1 : 0; streak = Math.max(streak, run); }
+    if (i % 7 === 0 && d.slice(8) <= '07') months.push({ col: i / 7, label: MONTHS[Number(d.slice(5, 7)) - 1] });
+    cells.push('<i class="' + (c >= 5 ? 'l4' : c >= 3 ? 'l3' : c >= 2 ? 'l2' : c >= 1 ? 'l1' : '') + (d === t ? ' today' : '') + '" title="' + esc(fmtDate(d, { absolute: true }) + ': ' + c + ' erledigt') + '"></i>');
+  }
+  const stat2 = (v, l) => '<div class="hm-stat"><b>' + v + '</b><span>' + l + '</span></div>';
+  return '<div class="card-w hm"><div class="hm-stats">' + stat2(total, 'erledigt in 12 Monaten') + stat2(active, 'aktive Tage') + stat2(streak, 'Werktage in Folge (Bestwert)') +
+    stat2(best || '–', bestDay ? 'Bestwert am ' + fmtDate(bestDay, { absolute: true }) : 'bester Tag') + '</div>' +
+    '<div class="hm-wrap"><div class="hm-dows"><span>' + DOW[1] + '</span><span></span><span>' + DOW[3] + '</span><span></span><span>' + DOW[5] + '</span><span></span><span></span></div><div>' +
+    '<div class="hm-months" style="--w:52">' + months.map(m => '<span style="grid-column:' + (m.col + 1) + '">' + m.label + '</span>').join('') + '</div>' +
+    '<div class="heat big">' + cells.join('') + '</div></div></div>' +
+    '<div class="heat-legend">' + L('weniger', 'less') + ' <i style="background:var(--bg-hover)"></i><i style="background:var(--heat-1)"></i><i style="background:var(--heat-2)"></i><i style="background:var(--heat-3)"></i><i style="background:var(--heat-4)"></i> ' + L('mehr', 'more') + '</div></div>';
+}
+function people_(email) { return myPeopleList().indexOf(email) >= 0; }
+A['pl-filter'] = el => { S.plan.filter = el.dataset.k; render(); };
+A['blk-len'] = (el, e) => {
+  e.stopPropagation();
+  const t = task(el.dataset.id);
+  if (t) patchTask(t.id, { estimate: Math.max(0.25, (plDur(t) + Number(el.dataset.d)) / 60) }, { keepPeek: true });
+};
+A['blk-unplan'] = (el, e) => { e.stopPropagation(); patchTask(el.dataset.id, { planDate: '' }, { keepPeek: true }); };
+const planDrag = { id: null };
+function bindPlanner() {
+  $$('[data-plan-drag]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      planDrag.id = el.dataset.planDrag;
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', planDrag.id); } catch (err) { /* IE */ }
+      setTimeout(() => el.classList.add('dragging'), 0);
+    });
+    el.addEventListener('dragend', () => { el.classList.remove('dragging'); planDrag.id = null; $$('.drop').forEach(x => x.classList.remove('drop')); });
+  });
+  $$('.tl-grid, .wk-col').forEach(grid => {
+    grid.addEventListener('dragover', e => { if (planDrag.id) { e.preventDefault(); grid.classList.add('drop'); } });
+    grid.addEventListener('dragleave', () => grid.classList.remove('drop'));
+    grid.addEventListener('drop', e => {
+      e.preventDefault();
+      grid.classList.remove('drop');
+      const id = planDrag.id;
+      planDrag.id = null;
+      if (!id) return;
+      const y = e.clientY - grid.getBoundingClientRect().top;
+      const min = Math.max(PL.from, Math.min(PL.to - 15, PL.from + Math.round(y / PL.hh * 4) * 15));
+      patchTask(id, { planDate: grid.dataset.planDate, planStart: min }, { keepPeek: true });
+    });
+  });
+  const back = $('[data-plan-return]');
+  if (back) {
+    back.addEventListener('dragover', e => { if (planDrag.id) e.preventDefault(); });
+    back.addEventListener('drop', e => { e.preventDefault(); const id = planDrag.id; planDrag.id = null; if (id && task(id) && task(id).planDate) patchTask(id, { planDate: '' }, { keepPeek: true }); });
+  }
+}
+
+
+function allPage() {
+  return '<div class="page wide">' + database(S.tasks, { title: 'Alle Aufgaben', sub: 'Deine Aufgaben und die deiner Teams und Projekte.' }) + '</div>';
+}
+
+function teamTasks(t) {
+  const pids = S.projects.filter(p => p.teamId === t.id).map(p => p.id);
+  return S.tasks.filter(x => x.teams.indexOf(t.id) >= 0 || pids.indexOf(x.projectId) >= 0);
+}
+/**
+ * Absence warning of a team (days in the next 4 weeks with at least the threshold away): one line in the
+ * header; "Details" opens the days with who is away, and the way to the availability page.
+ */
+function teamWarnLine(teamId) {
+  const t = TODAY();
+  const d = calEnsure(t, Shared.addDays(t, 27), teamId);
+  if (!d || !d.warnings.length) return '';
+  const open = !!(S.twOpen && S.twOpen[teamId]);
+  const n = d.warnings.length;
+  return '<div class="tw-line" role="status">' + icon('alert', 'sm') +
+    '<span><b>' + esc(L(n + (n === 1 ? ' Tag' : ' Tage') + ' mit ≥ ' + d.threshold + ' % abwesend', n + (n === 1 ? ' day' : ' days') + ' with ≥ ' + d.threshold + ' % away')) + '</b> ' +
+    esc(L('in den nächsten 4 Wochen', 'in the next 4 weeks')) + '</span>' +
+    '<button type="button" class="linkbtn" data-action="tw-toggle" data-id="' + esc(teamId) + '" aria-expanded="' + open + '" aria-controls="tw-' + esc(teamId) + '">' +
+    esc(L('Details', 'Details')) + '</button></div>' + (open ? teamWarnDetails(teamId, d) : '');
+}
+function teamWarnDetails(teamId, d) {
+  return '<div class="tw-details" id="tw-' + esc(teamId) + '">' + d.warnings.slice(0, 20).map(w =>
+    '<div class="tw-day"><span class="chip danger">' + esc(DOW[Shared.weekday(w.date)] + ' ' + fmtDate(w.date, { absolute: true }) + ' · ' + w.absent + '/' + w.total) + '</span>' +
+    '<span class="tw-who">' + esc((w.people || []).map(e => user(e).name).join(', ')) + '</span></div>').join('') +
+    '<p class="hint">' + esc(L('Urlaub, Krankheit und Feiertage eingerechnet.', 'Holidays, sick leave and public holidays included.')) + '</p>' +
+    '<button type="button" class="btn sm outline" data-action="warn-open" data-team="' + esc(teamId) + '">' + esc(L('Verfügbarkeit ansehen', 'View availability')) + '</button></div>';
+}
+A['tw-toggle'] = el => { S.twOpen = Object.assign({}, S.twOpen, { [el.dataset.id]: !(S.twOpen && S.twOpen[el.dataset.id]) }); render(); };
+function teamPage(t) {
+  const tab = S.teamTab || 'tasks';
+  const members = teamMembers(t);
+  const projects = S.projects.filter(p => p.teamId === t.id);
+  const tasks = teamTasks(t);
+  let body = '';
+  if (tab === 'tasks') body = database(tasks, { people: members, teamId: t.id });
+  if (tab === 'projects') body = '<div class="grid">' + projects.map(projectCard).join('') +
+    '<button class="pcard new" data-action="project-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Neues Projekt</button></div>';
+  if (tab === 'jf') body = jfTeamTab(t, projects);
+  if (tab === 'members') body = '<div class="members-list">' + members.map(e => {
+    const u = user(e);
+    const open = S.tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
+    return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:500">' + esc(u.name) +
+      (teamLeads(t).indexOf(e) >= 0 ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
+      '<span class="col2">' + flag(u.country) + ' ' + esc(u.region || '') + '</span>' +
+      '<span class="col2 num">' + (u.hoursPerWeek || 0) + ' h/Woche</span>' +
+      '<span class="col2 num">' + open + ' offen</span></div>';
+  }).join('') + '</div>';
+  return '<div class="page wide">' +
+    pageHead(t.name, t.description ? linkify(t.description) : '', mark(t, 'lg'),
+      '<button class="btn outline" data-action="team-capacity" data-id="' + esc(t.id) + '">' + icon('users', 'sm') + 'Verfügbarkeit</button>' +
+      '<button class="btn outline" data-action="team-calendar" data-id="' + esc(t.id) + '">' + icon('calendar', 'sm') + 'Kalender</button>' +
+      '<button class="icon-btn" data-action="team-edit" data-id="' + esc(t.id) + '" title="Team bearbeiten">' + icon('settings') + '</button>', teamWarnLine(t.id)) +
+    '<div class="page-meta">' + avatars(members, 6) + '<span>' + members.length + ' Mitglieder</span><span class="sep"></span>' +
+    '<span>Lead: ' + esc(teamLeads(t).map(e => user(e).name).join(', ')) + '</span><span class="sep"></span><span>' + projects.length + ' Projekte</span></div>' +
+    '<div class="db-bar"><div class="tabs">' +
+    [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length],
+      ['jf', 'Jour Fixe', 'repeat', jfData().series.filter(s => projects.some(p => p.id === s.projectId)).length], ['members', 'Mitglieder', 'users', members.length]]
+      .map(x => '<button class="tab' + (tab === x[0] ? ' active' : '') + '" data-action="team-tab" data-v="' + x[0] + '">' + icon(x[2]) + x[1] + ' <span class="n">' + x[3] + '</span></button>').join('') +
+    '</div>' + (tab === 'members' ? '<button class="btn primary" data-action="team-members" data-id="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Mitglieder hinzufügen</button>' : '') +
+    '</div><div class="fit-body" data-keep-scroll="fit">' + body + '</div></div>';
+}
+A['team-tab'] = el => { S.teamTab = el.dataset.v; render(); };
+A['team-capacity'] = el => { S.cap.teamId = el.dataset.id; S.cap.data = null; go('capacity'); };
+A['team-calendar'] = el => { S.cal.teamId = el.dataset.id; go('calendar'); };
+
+function projectCard(p) {
+  const tasks = S.tasks.filter(t => t.projectId === p.id && !t.parentId);
+  const done = tasks.filter(isDone).length;
+  const pct = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+  const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
+  return '<button class="pcard" data-action="nav" data-view="project" data-id="' + esc(p.id) + '">' +
+    '<div class="t">' + mark(p, 'md') + esc(p.name) + '</div>' +    (p.description ? '<div class="d">' + esc(p.description) + '</div>' : '') +
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="chip soft">' + esc(st.label) + '</span>' +
+    (p.endDate ? '<span class="meta">' + icon('flag', 'sm') + esc(fmtDate(p.endDate, { absolute: true })) + '</span>' : '') + '</div>' +
+    '<div class="progress"><i style="width:' + pct + '%"></i></div>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center"><span class="faint num" style="font-size:12px">' + done + ' von ' + tasks.length + ' erledigt</span>' +
+    avatars(projectMembers(p), 4) + '</div></button>';
+}
+
+function projectPage(p) {
+  const t = team(p.teamId);
+  const tasks = S.tasks.filter(x => x.projectId === p.id);
+  const top = tasks.filter(x => !x.parentId);
+  const subsAll = tasks.filter(x => x.parentId);
+  const done = top.filter(isDone).length;
+  const pct = top.length ? Math.round(done / top.length * 100) : 0;
+  const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
+  const members = projectMembers(p);
+  const today = TODAY();
+  const tab = S.projTab || 'overview';
+  const pc = projectColor(p);
+  const over = top.filter(x => !isDone(x) && x.dueDate && x.dueDate < today).length;
+  const hoursAll = top.reduce((s2, x) => s2 + (x.estimate || 0), 0);
+  const hoursDone = top.filter(isDone).reduce((s2, x) => s2 + (x.estimate || 0), 0);
+  const spent = tasks.reduce((s2, x) => s2 + (Number(x.spent) || 0), 0) / 60;
+  const subDone = subsAll.filter(isDone).length;
+  const rows = [
+    { l: 'Aufgaben', d: 'Hauptaufgaben des Projekts', v: pct, c: done + '/' + top.length + ' erledigt' },
+    { l: 'Unteraufgaben', d: 'Einzelne Arbeitsschritte', v: subsAll.length ? Math.round(subDone / subsAll.length * 100) : 0, c: subDone + '/' + subsAll.length + ' erledigt' },
+    { l: 'Aufwand', d: 'Geplante Stunden, die abgeschlossen sind', v: hoursAll ? Math.round(hoursDone / hoursAll * 100) : 0, c: fmtNum(hoursDone) + ' von ' + fmtNum(hoursAll) + ' h' },
+  ];
+  const used = rows.filter((r, i) => i === 0 || (i === 1 ? subsAll.length : hoursAll));
+  const overall = used.length ? Math.round(used.reduce((s2, r) => s2 + r.v, 0) / used.length) : 0;
+  const dist = Shared.STATUSES.map(x => '<div class="dst"><b>' + top.filter(y => y.status === x.key).length + '</b><span>' + cdot(STATUS_COLORS[x.key]) + esc(x.label) + '</span></div>').join('');
+  const qs = (l, v, cls) => '<div class="qs"><span>' + l + '</span><b class="' + (cls || '') + '">' + v + '</b></div>';
+  let body = '';
+  if (tab === 'overview') {
+    body = '<div class="pj-grid"><div class="card-w"><h3>' + icon('pie', 'sm') + 'Aufgabenverteilung</h3><div class="dsts">' + dist + '</div></div>' +
+      '<div class="card-w"><h3>' + icon('clock', 'sm') + 'Kurzstatistik</h3>' + qs('Abschlussquote', pct + ' %') + qs('Überfällige Aufgaben', over, over ? 'red' : '') +
+      qs('Offene Aufgaben', top.length - done) + qs('Gebuchte Zeit', fmtNum(Math.round(spent * 10) / 10) + ' h') + '</div></div>' +
+      '<div class="card-w"><h3>' + icon('layers', 'sm') + 'Fortschritt im Detail<span class="n">Gesamt ' + overall + ' %</span></h3><p class="hint" style="margin:-6px 0 12px">So setzt sich der Gesamtfortschritt zusammen.</p>' +
+      '<div class="ovr"><span class="track"><i style="width:' + overall + '%"></i></span></div>' +
+      rows.map(r => '<div class="brow"><div class="bt"><b>' + r.l + '</b><small>' + r.d + '</small></div><div class="bb"><span class="track"><i style="width:' + r.v + '%"></i></span></div><div class="bv"><b>' + r.v + ' %</b><small>' + r.c + '</small></div></div>').join('') + '</div>';
+  } else if (tab === 'tasks') {
+    body = database(tasks, { hideProject: true, people: members });
+  } else if (tab === 'jf' || tab === 'docs') {
+    body = jfTab(p);
+  } else {
+    const whole = !p.members.length;
+    // who belongs to the project: the whole team (default) or a picked list of people
+    body = '<div class="card-w pm-head"><div class="pm-mode"><span class="pm-ic">' + icon(whole ? 'users' : 'user') + '</span><div><b>' +
+      (whole ? 'Ganzes Team' + (t ? ' ' + esc(t.name) : '') : members.length + ' ausgewählte Personen') + '</b><small>' +
+      (whole ? 'Alle Mitglieder des Teams gehören automatisch dazu, auch wer später ins Team kommt. Sobald du Personen hinzufügst oder entfernst, gilt nur noch die Auswahl.'
+        : 'Nur diese Personen gehören zum Projekt, auch aus anderen Teams oder per E-Mail eingeladen.') + '</small></div></div>' +
+      '<div class="pm-acts">' + (whole ? '' : '<button class="btn outline sm" data-action="project-whole-team" data-id="' + esc(p.id) + '">' + icon('users', 'sm') + 'Wieder ganzes Team</button>') +
+      '<button class="btn primary" data-action="project-members" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Personen hinzufügen</button></div></div>' +
+      '<div class="card-w"><div class="members-list">' + (members.length ? members.map(e => {
+        const u = user(e);
+        const open = tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
+        return '<div class="mrow">' + avatar(e, 'lg') + '<div class="info"><div style="font-weight:600">' + esc(u.name) + (projectLeads(p).indexOf(e) >= 0 ? ' <span class="chip soft">Lead</span>' : '') + '</div><small>' + esc(e) + '</small></div>' +
+          '<span class="col2">' + flag(u.country) + ' ' + esc(u.region || '') + '</span><span class="col2 num">' + open + ' offen im Projekt</span>' +
+          '<button class="icon-btn" data-action="project-unmember" data-id="' + esc(p.id) + '" data-v="' + esc(e) + '" title="Aus dem Projekt entfernen" aria-label="Aus dem Projekt entfernen">' + icon('x', 'sm') + '</button></div>';
+      }).join('') : '<div class="empty-mini">Noch niemand im Projekt. Füge Personen hinzu.</div>') + '</div></div>';
+  }
+  return '<div class="page wide"><div class="pj-banner ' + inkClass(projectColorKey(p)) + '" style="--pc:' + pc + '">' +
+    '<div class="pj-l">' + mark(p, 'lg') + '<div><div class="pj-t"><h1>' + esc(p.name) + '</h1><span class="pb-chip">' + esc(st.label) + '</span></div>' +
+    '<p>' + (p.description ? linkify(p.description) : 'Keine Beschreibung.') + '</p>' +
+    ((p.links || []).length || canEditProject(p) ? '<div class="lk-row pj-links">' + linksHtml(p.links, 'project', p.id, canEditProject(p)) + '</div>' : '') +
+    '<div class="pj-m">' + (t ? '<button data-action="nav" data-view="team" data-id="' + esc(t.id) + '">' + mark(t) + esc(t.name) + '</button>' : '') +
+    (p.startDate || p.endDate ? '<span>' + icon('calendar', 'sm') + esc(fmtRange(p.startDate || p.endDate, p.endDate)) + '</span>' : '') +
+    '<button class="pj-people" data-action="project-members" data-id="' + esc(p.id) + '" title="Personen hinzufügen oder entfernen">' + avatars(members, 5) +
+      (p.members.length ? members.length + ' Mitglieder' : 'Ganzes Team') + '<span class="pj-plus">' + icon('plus', 'sm') + 'Personen</span></button></div></div></div>' +
+    '<div class="pj-acts"><button class="icon-btn sq" data-action="new-task" title="Neue Aufgabe">' + icon('plus') + '</button>' +
+    '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
+    '<button class="icon-btn sq" data-action="project-edit" data-id="' + esc(p.id) + '" title="Projekt bearbeiten">' + icon('settings') + '</button></div></div>' +
+    '<div class="pj-tabs">' + [['overview', 'Übersicht', ''], ['tasks', 'Aufgaben', top.length], ['jf', 'Jour Fixe', ''], ['members', 'Mitglieder', members.length]].map(x =>
+      '<button class="' + (tab === x[0] ? 'on' : '') + '" data-action="proj-tab" data-v="' + x[0] + '">' + x[1] + (x[2] !== '' ? ' <span class="n">' + x[2] + '</span>' : '') + '</button>').join('') + '</div>' +
+    '<div class="fit-body" data-keep-scroll="fit">' + body + '</div></div>';
+}
+A['proj-tab'] = el => {
+  // leaving the editor with unsaved text: the draft stays in the browser and comes back next time
+  if (S.protoEdit) docEndEdit();
+  S.protoEdit = null;
+  S.doc = null;
+  S.projTab = el.dataset.v;
+  render();
+};
+
+/* ---------------- team calendar ---------------- */
+function scopeButton(action, teamId, personal) {
+  const t = teamId && team(teamId);
+  return '<button class="btn outline sm" data-action="' + action + '">' + (t ? mark(t) + esc(t.name)
+    : personal ? icon('user', 'sm') + 'Persönlich' : icon('users', 'sm') + 'Alle Personen') + icon('chevron', 'sm') + '</button>';
+}
+const CAL_VIEWS = [['week', 'Woche', 'board'], ['day', 'Tag', 'sub'], ['month', 'Monat', 'calendar'], ['agenda', 'Agenda', 'list'], ['heatmap', 'Heatmap', 'layers']];
+const AG_RANGES = { today: [1, 'Heute'], week: [7, 'Woche'], month: [31, 'Monat'], all: [90, '90 Tage'] };
+function calendarPage() {
+  if (!S.cal.mode || S.cal.mode === 'planner') S.cal.mode = 'week';
+  // phones: seven columns do not fit, show the day instead
+  const mode = S.cal.mode === 'week' && window.innerWidth < 700 ? 'day' : S.cal.mode;
+  // the hours fill the window: about 7–21 h are visible without scrolling, small windows still scroll
+  PL.hh = Math.max(24, Math.min(56, Math.floor(Math.max(320, window.innerHeight - 235) / 14)));
+  // personal calendar by default; a team gives a quick look at that team (details: availability page)
+  const teamId = S.cal.teamId && team(S.cal.teamId) ? S.cal.teamId : '';
+  const people = teamId ? teamMembers(team(teamId)) : [S.me.email];
+  const t = TODAY();
+  const show = S.cal.show;
+  const scoped = x => (teamId ? x.assignees.some(e => people.indexOf(e) >= 0) || x.teams.indexOf(teamId) >= 0 : isMine(x));
+  const tasks = S.tasks.filter(x => x.dueDate && scoped(x));
+  const upcoming = calEnsure(t, Shared.addDays(t, 90), teamId);
+  const hidden = ['absences', 'holidays', 'events', 'tasks'].filter(k => !show[k]).length;
+  const filters = '<button class="btn outline sm' + (hidden ? ' active' : '') + '" data-action="cal-layers" title="Was im Kalender angezeigt wird">' + icon('layers', 'sm') + 'Ebenen' +
+    (hidden ? ' <span class="tn">' + (4 - hidden) + '/4</span>' : '') + '</button>';
+  const side = () => '<aside>' + (upcoming ? sidePanel(upcoming, people) : '<div class="panel">' + skPeople(3) + '</div>') + '</aside>';
+  let main = '', layoutSide = false;
+  const ctl = [];
+  if (mode === 'agenda') {
+    const range = AG_RANGES[S.cal.range] ? S.cal.range : 'week';
+    ctl.push('<div class="seg">' + Object.keys(AG_RANGES).map(k => '<button class="' + (range === k ? 'on' : '') + '" data-action="cal-range" data-k="' + k + '">' + AG_RANGES[k][1] + '</button>').join('') + '</div>');
+    const over = tasks.filter(x => !isDone(x) && x.dueDate < t).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || rankPrio(a) - rankPrio(b));
+    const overHtml = show.tasks && over.length
+      ? '<div class="card-w ag-over"><h3 style="color: var(--danger-text)">' + icon('alert', 'sm') + 'Überfällig <span class="n">' + over.length + '</span></h3>' +
+        over.slice(0, 12).map(x => '<div class="ag-item overdue" data-action="open-task" data-id="' + esc(x.id) + '">' + glyph(x.status) + '<span class="tt">' + esc(x.title) + '</span>' +
+          metaHtml(x, { skipDue: true }) + '<span class="meta due">' + esc(fmtRange(x.startDate || x.dueDate, x.dueDate)) + '</span>' + (x.assignees.length ? avatars(x.assignees, 2) : '') + '</div>').join('') +
+        (over.length > 12 ? '<div class="hint" style="padding-top:6px">+ ' + (over.length - 12) + ' weitere</div>' : '') + '</div>' : '';
+    main = overHtml + '<div class="card-w">' + (upcoming ? agendaHtml(upcoming, t, AG_RANGES[range][0], { people: people, teamId: teamId, tasks: tasks.filter(x => !isDone(x)), show: show, skipOverdue: true }) : skRows(6)) + '</div>';
+    layoutSide = true;
+  } else if (mode === 'month') {
+    const days = monthDays(calCursor());
+    const data = calEnsure(days[0], days[days.length - 1], teamId);
+    main = calNav() + monthHtml({ cursor: calCursor(), tasks: tasks, data: data, show: show, people: people, teamId: teamId }) +
+      '<div class="legend"><span><span class="sw" style="background:var(--danger-soft);border:1px solid var(--danger)"></span>≥ ' + ((data && data.threshold) || 50) + ' % des Teams abwesend</span>' +
+      '<span><span class="sw" style="background:var(--accent-soft)"></span>Termin</span><span style="color: var(--warning-text);font-weight:600">Feiertag</span></div>';
+    layoutSide = true;
+  } else if (mode === 'week' || mode === 'day') {
+    const f = focusDate();
+    const days = [];
+    if (mode === 'day') days.push(f);
+    else for (let i = 0; i < 7; i++) days.push(Shared.addDays(Shared.mondayOf(f), i));
+    const data = calEnsure(days[0], days[days.length - 1], teamId);
+    main = '<div class="cal-plan">' + planListHtml(days[days.length - 1], days) +
+      '<div class="cal-grid">' + calNav(mode === 'day' ? DOW_LONG[Shared.weekday(f)] + ', ' + fmtDate(f, { absolute: true }) : weekTitle(days)) +
+      timeGridHtml(days, { data: data, people: people, teamId: teamId, tasks: tasks, show: show }) + '</div></div>';
+  } else if (mode === 'heatmap') {
+    main = heatmapHtml(people);
+  }
+  const views = '<div class="seg views">' + CAL_VIEWS.map((v, i) => '<button class="' + (mode === v[0] ? 'on' : '') + '" data-action="cal-mode" data-v="' + v[0] + '" title="' + v[1] + ' (Taste ' + (i + 1) + ')">' + icon(v[2], 'sm') + v[1] + '</button>').join('') + '</div>';
+  // The page itself does not scroll: list, grid and side panel scroll inside their own boxes.
+  return '<div class="page wide cal-fit">' +
+    '<div class="card-w cal-top slim"><div class="cal-top-l"><h1 class="page-title">Kalender</h1>' +
+    '<div class="cal-ctl">' + scopeButton('cal-team', teamId, true) + ctl.join('') + (mode === 'heatmap' ? '' : filters) + '</div></div>' +
+    '<div class="cal-top-r">' + views + '<div class="cal-acts"><button class="btn outline" data-action="event-new">' + icon('plus', 'sm') + 'Termin</button>' +
+    '<button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button></div>' + prefControls() + '</div></div>' +
+    '<div class="cal-body">' +
+    (layoutSide ? '<div class="cal-layout"><div class="cal-main" data-keep-scroll="main">' + main + '</div><div class="cal-side" data-keep-scroll="side">' + side() + '</div></div>'
+      : '<div class="cal-full">' + main + '</div>') + '</div></div>';
+}
+A['cal-mode'] = el => {
+  S.cal.mode = el.dataset.v;
+  if (S.cal.mode === 'month') S.cal.cursor = focusDate().slice(0, 8) + '01';
+  render({ top: true });
+};
+A['cal-range'] = el => { S.cal.range = el.dataset.k; render({ top: true }); };
+function sidePanel(d, people, o) {
+  o = o || {};
+  const t = o.from && o.from > TODAY() ? o.from : TODAY();
+  const inScope = e => !people || people.indexOf(e) >= 0;
+  const hol = {};
+  d.holidays.forEach(h => {
+    const aff = h.affects.filter(inScope);
+    if (!aff.length) return;
+    const k = h.date + h.name;
+    if (!hol[k]) hol[k] = { date: h.date, name: h.name, nameEn: h.nameEn, countries: [], affects: [] };
+    if (hol[k].countries.indexOf(h.country) < 0) hol[k].countries.push(h.country);
+    aff.forEach(e => { if (hol[k].affects.indexOf(e) < 0) hol[k].affects.push(e); });
+  });
+  const hl = Object.keys(hol).map(k => hol[k]).filter(h => h.date >= t).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 12);
+  const abs = d.absences.filter(a => a.endDate >= t && inScope(a.email)).sort((a, b) => a.startDate.localeCompare(b.startDate)).slice(0, 6);
+  const warns = o.noWarn ? [] : d.warnings.slice(0, 6);
+  return (warns.length ? '<div class="panel"><h3 style="color: var(--danger-text)">' + icon('alert', 'sm') + 'Warnungen</h3><div class="hlist">' + warns.map(w =>
+    '<div class="hitem warnitem">' + dayBox(w.date) + '<div class="what"><div><b>' + w.absent + ' von ' + w.total + '</b> in ' + esc(w.teamName) + ' abwesend</div>' +
+    '<div class="muted">' + esc(w.people.map(x => user(x.email).name.split(' ')[0] + ' (' + (x.kind === 'holiday' ? holName(x) : absenceType(x.kind).label) + ')').join(', ')) + '</div></div></div>').join('') + '</div></div>' : '') +
+    '<div class="panel"><h3>' + icon('plane', 'sm') + 'Abwesenheiten</h3><div class="hlist">' + (abs.map(a =>
+      '<div class="hitem" data-action="absence-edit" data-id="' + esc(a.id) + '" style="cursor:pointer">' + avatar(a.email, 'lg') +
+      '<div class="what"><div>' + esc(user(a.email).name) + '</div><div class="muted">' + '<span>' + esc(absenceType(a.type).label) + '</span> · ' + esc(fmtRange(a.startDate, a.endDate)) + '</div></div></div>').join('') ||
+      '<div class="faint" style="font-size:13px;padding:4px 6px">Niemand ist abwesend.</div>') + '</div></div>' +
+    '<div class="panel"><h3>' + icon('globe', 'sm') + 'Feiertage</h3>' +
+    (!S.me.region && REGIONS[S.me.country] ? '<button class="hint-row" data-action="nav" data-view="settings">' + icon('alert', 'sm') +
+      'Für regionale Feiertage dein Bundesland/deine Region im Profil setzen.</button>' : '') +
+    '<div class="hlist">' + (hl.map(h =>
+      '<div class="hitem">' + dayBox(h.date) + '<div class="what"><div>' + esc(holName(h)) + '</div>' +
+      '<div class="muted">' + h.countries.map(flag).join(' ') + ' ' + esc(DOW[Shared.weekday(h.date)]) + '</div>' +
+      '<div class="hol-who" title="' + esc(h.affects.map(e => user(e).name).join(', ')) + '">' + h.affects.slice(0, 8).map(e => avatar(e)).join('') +
+      (h.affects.length > 8 ? '<span class="faint">+' + (h.affects.length - 8) + '</span>' : '') + '</div></div></div>').join('') ||
+      '<div class="faint" style="font-size:13px;padding:4px 6px">Keine in den nächsten 90 Tagen.</div>') + '</div></div>';
+}
+A['cal-show'] = el => { S.cal.show[el.dataset.k] = !S.cal.show[el.dataset.k]; render(); };
+function scopeMenu(el, current, onPick) {
+  openMenu(el, [{ value: '', html: icon('users', 'sm') + '<span>Alle Personen</span>', search: 'alle' }]
+    .concat(S.teams.map(t => ({ value: t.id, html: teamChip(t), search: t.name }))), { selected: [current || ''], onPick: onPick });
+}
+A['cal-team'] = el => openMenu(el, [{ value: '', html: icon('user', 'sm') + '<span>Persönlich</span><small>nur ich</small>', search: 'persönlich ich' }]
+  .concat(myTeams().length ? [{ label: 'Teams' }] : [])
+  .concat(myTeams().map(t => ({ value: t.id, html: teamChip(t), search: t.name }))),
+{ selected: [S.cal.teamId || ''], search: false, onPick: v => { S.cal.teamId = v; render(); } });
+A['cal-layers'] = el => openMenu(el, [['absences', 'Abwesenheiten', 'plane'], ['holidays', 'Feiertage', 'globe'], ['events', 'Termine', 'calendar'], ['tasks', 'Aufgaben', 'checksq']]
+  .map(x => ({ value: x[0], html: icon(x[2], 'sm') + '<span>' + x[1] + '</span>', search: x[1] })),
+{ multi: true, search: false, selected: Object.keys(S.cal.show).filter(k => S.cal.show[k]), onPick: (v, sel) => {
+  Object.keys(S.cal.show).forEach(k => { S.cal.show[k] = sel.indexOf(k) >= 0; });
+  render();
+} });
+
+/* ---------------- availability (capacity) ---------------- */
+const ABS_LETTER = { vacation: 'U', sick: 'K', training: 'F', other: 'A', holiday: 'FT' };
+function capacityPage() {
+  const c = S.cap;
+  if (!c.from) c.from = Shared.mondayOf(TODAY());
+  if (c.teamId === undefined || c.teamId === null || (c.teamId && !team(c.teamId))) c.teamId = (myTeams()[0] || {}).id || '';
+  const teamId = c.teamId;
+  const weeks = c.weeks > 13 ? 6 : c.weeks || 6;
+  const key = [teamId, c.from, weeks].join('|');
+  if (!c.data || c.key !== key) {
+    if (!c.loading || c.loadingKey !== key) {
+      c.loading = true;
+      c.loadingKey = key;
+      call('availability', { teamId: teamId, from: c.from, weeks: weeks })
+        .then(d => { c.data = d; c.key = key; c.loading = false; if (S.route.view === 'capacity') render({ peek: false }); })
+        .catch(err => { c.loading = false; fail(err); });
+    }
+  }
+  const d = c.data && c.key === key ? c.data : null;
+  // Same layout as the calendar: one slim header row, the page does not scroll, the table and side panels do.
+  const head = '<div class="page wide cal-fit cap-fit">' +
+    '<div class="card-w cal-top"><div class="cal-top-l"><h1 class="page-title" title="' + esc('Urlaub aus dem Teamkalender, Feiertage je Land und Bundesland eingerechnet. Ab ' +
+      ((d && d.threshold) || 50) + ' % Abwesenheit im Team gibt es eine Warnung.') + '">Verfügbarkeit</h1>' +
+    '<div class="cal-ctl">' + scopeButton('cap-team', teamId) +
+    '<div class="seg">' + [4, 6, 8, 13].map(n => '<button class="' + (weeks === n ? 'on' : '') + '" data-action="cap-weeks" data-n="' + n + '">' + n + ' Wo.</button>').join('') + '</div>' +
+    '<button class="icon-btn" data-action="cap-prev" aria-label="Früher">' + icon('left') + '</button>' +
+    '<button class="btn outline sm" data-action="cap-today">Diese Woche</button>' +
+    '<button class="icon-btn" data-action="cap-next" aria-label="Später">' + icon('right') + '</button></div></div>' +
+    '<div class="cal-top-r"><button class="btn primary" data-action="absence-new">' + icon('plane', 'sm') + 'Urlaub eintragen</button>' + prefControls() + '</div></div>';
+  if (!d) return head + '<div class="card-w">' + skTable(6, Math.min(weeks, 8) + 1) + '</div></div>';
+
+  const work = d.days.filter(x => { const wd = Shared.weekday(x); return wd !== 0 && wd !== 6; });
+  const warnDays = d.team.filter(x => x.warn);
+  const banner = warnDays.length
+    ? '<div class="banner danger">' + icon('alert') + '<div><b>' + warnDays.length + (warnDays.length === 1 ? ' Tag' : ' Tage') + ' mit ≥ ' + d.threshold + ' % Abwesenheit' +
+      (teamId ? ' in ' + esc(team(teamId).name) : '') + '.</b> Bitte Urlaube abstimmen oder Vertretung klären.' +
+      '<div class="days-list">' + warnDays.slice(0, 14).map(w => '<span class="chip danger" title="' + esc(w.people.map(x => user(x.email).name + ' – ' + (x.kind === 'holiday' ? holName(x) : absenceType(x.kind).label)).join('\n')) + '">' +
+        esc(DOW[Shared.weekday(w.date)] + ' ' + fmtDate(w.date, { absolute: true }) + ' · ' + w.absent + '/' + w.total) + '</span>').join('') + '</div></div></div>'
+    : '<div class="banner ok">' + icon('check') + '<div><b>Gut besetzt.</b> Im gewählten Zeitraum ist nie die Hälfte des Teams gleichzeitig weg.</div></div>';
+
+  const today = TODAY();
+  const th = '<tr><th class="who">' + d.members.length + (d.members.length === 1 ? ' Person' : ' Personen') + '</th>' + work.map((x, i) =>
+    '<th class="' + (Shared.weekday(x) === 1 ? 'wkb ' : '') + (x === today ? 'today' : '') + '" title="' + esc(fmtDate(x, { absolute: true })) + '">' + DOW[Shared.weekday(x)] + '<small>' + Number(x.slice(8)) + (Number(x.slice(8)) <= 3 || i === 0 ? '<br>' + MONTHS[Number(x.slice(5, 7)) - 1] : '') + '</small></th>').join('') + '</tr>';
+  const rows = d.members.map(m => '<tr><td class="who"><div class="person">' + avatar(m.email, 'md') + '<div style="min-width:0;line-height:1.3"><div style="font-weight:500;font-size:13px">' + esc(m.name) + '</div>' +
+    '<div class="faint" style="font-size:11.5px">' + esc(m.region || m.country || '') + (m.awayDays ? ' · ' + m.awayDays + ' Tage weg' : '') + '</div></div></div></td>' +
+    work.map(x => {
+      const cell = m.cells[x];
+      const inner = !cell.works ? '<div class="blk off" title="Kein Arbeitstag"></div>'
+        : cell.away ? '<div class="blk ' + esc(cell.kind) + '" title="' + esc(cell.label) + '">' + (ABS_LETTER[cell.kind] || '') + '</div>' : '';
+      return '<td class="c' + (Shared.weekday(x) === 1 ? ' wkb' : '') + '">' + inner + '</td>';
+    }).join('') + '</tr>').join('');
+  const foot = '<tr><td class="who">Abwesend</td>' + work.map(x => {
+    const tday = d.team.find(y => y.date === x);
+    const cls = tday.warn ? 'warn' : tday.ratio >= 25 ? 'mid' : '';
+    return '<td class="c' + (Shared.weekday(x) === 1 ? ' wkb' : '') + '"><span class="pct ' + cls + '" title="' + tday.absent + ' von ' + tday.total + '">' + (tday.absent ? tday.ratio + '%' : '–') + '</span></td>';
+  }).join('') + '</tr>';
+  const legend = '<div class="legend">' + Shared.ABSENCE_TYPES.map(a => '<span><span class="sw" style="background:var(--' + a.key + ')"></span>' + esc(a.label) + '</span>').join('') +
+    '<span><span class="sw" style="background:var(--holiday)"></span>Feiertag</span><span><span class="sw blk off" style="display:inline-block;width:10px;height:10px;margin:0 6px 0 0"></span>kein Arbeitstag (Teilzeit)</span></div>';
+  // the side panel always looks 90 days ahead (Christmas included), not only at the weeks in the table
+  const extra = calEnsure(TODAY(), Shared.addDays(TODAY(), 90), teamId);
+  const scope = teamId ? teamMembers(team(teamId)) : null;
+  return head + '<div class="cal-body"><div class="cal-layout"><div class="cal-main cap-main">' + banner +
+    '<div class="av-wrap" data-keep-scroll="av"><table class="av"><thead>' + th + '</thead><tbody>' + rows + '</tbody><tfoot>' + foot + '</tfoot></table></div>' + legend + '</div>' +
+    '<div class="cal-side" data-keep-scroll="side">' + (extra ? sidePanel(extra, scope, { noWarn: true }) : '<div class="panel">' + skPeople(3) + '</div>') + '</div></div></div></div>';
+}
+function fmtNum(n) { return String(Math.round(n * 10) / 10).replace('.', ','); }
+function uniq(a) { return a.filter((x, i) => a.indexOf(x) === i); }
+A['cap-team'] = el => scopeMenu(el, S.cap.teamId, v => { S.cap.teamId = v; render(); });
+A['cap-weeks'] = el => { S.cap.weeks = Number(el.dataset.n); render(); };
+A['cap-prev'] = () => { S.cap.from = Shared.addDays(S.cap.from, -7); render(); };
+A['cap-next'] = () => { S.cap.from = Shared.addDays(S.cap.from, 7); render(); };
+A['cap-today'] = () => { S.cap.from = Shared.mondayOf(TODAY()); render(); };
+
+/* ---------------- settings ---------------- */
+const COUNTRIES = [['DE', 'Deutschland'], ['AT', 'Österreich'], ['CH', 'Schweiz'], ['US', 'USA'], ['GB', 'Vereinigtes Königreich'],
+  ['FR', 'Frankreich'], ['IT', 'Italien'], ['ES', 'Spanien'], ['NL', 'Niederlande'], ['BE', 'Belgien'], ['LU', 'Luxemburg'],
+  ['PL', 'Polen'], ['CZ', 'Tschechien'], ['DK', 'Dänemark'], ['SE', 'Schweden'], ['NO', 'Norwegen'], ['FI', 'Finnland'],
+  ['IE', 'Irland'], ['PT', 'Portugal'], ['HU', 'Ungarn'], ['RO', 'Rumänien'], ['HR', 'Kroatien'], ['GR', 'Griechenland'],
+  ['TR', 'Türkei'], ['UA', 'Ukraine'], ['RS', 'Serbien'], ['CA', 'Kanada'], ['MX', 'Mexiko'], ['BR', 'Brasilien'],
+  ['AR', 'Argentinien'], ['CN', 'China'], ['JP', 'Japan'], ['KR', 'Südkorea'], ['SG', 'Singapur'], ['AU', 'Australien'],
+  ['NZ', 'Neuseeland'], ['ZA', 'Südafrika']];
+/** Regions with their own public holidays, coded like the holiday API (ISO 3166-2). Countries not listed have none. */
+const REGIONS = {
+  DE: [['DE-BW', 'Baden-Württemberg'], ['DE-BY', 'Bayern'], ['DE-BE', 'Berlin'], ['DE-BB', 'Brandenburg'], ['DE-HB', 'Bremen'],
+    ['DE-HH', 'Hamburg'], ['DE-HE', 'Hessen'], ['DE-MV', 'Mecklenburg-Vorpommern'], ['DE-NI', 'Niedersachsen'], ['DE-NW', 'Nordrhein-Westfalen'],
+    ['DE-RP', 'Rheinland-Pfalz'], ['DE-SL', 'Saarland'], ['DE-SN', 'Sachsen'], ['DE-ST', 'Sachsen-Anhalt'], ['DE-SH', 'Schleswig-Holstein'], ['DE-TH', 'Thüringen']],
+  AT: [['AT-1', 'Burgenland'], ['AT-2', 'Kärnten'], ['AT-3', 'Niederösterreich'], ['AT-4', 'Oberösterreich'], ['AT-5', 'Salzburg'],
+    ['AT-6', 'Steiermark'], ['AT-7', 'Tirol'], ['AT-8', 'Vorarlberg'], ['AT-9', 'Wien']],
+  CH: [['CH-AG', 'Aargau'], ['CH-AR', 'Appenzell Ausserrhoden'], ['CH-AI', 'Appenzell Innerrhoden'], ['CH-BL', 'Basel-Landschaft'], ['CH-BS', 'Basel-Stadt'],
+    ['CH-BE', 'Bern'], ['CH-FR', 'Freiburg'], ['CH-GE', 'Genf'], ['CH-GL', 'Glarus'], ['CH-GR', 'Graubünden'], ['CH-JU', 'Jura'], ['CH-LU', 'Luzern'],
+    ['CH-NE', 'Neuenburg'], ['CH-NW', 'Nidwalden'], ['CH-OW', 'Obwalden'], ['CH-SH', 'Schaffhausen'], ['CH-SZ', 'Schwyz'], ['CH-SO', 'Solothurn'],
+    ['CH-SG', 'St. Gallen'], ['CH-TI', 'Tessin'], ['CH-TG', 'Thurgau'], ['CH-UR', 'Uri'], ['CH-VD', 'Waadt'], ['CH-VS', 'Wallis'], ['CH-ZG', 'Zug'], ['CH-ZH', 'Zürich']],
+  GB: [['GB-ENG', 'England'], ['GB-NIR', 'Nordirland'], ['GB-SCT', 'Schottland'], ['GB-WLS', 'Wales']],
+  ES: [['ES-AN', 'Andalusien'], ['ES-AR', 'Aragonien'], ['ES-AS', 'Asturien'], ['ES-IB', 'Balearen'], ['ES-PV', 'Baskenland'], ['ES-CN', 'Kanaren'],
+    ['ES-CB', 'Kantabrien'], ['ES-CL', 'Kastilien und León'], ['ES-CM', 'Kastilien-La Mancha'], ['ES-CT', 'Katalonien'], ['ES-CE', 'Ceuta'],
+    ['ES-EX', 'Extremadura'], ['ES-GA', 'Galicien'], ['ES-RI', 'La Rioja'], ['ES-MD', 'Madrid'], ['ES-ML', 'Melilla'], ['ES-MC', 'Murcia'],
+    ['ES-NC', 'Navarra'], ['ES-VC', 'Valencia']],
+  CA: [['CA-AB', 'Alberta'], ['CA-BC', 'British Columbia'], ['CA-MB', 'Manitoba'], ['CA-NB', 'New Brunswick'], ['CA-NL', 'Neufundland und Labrador'],
+    ['CA-NS', 'Nova Scotia'], ['CA-NT', 'Nordwest-Territorien'], ['CA-NU', 'Nunavut'], ['CA-ON', 'Ontario'], ['CA-PE', 'Prince Edward Island'],
+    ['CA-QC', 'Québec'], ['CA-SK', 'Saskatchewan'], ['CA-YT', 'Yukon']],
+  AU: [['AU-ACT', 'Australian Capital Territory'], ['AU-NSW', 'New South Wales'], ['AU-NT', 'Northern Territory'], ['AU-QLD', 'Queensland'],
+    ['AU-SA', 'South Australia'], ['AU-TAS', 'Tasmanien'], ['AU-VIC', 'Victoria'], ['AU-WA', 'Western Australia']],
+  US: [['US-AL', 'Alabama'], ['US-AK', 'Alaska'], ['US-AZ', 'Arizona'], ['US-AR', 'Arkansas'], ['US-CA', 'California'], ['US-CO', 'Colorado'],
+    ['US-CT', 'Connecticut'], ['US-DE', 'Delaware'], ['US-DC', 'District of Columbia'], ['US-FL', 'Florida'], ['US-GA', 'Georgia'], ['US-HI', 'Hawaii'],
+    ['US-ID', 'Idaho'], ['US-IL', 'Illinois'], ['US-IN', 'Indiana'], ['US-IA', 'Iowa'], ['US-KS', 'Kansas'], ['US-KY', 'Kentucky'], ['US-LA', 'Louisiana'],
+    ['US-ME', 'Maine'], ['US-MD', 'Maryland'], ['US-MA', 'Massachusetts'], ['US-MI', 'Michigan'], ['US-MN', 'Minnesota'], ['US-MS', 'Mississippi'],
+    ['US-MO', 'Missouri'], ['US-MT', 'Montana'], ['US-NE', 'Nebraska'], ['US-NV', 'Nevada'], ['US-NH', 'New Hampshire'], ['US-NJ', 'New Jersey'],
+    ['US-NM', 'New Mexico'], ['US-NY', 'New York'], ['US-NC', 'North Carolina'], ['US-ND', 'North Dakota'], ['US-OH', 'Ohio'], ['US-OK', 'Oklahoma'],
+    ['US-OR', 'Oregon'], ['US-PA', 'Pennsylvania'], ['US-RI', 'Rhode Island'], ['US-SC', 'South Carolina'], ['US-SD', 'South Dakota'],
+    ['US-TN', 'Tennessee'], ['US-TX', 'Texas'], ['US-UT', 'Utah'], ['US-VT', 'Vermont'], ['US-VA', 'Virginia'], ['US-WA', 'Washington'],
+    ['US-WV', 'West Virginia'], ['US-WI', 'Wisconsin'], ['US-WY', 'Wyoming']],
+};
+/** Region picker that matches the chosen country; hidden for countries without regional holidays. */
+function regionField(country, value) {
+  const list = REGIONS[country];
+  if (!list) return '<input type="hidden" name="region" value=""><div class="hint">Für dieses Land gibt es keine regionalen Feiertage.</div>';
+  return '<select class="select" name="region" aria-label="Region"><option value="">Ganzes Land (nur landesweite Feiertage)</option>' + list.map(r =>
+    '<option value="' + r[0] + '"' + (r[0] === value ? ' selected' : '') + '>' + esc(r[1]) + '</option>').join('') + '</select>';
+}
+ON.change['country-region'] = el => {
+  const box = el.closest('form').querySelector('[data-region-box]');
+  if (box) box.innerHTML = regionField(el.value, '');
+};
+function countrySelect(value) {
+  return '<select class="select" name="country" data-on-change="country-region">' + COUNTRIES.map(c =>
+    '<option value="' + c[0] + '"' + (c[0] === value ? ' selected' : '') + '>' + c[1] + ' (' + c[0] + ')</option>').join('') + '</select>';
+}
+const AVATAR_COLORS = ['#e16b5c', '#e5894a', '#d9a72a', '#5aa36b', '#3e8ed0', '#7a6ad8', '#c45fa0', '#4aa8a8', '#8a7a6a'];
+
+A['ai-test'] = el => {
+  el.disabled = true;
+  call('ai.test', {}).then(r => { S.aiTest = r; render(); }).catch(err => { S.aiTest = { ok: false, error: err.message }; render(); });
+};
+ON.change['ai-assistant-on'] = el => call('ai.setAssistant', { on: el.checked }).then(r => { S.ai.assistant = r.assistant; render(); }).catch(fail);
+A['ai-test-why'] = () => msgDetails(S.aiTest.error + (S.aiTest.url ? '\n\n' + S.aiTest.url : '') + (/UrlFetchApp|permission|Berechtigung/i.test(S.aiTest.error)
+  ? L('\n\nDie App braucht für KI externe Aufrufe (UrlFetchApp). Ist das in eurer Organisation gesperrt, muss die Google-Workspace-Administration es für dieses Skript freigeben.',
+    '\n\nAI needs external calls (UrlFetchApp). If your organisation blocks them, your Google Workspace admin has to allow them for this script.') : ''), 'Vertex AI');
+/** Admins: switch the assistant, test the connection (model, time, Google's message). */
+function aiAdminRow() {
+  return '<div class="row-btns" style="margin-top:8px"><button class="btn sm" data-action="ai-test">' + icon('sparkle', 'sm') + esc(L('Verbindung testen', 'Test connection')) + '</button>' +
+      '<label class="pe-done"><input type="checkbox" data-on-change="ai-assistant-on"' + (S.ai.assistant !== false ? ' checked' : '') + '> ' + esc(L('Assistent für alle eingeschaltet', 'Assistant on for everybody')) + '</label>' +
+      (S.ai.callsToday ? '<span class="faint">' + esc(L('KI-Aufrufe heute: ', 'AI calls today: ') + S.ai.callsToday) + '</span>' : '') +
+      (S.aiTest ? '<span class="ai-test ' + (S.aiTest.ok ? 'ok' : 'bad') + '" role="status">' + esc((S.aiTest.ok ? L('Gemini antwortet: ', 'Gemini answers: ') + S.aiTest.answer : shortMsg(S.aiTest.error)) +
+        (S.aiTest.model ? ' · ' + S.aiTest.model : '') + (S.aiTest.style ? ' · ' + S.aiTest.style.split(' (')[0] : '') + (S.aiTest.note ? ' · ' + S.aiTest.note : '') + (S.aiTest.ms !== undefined ? ' · ' + S.aiTest.ms + ' ms' : '')) + '</span>' +
+        (S.aiTest.ok ? '' : '<button class="linkbtn" data-action="ai-test-why">' + esc(L('Details', 'Details')) + '</button>') : '') + '</div>';
+}
+function settingsPage() {
+  const me = S.me;
+  const days = String(me.workDays || '').split(',');
+  const t = TODAY();
+  const abs = calEnsure(Shared.addDays(t, -30), Shared.addDays(t, 365), '');
+  const myAbs = abs ? abs.absences.filter(a => a.email === me.email && a.endDate >= t) : null;
+  const profile = '<form data-on-submit="profile" class="settings-grid">' +
+    field('Name', '<input class="input" name="name" value="' + esc(me.name) + '">') +
+    divField('Farbe', '<input type="hidden" name="color" value="' + esc(me.color) + '"><div class="color-row">' + AVATAR_COLORS.map(c =>
+      '<button type="button" class="' + (c === me.color ? 'on' : '') + '" style="background:' + c + '" data-action="pick-color" data-v="' + c + '" title="Farbe wählen" aria-label="Farbe wählen"></button>').join('') + '</div>') +
+    field('Land (für Feiertage)', countrySelect(me.country)) +
+    divField('Bundesland / Region', '<div data-region-box>' + regionField(me.country, me.region || '') + '</div>') +
+    field('Wochenstunden', '<input class="input" type="number" min="0" max="80" step="0.5" name="hoursPerWeek" value="' + esc(me.hoursPerWeek) + '">') +
+    divField('Arbeitstage', '<div class="days">' + [1, 2, 3, 4, 5, 6, 0].map(d => '<label><input type="checkbox" name="workDays" value="' + d + '"' + (days.indexOf(String(d)) >= 0 ? ' checked' : '') + '><span>' + DOW[d] + '</span></label>').join('') + '</div>') +
+    '<div><button class="btn primary" type="submit">Profil speichern</button></div></form>';
+
+  const absHtml = myAbs === null ? skRows(2) : (myAbs.map(a => {
+    const ty = Shared.ABSENCE_TYPES.find(x => x.key === a.type) || Shared.ABSENCE_TYPES[3];
+    return '<div class="li"><span class="chip"><span class="dot" style="background:var(--' + ty.key + ')"></span>' + esc(ty.label) + '</span><span class="grow">' + esc(fmtRange(a.startDate, a.endDate)) +
+      (a.note ? ' <span class="faint">· ' + esc(a.note) + '</span>' : '') + '</span>' +
+      '<button class="btn sm" data-action="absence-edit" data-id="' + esc(a.id) + '">Bearbeiten</button></div>';
+  }).join('') || '<div class="empty-li">Keine geplanten Abwesenheiten.</div>');
+
+  const ai = '<div class="notice">' + (S.ai.enabled
+    ? L('✅ <b>Vertex AI ist aktiv</b> (Modell <code>' + esc(S.ai.model) + '</code>). Briefing, Quick-Add und Aufgaben-Zerlegung nutzen Gemini.',
+      '✅ <b>Vertex AI is on</b> (model <code>' + esc(S.ai.model) + '</code>). Briefing, quick add and task breakdown use Gemini.')
+    : L('<b>Regelbasierter Modus.</b> Alle smarten Funktionen laufen bereits mit Regeln (Quick-Add-Parser, Kapazitäts-Vorschläge, Briefing). ' +
+      'Für KI: im Apps-Script-Projekt unter <i>Projekteinstellungen → Skripteigenschaften</i> den Wert <code>VERTEX_API_KEY</code> setzen ' +
+      '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), oder (Anmeldung über euer Google-Cloud-Projekt) <code>VERTEX_PROJECT_ID</code>; optional <code>VERTEX_MODEL</code>, <code>VERTEX_LOCATION</code>, <code>VERTEX_API_STYLE</code>.',
+    '<b>Rule-based mode.</b> All smart features already work with rules (quick-add parser, capacity suggestions, briefing). ' +
+      'For AI: in the Apps Script project under <i>Project settings → Script properties</i> set <code>VERTEX_API_KEY</code> ' +
+      '(placeholder: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), or (sign-in through your Google Cloud project) <code>VERTEX_PROJECT_ID</code>; optionally <code>VERTEX_MODEL</code>, <code>VERTEX_LOCATION</code>, <code>VERTEX_API_STYLE</code>.')) +
+    (S.me.admin ? aiAdminRow() : '') + '</div>';
+
+  let admin = '';
+  if (me.admin) {
+    admin = '<div class="h2">' + icon('users') + 'Personen <span class="faint" style="font-weight:400">· Admin</span></div><div class="list-plain">' +
+      S.users.slice().sort((a, b) => a.name.localeCompare(b.name)).map(u => '<div class="li">' + avatar(u.email) + '<span class="grow">' + esc(u.name) +
+        ' <span class="faint">' + esc(u.email) + '</span></span><span class="faint num">' + esc((u.region || u.country || '') + ' · ' + u.hoursPerWeek + ' h') + '</span>' +
+        '<button class="btn sm' + (u.role === 'admin' ? ' active' : '') + '" data-action="user-role" data-email="' + esc(u.email) + '"' + (u.email === me.email ? ' disabled' : '') + '>' + (u.role === 'admin' ? 'Admin' : 'Mitglied') + '</button>' +
+        '<button class="btn sm" data-action="user-edit" data-email="' + esc(u.email) + '">Bearbeiten</button></div>').join('') + '</div>' +
+      '<button class="btn sm outline" data-action="user-invite" style="margin-top:8px">' + icon('plus', 'sm') + 'Person hinzufügen</button>' +
+      '<div class="h2">' + icon('globe') + 'Firmen-Feiertage <span class="faint" style="font-weight:400">· zusätzlich zu den gesetzlichen</span></div><div class="list-plain">' +
+      (S.companyHolidays.slice().sort((a, b) => a.date.localeCompare(b.date)).map(h => '<div class="li"><span class="faint nowrap" style="width:110px">' + esc(fmtDate(h.date, { absolute: true })) + '</span>' +
+        '<span class="grow">' + esc(h.name) + ' <span class="faint">' + esc(h.countries.length ? h.countries.join(', ') : 'alle Länder') + '</span></span>' +
+        '<button class="btn sm danger" data-action="ch-remove" data-id="' + esc(h.id) + '">Entfernen</button></div>').join('') || '<div class="empty-li">Keine.</div>') +
+      '</div><button class="btn sm outline" data-action="ch-new" style="margin-top:8px">' + icon('plus', 'sm') + 'Firmen-Feiertag</button>' +
+      '<div class="h2">' + icon('lock') + 'Datensicherung</div>' + backupBox() +
+      '<div class="h2">' + icon('folder') + 'Ablage</div>' + storageBox();
+  }
+  return '<div class="page">' + pageHead('Einstellungen', '') + '<div class="fit-body" data-keep-scroll="fit">' +
+    '<p class="page-sub">Angemeldet über Google als <b>' + esc(me.email) + '</b>. Land, Region, Wochenstunden und Arbeitstage bestimmen deine Kapazität.</p>' +
+    '<div class="h2">' + icon('user') + 'Profil</div>' + profile +
+    '<div class="h2">' + icon('plane') + 'Meine Abwesenheiten</div><div class="list-plain">' + absHtml + '</div>' +
+    '<button class="btn sm outline" data-action="absence-new" style="margin-top:8px">' + icon('plus', 'sm') + 'Abwesenheit eintragen</button>' +
+    '<div class="h2">' + icon('sparkle') + 'Smarte Funktionen</div>' + ai + admin + '</div></div>';
+}
+ON.submit.profile = form => {
+  const v = formValues(form);
+  call('users.save', v).then(u => {
+    form.removeAttribute('data-touched');
+    Object.assign(S.me, u);
+    applyUser(u);
+    S.cap.data = null; calInvalidate(); S.briefing = null;
+    toast('Profil gespeichert');
+    render();
+  }).catch(fail);
+};
+function applyUser(u) {
+  const i = S.users.findIndex(x => x.email === u.email);
+  if (i >= 0) S.users[i] = u; else S.users.push(u);
+}
+/** Admins: last backup, "Jetzt sichern" and how to make it weekly (see Backup.js). */
+function backupBox() {
+  if (S.backup === undefined) {
+    S.backup = null;
+    call('backup.status').then(b => { S.backup = b; render(); }).catch(err => { S.backup = { error: friendlyError(err.message || String(err)) }; render(); });
+  }
+  const b = S.backup;
+  if (!b) return skLines(2);
+  if (b.error) return '<div class="notice">' + esc(b.error) + '</div>';
+  const age = b.last ? Shared.diffDays(b.last.date, TODAY()) : null;
+  const stale = age === null || age > 8;
+  return '<div class="list-plain"><div class="li"><span class="grow">' +
+    (b.last ? 'Letztes Backup: <b>' + esc(fmtDate(b.last.date, { absolute: true })) + '</b> <span class="faint">· ' + b.count + ' von ' + b.keep + ' Ständen</span>'
+      : 'Noch kein Backup.') + '</span>' +
+    (b.url ? '<a class="btn sm" href="' + esc(b.url) + '" target="_blank" rel="noopener">Backups öffnen</a>' : '') +
+    '<button class="btn sm primary" data-action="backup-run"' + (S.backupBusy ? ' disabled' : '') + '>' + (S.backupBusy ? 'Sichert …' : 'Jetzt sichern') + '</button></div></div>' +
+    (stale ? '<div class="banner warn" style="margin-top:8px">' + icon('alert') + '<div>' +
+      L('<b>Wöchentliches Backup einrichten:</b> im Apps-Script-Editor links <i>Trigger</i> → <i>Trigger hinzufügen</i> → Funktion <code>backupDatabase</code>, ' +
+        'Ereignisquelle <i>Zeitgesteuert</i>, <i>Wochen-Timer</i>, z. B. Sonntag 2–3 Uhr → Speichern.',
+      '<b>Set up the weekly backup:</b> in the Apps Script editor, <i>Triggers</i> → <i>Add trigger</i> → function <code>backupDatabase</code>, ' +
+        'event source <i>Time-driven</i>, <i>Week timer</i>, e.g. Sunday 2–3 am → Save.') + '</div></div>' : '');
+}
+A['backup-run'] = () => {
+  S.backupBusy = true;
+  render();
+  call('backup.run').then(r => {
+    S.backupBusy = false;
+    S.backup = undefined;
+    toast('Backup gespeichert: ' + fmtDate(r.date, { absolute: true }));
+    render();
+  }).catch(err => { S.backupBusy = false; render(); fail(err); });
+};
+A['user-role'] = el => {
+  const u = user(el.dataset.email);
+  const toAdmin = u.role !== 'admin';
+  openModal({
+    title: toAdmin ? 'Zum Admin machen?' : 'Admin-Rechte entziehen?',
+    body: '<p style="margin:0">' + esc(u.name + ' (' + u.email + ')') + '</p><p class="hint">' +
+      (toAdmin ? 'Admins sehen alles, verwalten alle Teams und Firmen-Feiertage.' : 'Die Person bleibt Mitglied und behält ihre Teams und Aufgaben.') + '</p>',
+    submitLabel: 'Übernehmen',
+    onSubmit: () => call('users.save', { email: u.email, role: toAdmin ? 'admin' : 'member' }).then(x => { applyUser(x); render(); toast('Änderungen übernommen'); }),
+  });
+};
+function userModal(u) {
+  const isNew = !u;
+  u = u || { country: S.me.country, hoursPerWeek: 40, workDays: '1,2,3,4,5' };
+  const days = String(u.workDays || '').split(',');
+  openModal({
+    title: isNew ? 'Person hinzufügen' : u.name + ' bearbeiten',
+    body: (isNew ? field('E-Mail (Google-Konto)', '<input class="input" name="email" type="email" required>') : '<input type="hidden" name="email" value="' + esc(u.email) + '">') +
+      field('Name', '<input class="input" name="name" value="' + esc(u.name || '') + '">') +
+      '<div class="row">' + field('Land', countrySelect(u.country)) +
+      divField('Region', '<div data-region-box>' + regionField(u.country, u.region || '') + '</div>') + '</div>' +
+      field('Wochenstunden', '<input class="input" type="number" name="hoursPerWeek" min="0" max="80" step="0.5" value="' + esc(u.hoursPerWeek) + '">') +
+      divField('Arbeitstage', '<div class="days">' + [1, 2, 3, 4, 5, 6, 0].map(d => '<label><input type="checkbox" name="workDays" value="' + d + '"' + (days.indexOf(String(d)) >= 0 ? ' checked' : '') + '><span>' + DOW[d] + '</span></label>').join('') + '</div>'),
+    danger: !isNew && u.email !== S.me.email ? { label: 'Deaktivieren', onClick: () => call('users.save', { email: u.email, active: false }).then(() => { closeModal(); reloadAll(); }).catch(fail) } : null,
+    onSubmit: v => call('users.save', v).then(x => { applyUser(x); S.cap.data = null; render(); }),
+  });
+}
+A['user-edit'] = el => userModal(user(el.dataset.email));
+A['user-invite'] = () => userModal(null);
+A['ch-new'] = () => openModal({
+  title: 'Firmen-Feiertag',
+  body: '<div class="row">' + field('Datum', '<input class="input" type="date" name="date" required>') + field('Name', '<input class="input" name="name" required placeholder="z. B. Betriebsausflug">') + '</div>' +
+    field('Nur für Länder (optional, kommagetrennt)', '<input class="input" name="countries" placeholder="z. B. DE, AT">'),
+  onSubmit: v => call('companyHolidays.save', { date: v.date, name: v.name, countries: v.countries.split(/[,\s]+/).filter(Boolean) })
+    .then(h => { S.companyHolidays.push(h); calReload(); }),
+});
+A['ch-remove'] = el => {
+  const h = S.companyHolidays.find(x => x.id === el.dataset.id);
+  if (h) confirmDelete('Firmen-Feiertag „' + h.name + '“ entfernen?', () => call('companyHolidays.remove', { id: h.id })
+    .then(() => { S.companyHolidays = S.companyHolidays.filter(x => x.id !== h.id); calReload(); }));
+};
+</script>

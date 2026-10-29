@@ -1,0 +1,58 @@
+/**
+ * Builds dev/preview.html: the real web app UI plus the real server code
+ * running in the browser against in-memory shims and demo data.
+ * Usage: npm run preview  (then open dev/preview.html, ?user=<email> to switch person)
+ */
+const fs = require('fs');
+const path = require('path');
+const { load, serverFiles, SRC } = require('./load');
+
+const ctx = load({ quiet: true });
+const read = f => fs.readFileSync(path.join(SRC, f), 'utf8');
+
+let html = read('Index.html')
+  // what the server sends: include() (comments on their own lines left out)
+  .replace(/<\?!= include\('(\w+)'\) \?>/g, (m, name) => ctx.include(name))
+  .replace(/<\?!= JSON\.stringify\(String\(userEmail.*?\?>/, () => '(new URLSearchParams(location.search).get("user") || "demo.user@firma.de")')
+  .replace('<?!= clientLib() ?>', () => 'var Shared = (' + ctx.SharedFactory.toString() + ')();');
+
+const server = serverFiles().map(f => '// ---- ' + f + '\n' + read(f)).join('\n');
+const shim = fs.readFileSync(path.join(__dirname, 'gas-shim.js'), 'utf8');
+const runtime = `
+<script>
+// ---- Preview runtime: server code in a private scope, google.script.run shim.
+(function () {
+  ${shim}
+  const params = new URLSearchParams(location.search);
+  globalThis.__GAS_USER__ = params.get('user') || 'demo.user@firma.de';
+  globalThis.__GAS_QUIET__ = true;
+  // the built-in Drive service, as in the real project (images need it)
+  globalThis.Drive = __driveAdvanced();
+  globalThis.__FILES__ = ${JSON.stringify({ AssistantUi: ctx.include('AssistantUi'), JfTasksUi: ctx.include('JfTasksUi'), ImagesUi: ctx.include('ImagesUi') }).replace(/<\/script/gi, '<\\/script')};
+  ${server}
+  setup();
+  PropertiesService.getScriptProperties().setProperty('ALLOW_DEMO_DATA', 'true');
+  seedDemoData();
+  const server = { api: api };
+  function runner(ok, ko) {
+    return new Proxy({}, {
+      get(_, name) {
+        if (name === 'withSuccessHandler') return fn => runner(fn, ko);
+        if (name === 'withFailureHandler') return fn => runner(ok, fn);
+        return function () {
+          const args = arguments;
+          setTimeout(() => {
+            try { const out = server[name].apply(null, args); if (ok) ok(out); } catch (e) { if (ko) ko(e); }
+          }, 60);
+        };
+      },
+    });
+  }
+  window.google = { script: { run: runner(null, null), url: { getLocation: cb => cb({ parameter: Object.fromEntries(params) }) } } };
+})();
+</script>`;
+
+// a function, so that "$$" and "$&" in the code stay as they are
+html = html.replace('<body>', () => '<body>' + runtime);
+fs.writeFileSync(path.join(__dirname, 'preview.html'), html);
+console.log('dev/preview.html written');

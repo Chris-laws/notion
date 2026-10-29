@@ -1,0 +1,1175 @@
+<script>
+/* ==========================================================================
+   Reusable UI: toasts, popover menus, property editors, modals, forms,
+   and the command palette (search + natural-language quick add).
+   ========================================================================== */
+
+/* ---------------- toasts ---------------- */
+/** One short line for a message: no web addresses, no technical reason in brackets, at most about 140 characters. */
+function shortMsg(msg) {
+  let s = String(msg).replace(/\s*\((?:Google|Drive)[^)]*\)\s*$/, '').replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+  if (s.length > 140) s = s.slice(0, 137).replace(/\s+\S*$/, '') + ' …';
+  return s;
+}
+/** The full text of a message (with Google's reason), to read or copy. */
+function msgDetails(msg, title) {
+  openModal({ title: title || L('Details', 'Details'), body: '<pre class="msg-full">' + esc(msg) + '</pre>', submitLabel: L('Schließen', 'Close'), onSubmit: () => closeModal() });
+}
+function toast(msg, opts) {
+  opts = opts || {};
+  const el = document.createElement('div');
+  el.className = 'toast' + (opts.error ? ' err' : opts.warn ? ' warn' : '');
+  if (opts.error) el.setAttribute('role', 'alert');
+  const short = shortMsg(msg);
+  // long or technical messages: one short line, the rest behind "Details"
+  const actions = (opts.actions || (opts.action ? [opts.action] : [])).concat(short !== String(msg) ? [{ label: L('Details', 'Details'), fn: () => msgDetails(msg) }] : []);
+  el.innerHTML = '<span>' + esc(short) + '</span>' + actions.map(a => '<button>' + esc(a.label) + '</button>').join('');
+  $$('button', el).forEach((b, i) => { b.onclick = () => { actions[i].fn(); el.remove(); }; });
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), opts.duration || (opts.error || opts.warn ? 8000 : 3800));
+}
+
+/* ---------------- popovers ---------------- */
+let popOutside = null;
+function openPop(anchor, html, mount) {
+  closePop();
+  const root = $('#popover-root');
+  root.innerHTML = '<div class="pop" role="dialog">' + html + '</div>';
+  const pop = root.firstChild;
+  const r = anchor.getBoundingClientRect();
+  const w = Math.max(pop.offsetWidth, 220);
+  const h = pop.offsetHeight;
+  const left = Math.min(r.left, window.innerWidth - w - 8);
+  let top = r.bottom + 4;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 4);
+  pop.style.left = Math.max(8, left) + 'px';
+  pop.style.top = top + 'px';
+  popOutside = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) closePop(); };
+  setTimeout(() => document.addEventListener('mousedown', popOutside), 0);
+  if (mount) mount(pop);
+  const first = pop.querySelector('input');
+  if (first) first.focus();
+  return pop;
+}
+function closePop() {
+  const root = $('#popover-root');
+  if (!root.children.length) return false;
+  root.innerHTML = '';
+  document.removeEventListener('mousedown', popOutside);
+  return true;
+}
+function closeTopLayer() {
+  if ($('#palette-root').children.length) { closePalette(); return true; }
+  if (closePop()) return true;
+  if (closePeopleModal()) return true;
+  if ($('#modal-root').children.length) { closeModal(); return true; }
+  // the assistant panel (loaded on first use)
+  if ($('#asst-root .asst') && typeof asstClose === 'function') { asstClose(); return true; }
+  return false;
+}
+
+/**
+ * Generic option menu.
+ * items: [{ value, html, search }], opts: { multi, selected:[], search, create, onPick(value, selected) }
+ */
+function openMenu(anchor, items, opts) {
+  let selected = (opts.selected || []).slice();
+  let query = '';
+  let hover = 0;
+  const visible = () => {
+    const q = query.trim().toLowerCase();
+    let list = items.filter(it => !q || (it.search || '').toLowerCase().indexOf(q) >= 0);
+    if (opts.invite && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(q) && !items.some(it => (it.search || '').toLowerCase().indexOf(q) >= 0)) {
+      list = list.concat([{ value: q, html: avatar(q) + '<span>' + esc(q) + ' <span class="faint">· per E-Mail einladen</span></span>', create: true, invite: true }]);
+    }
+    if (opts.create && q && !items.some(it => (it.search || '').toLowerCase() === q)) {
+      list = list.concat([{ value: query.trim(), html: icon('plus', 'sm') + ' „' + esc(query.trim()) + '“ hinzufügen', create: true }]);
+    }
+    return list;
+  };
+  const draw = pop => {
+    const list = visible();
+    hover = Math.min(hover, Math.max(0, list.length - 1));
+    $('.pop-list', pop).innerHTML = list.map((it, i) => it.label
+      ? '<div class="pop-label">' + esc(it.label) + '</div>'
+      : '<button class="pop-item' + (i === hover ? ' hover' : '') + '" data-i="' + i + '">' + it.html +
+        (selected.indexOf(it.value) >= 0 ? '<span class="tick">' + icon('check', 'sm') + '</span>' : '') +
+        (it.deletable && opts.onDelete ? '<span class="pop-del" data-del="' + i + '" title="Löschen">' + icon('trash', 'sm') + '</span>' : '') + '</button>').join('') ||
+      '<div class="faint" style="padding:8px">Keine Treffer</div>';
+  };
+  const pick = (pop, it) => {
+    if (!it || it.label) return;
+    if (opts.multi) {
+      const i = selected.indexOf(it.value);
+      if (i >= 0) selected.splice(i, 1); else selected.push(it.value);
+      if (it.create) {
+        if (it.invite) {
+          if (!S.users.some(u => u.email === it.value)) S.users.push(user(it.value));
+          items.push({ value: it.value, html: avatar(it.value) + '<span>' + esc(it.value) + '</span>', search: it.value });
+        } else items.push({ value: it.value, html: tagChip(it.value), search: it.value });
+      }
+      if (query) { query = ''; hover = 0; const si = $('.pop-search', pop); if (si) si.value = ''; }
+      // onPick may answer with the new selection (e.g. "Ganzes Team" replaces the picks)
+      const next = opts.onPick(it.value, selected.slice());
+      if (Array.isArray(next)) selected = next.slice();
+      draw(pop);
+    } else {
+      closePop();
+      opts.onPick(it.value, [it.value]);
+    }
+  };
+  openPop(anchor,
+    (opts.search === true || opts.search !== false && items.length > 6 || opts.create || opts.invite ? '<input class="pop-search" placeholder="' + esc(opts.placeholder || 'Suchen…') + '">' : '') +
+    '<div class="pop-list"></div>',
+    pop => {
+      draw(pop);
+      pop.addEventListener('click', e => {
+        const del = e.target.closest('[data-del]');
+        if (del) {
+          const it = visible()[Number(del.dataset.del)];
+          items.splice(items.indexOf(it), 1);
+          opts.onDelete(it.value);
+          draw(pop);
+          return;
+        }
+        const b = e.target.closest('.pop-item');
+        if (b) pick(pop, visible()[Number(b.dataset.i)]);
+      });
+      const input = $('.pop-search', pop);
+      const keys = e => {
+        const list = visible();
+        if (e.key === 'ArrowDown') { hover = Math.min(list.length - 1, hover + 1); draw(pop); e.preventDefault(); }
+        if (e.key === 'ArrowUp') { hover = Math.max(0, hover - 1); draw(pop); e.preventDefault(); }
+        if (e.key === 'Enter') { pick(pop, list[hover]); e.preventDefault(); }
+      };
+      if (input) {
+        input.addEventListener('input', () => { query = input.value; hover = 0; draw(pop); });
+        input.addEventListener('keydown', keys);
+      }
+    });
+}
+
+/* ---------------- people manager: one dialog for every place where people are added ---------------- */
+/**
+ * "Mitglieder verwalten": search on top (name or e-mail, hits after a few letters), the current
+ * people below with avatar, name, e-mail, role and a remove button, hits with "Hinzufügen",
+ * invite by e-mail. Opens above other dialogs (own layer), Esc closes it first.
+ * o: {
+ *   title, sub, selected: [emails], onChange(list) (called once with the result on "Übernehmen"),
+ *   single: pick exactly one (closes on pick), roles: email => label, keep: email (or list) that cannot be removed,
+ *   lead: { is(email), can, set(email, on) -> Promise } a "Lead" / "Mitglied" chip for saved members, a switch if can,
+ *   prefer: [emails] suggested first, all: { label, people } (empty list = all of these),
+ *   extra: [{ value, name, icon }] special entries (filters), min: 1 = at least one person,
+ *   addLabel, emptyText, invite (default true)
+ * }
+ */
+let PM = null;
+function peopleModal(o) {
+  closePop();
+  PM = { o: o, list: (o.selected || []).slice(), orig: (o.selected || []).slice(), q: '', ret: document.activeElement, undo: null, warned: false };
+  const root = $('#people-root');
+  root.innerHTML = '<div class="pm-bg" data-action="pm-bg"><div class="pm" role="dialog" aria-modal="true" aria-labelledby="pm-title">' +
+    '<div class="pm-top"><div><div id="pm-title" class="pm-title">' + esc(o.title || 'Mitglieder verwalten') + '</div>' +
+    (o.sub ? '<div class="pm-sub">' + esc(o.sub) + '</div>' : '') + '</div>' +
+    '<button type="button" class="icon-btn" data-action="pm-close" aria-label="Schließen" title="Schließen (Esc)">' + icon('x') + '</button></div>' +
+    '<label class="pm-search">' + icon('search', 'sm') + '<input type="search" placeholder="' + esc(o.invite === false ? 'Name oder E-Mail suchen …' : 'Name oder E-Mail suchen – oder E-Mail einladen …') + '" autocomplete="off" aria-label="Person suchen"></label>' +
+    '<div class="pm-body" role="list"></div>' +
+    '<div class="pm-foot"></div></div></div>';
+  const m = $('.pm', root);
+  const input = $('input', m);
+  input.addEventListener('input', () => { PM.q = input.value; pmDraw(); });
+  input.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const first = $('.pm-hit [data-action="pm-add"]', m);
+    if (first) first.click();
+  });
+  m.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const f = $$('button:not([disabled]), input', m).filter(x => x.offsetParent);
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
+  pmDraw();
+  input.focus();
+}
+function pmEffective() {
+  const o = PM.o;
+  return !PM.list.length && o.all ? o.all.people.slice() : PM.list.slice();
+}
+function pmName(e) {
+  const x = (PM.o.extra || []).find(i => i.value === e);
+  return x ? x.name : user(e).name;
+}
+/** The role of a member: "Lead" / "Mitglied" (a switch for leads), otherwise the label from o.roles. */
+function pmRole(e, kind, x) {
+  const o = PM.o;
+  if (x) return '';
+  // only people already saved (for "ganzes Team" the whole team) can change their role right away
+  const saved = !PM.orig.length && o.all ? o.all.people : PM.orig;
+  if (kind === 'member' && o.lead && saved.indexOf(e) >= 0) return pmLeadChip(e, o.lead);
+  const role = o.roles ? o.roles(e) : '';
+  return role ? '<span class="chip soft pm-role">' + esc(role) + '</span>' : '';
+}
+function pmLeadChip(e, lr) {
+  const on = lr.is(e);
+  const label = on ? 'Lead' : L('Mitglied', 'Member');
+  if (!lr.can) return '<span class="chip soft pm-role' + (on ? ' on' : '') + '">' + label + '</span>';
+  return '<button type="button" class="chip soft pm-role pm-lead' + (on ? ' on' : '') + '" data-action="pm-role" data-v="' + esc(e) + '" aria-pressed="' + on + '"' +
+    ' title="' + esc(on ? L('Lead-Rolle entziehen', 'Take the lead role away') : L('Zum Lead machen', 'Make lead')) + '">' + label + '</button>';
+}
+A['pm-role'] = el => {
+  const lr = PM && PM.o.lead;
+  if (!lr) return;
+  el.disabled = true;
+  lr.set(el.dataset.v, !lr.is(el.dataset.v)).then(() => pmDraw()).catch(err => { el.disabled = false; fail(err); });
+};
+function pmRow(e, kind) {
+  const o = PM.o;
+  const x = (o.extra || []).find(i => i.value === e);
+  const u = user(e);
+  const known = x || S.users.some(v => v.email === e);
+  const mine = pmEffective().indexOf(e) >= 0;
+  const av = x ? '<span class="pm-xic">' + icon(x.icon || 'user', 'sm') + '</span>' : avatar(e);
+  const text = '<span class="pm-who"><b>' + esc(x ? x.name : u.name) + (e === S.me.email ? ' <span class="faint">(ich)</span>' : '') + '</b>' +
+    (x ? '' : '<small>' + esc(e) + (known ? '' : ' · wird eingeladen') + '</small>') + '</span>';
+  let btn;
+  if (kind === 'member') {
+    btn = o.single ? '<span class="chip soft">Ausgewählt</span>'
+      : [].concat(o.keep || []).indexOf(e) >= 0 ? '<span class="pm-keep" title="' + esc(o.keepHint || 'Kann nicht entfernt werden') + '">' + icon('lock', 'sm') + '</span>'
+      : '<button type="button" class="icon-btn pm-del" data-action="pm-remove" data-v="' + esc(e) + '" title="Entfernen" aria-label="' + esc(pmName(e) + ' entfernen') + '">' + icon('trash', 'sm') + '</button>';
+  } else if (mine) {
+    btn = '<span class="pm-in">' + icon('check', 'sm') + (o.single ? 'Ausgewählt' : 'Dabei') + '</span>';
+  } else {
+    btn = '<button type="button" class="btn sm ' + (kind === 'invite' ? 'outline' : 'primary') + '" data-action="pm-add" data-v="' + esc(e) + '">' +
+      icon(kind === 'invite' ? 'mail' : o.single ? 'check' : 'plus', 'sm') + (kind === 'invite' ? 'Einladen' : o.single ? 'Auswählen' : (o.addLabel || 'Hinzufügen')) + '</button>';
+  }
+  return '<div class="pm-row' + (kind !== 'member' ? ' pm-hit' : '') + '" role="listitem">' + av + text + pmRole(e, kind, x) + btn + '</div>';
+}
+function pmDraw() {
+  if (!PM) return;
+  const o = PM.o;
+  const m = $('#people-root .pm');
+  if (!m) return;
+  const q = PM.q.trim().toLowerCase();
+  const eff = pmEffective();
+  const prefer = o.prefer || [];
+  const extras = (o.extra || []);
+  let html = '';
+  if (q) {
+    const hits = extras.filter(x => x.name.toLowerCase().indexOf(q) >= 0).map(x => x.value)
+      .concat(S.users.filter(u => (u.name + ' ' + u.email).toLowerCase().indexOf(q) >= 0)
+        .sort((a, b) => (prefer.indexOf(b.email) >= 0) - (prefer.indexOf(a.email) >= 0) || a.name.localeCompare(b.name)).map(u => u.email));
+    const isMail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(q);
+    html += '<div class="pm-sec">Treffer <span class="n">' + hits.length + '</span></div>' +
+      (hits.length ? hits.slice(0, 40).map(e => pmRow(e, 'hit')).join('') : '') +
+      (o.invite !== false && !o.single && isMail && !S.users.some(u => u.email === q) ? pmRow(q, 'invite') : '') +
+      (!hits.length && !(isMail && o.invite !== false && !o.single) ? '<div class="pm-empty">Niemand gefunden.' + (o.invite === false || o.single ? '' : ' Gib eine vollständige E-Mail-Adresse ein, um die Person einzuladen.') + '</div>' : '');
+  } else {
+    const sugg = extras.map(x => x.value).filter(v => eff.indexOf(v) < 0)
+      .concat(prefer.filter(e => eff.indexOf(e) < 0)).slice(0, 8);
+    if (sugg.length) html += '<div class="pm-sec">Vorschläge</div>' + sugg.map(e => pmRow(e, 'hit')).join('');
+  }
+  if (o.all) {
+    const whole = !PM.list.length;
+    html += '<div class="pm-allbar' + (whole ? ' on' : '') + '">' + icon('users', 'sm') + '<div><b>' + esc(o.all.label) + '</b><small>' +
+      (whole ? 'Alle Mitglieder gehören automatisch dazu, auch künftige. Wer hinzugefügt oder entfernt wird, macht daraus eine feste Auswahl.'
+        : 'Feste Auswahl: nur die Personen unten gehören dazu.') + '</small></div>' +
+      (whole ? '' : '<button type="button" class="btn sm outline" data-action="pm-all">Wieder ganzes Team</button>') + '</div>';
+  }
+  const members = eff.slice().sort((a, b) => (a === S.me.email ? -1 : b === S.me.email ? 1 : 0) || pmName(a).localeCompare(pmName(b)));
+  html += '<div class="pm-sec">' + (o.single ? 'Ausgewählt' : 'Aktuelle Mitglieder') + ' <span class="n">' + members.length + '</span></div>' +
+    (members.length ? members.map(e => pmRow(e, 'member')).join('') : '<div class="pm-empty">' + esc(o.emptyText || 'Noch niemand. Suche oben nach Namen oder E-Mail.') + '</div>');
+  $('.pm-body', m).innerHTML = html;
+  $('.pm-foot', m).innerHTML = pmFoot(members.length);
+}
+/** Changes against the list the dialog was opened with (added + removed people). */
+function pmChanges() {
+  const now = pmEffective();
+  const was = !PM.orig.length && PM.o.all ? PM.o.all.people : PM.orig;
+  const diff = now.filter(e => was.indexOf(e) < 0).length + was.filter(e => now.indexOf(e) < 0).length;
+  // "whole team" <-> the same people picked one by one is a change too
+  return diff || (!PM.list.length !== !PM.orig.length ? 1 : 0);
+}
+function pmFoot(count) {
+  if (PM.o.single) return '<button type="button" class="btn" data-action="pm-close">Schließen</button>';
+  const n = pmChanges();
+  const people = count === 1 ? '1 Person' : count + ' Personen';
+  const pending = n === 1 ? '1 Änderung' : n + ' Änderungen';
+  if (PM.warned && n) {
+    return '<span class="pm-count pm-warn" role="alert">' + icon('alert', 'sm') + 'Ungespeicherte Änderungen: übernehmen oder verwerfen?</span>' +
+      '<button type="button" class="btn" data-action="pm-discard">Verwerfen</button>' +
+      '<button type="button" class="btn primary" data-action="pm-apply">Übernehmen</button>';
+  }
+  return '<span class="pm-count"><span>' + people + '</span>' + (n ? ' · <b>' + pending + '</b>' : '') + '</span>' +
+    '<button type="button" class="btn" data-action="pm-discard">Abbrechen</button>' +
+    '<button type="button" class="btn primary" data-action="pm-apply"' + (n ? '' : ' disabled') + '>Übernehmen</button>';
+}
+/** Changes the list in the dialog only; saving happens with "Übernehmen". */
+function pmCommit(list) {
+  PM.list = list;
+  PM.warned = false;
+  pmDraw();
+}
+A['pm-add'] = el => {
+  const e = el.dataset.v;
+  const o = PM.o;
+  if (!S.users.some(u => u.email === e) && !(o.extra || []).some(x => x.value === e)) S.users.push(user(e));
+  if (o.single) { const cb = o.onChange; closePeopleModal(true); if (cb) cb([e]); return; }
+  const before = PM.list.slice();
+  const base = pmEffective();
+  if (base.indexOf(e) < 0) base.push(e);
+  pmCommit(base);
+  PM.undo = before;
+  // ready for the next name
+  const input = $('#people-root input');
+  if (input && PM.q) { input.value = ''; PM.q = ''; pmDraw(); }
+  if (input) input.focus();
+};
+A['pm-remove'] = el => {
+  const e = el.dataset.v;
+  const o = PM.o;
+  const before = PM.list.slice();
+  const next = pmEffective().filter(x => x !== e);
+  if (o.min && next.length < o.min) { toast('Mindestens eine Person muss übrig bleiben.', { warn: true }); return; }
+  pmCommit(next);
+  PM.undo = before;
+};
+A['pm-all'] = () => pmCommit([]);
+A['pm-apply'] = () => {
+  const cb = PM.o.onChange;
+  const list = PM.list.slice();
+  const changed = pmChanges();
+  closePeopleModal(true);
+  if (cb && changed) cb(list);
+};
+A['pm-discard'] = () => closePeopleModal(true);
+A['pm-close'] = () => closePeopleModal();
+A['pm-bg'] = (el, e) => { if (e.target === el) closePeopleModal(); };
+/** Closes the dialog; with unsaved changes the first attempt only warns (force: close anyway, changes dropped). */
+function closePeopleModal(force) {
+  if (!PM) return false;
+  if (!force && !PM.o.single && pmChanges()) {
+    PM.warned = true;
+    pmDraw();
+    return true;
+  }
+  const ret = PM.ret;
+  const done = PM.o.onClose;
+  PM = null;
+  $('#people-root').innerHTML = '';
+  if (done) done();
+  if (ret && document.contains(ret) && ret.focus) ret.focus();
+  return true;
+}
+
+/* ---------------- property editors ---------------- */
+function relevantPeople(t) {
+  let emails = [];
+  const p = t.projectId && project(t.projectId);
+  if (p) emails = emails.concat(projectMembers(p));
+  (t.teams || []).forEach(id => { if (team(id)) emails = emails.concat(teamMembers(team(id))); });
+  return emails;
+}
+
+const PROP_EDITORS = {
+  status(anchor, t, save) {
+    openMenu(anchor, Shared.STATUSES.map(s => ({ value: s.key, html: statusTag(s.key), search: s.label })),
+      { selected: [t.status], search: false, onPick: v => save({ status: v }) });
+  },
+  priority(anchor, t, save) {
+    openMenu(anchor, Shared.PRIORITIES.map(p => ({ value: p.key, html: prioTag(p.key), search: p.label }))
+      .concat([{ value: '', html: '<span class="faint">Keine Priorität</span>', search: 'keine' }]),
+    { selected: [t.priority], search: false, onPick: v => save({ priority: v }) });
+  },
+  assignees(anchor, t, save) {
+    peopleModal({ title: 'Zuständige verwalten', sub: t.title, selected: t.assignees, prefer: relevantPeople(t), addLabel: 'Zuweisen',
+      emptyText: 'Noch niemand zuständig.', onChange: list => save({ assignees: list }) });
+  },
+  teams(anchor, t, save) {
+    openMenu(anchor, S.teams.map(x => ({ value: x.id, html: teamChip(x), search: x.name })),
+      { multi: true, selected: t.teams, onPick: (v, sel) => save({ teams: sel }) });
+  },
+  projectId(anchor, t, save) {
+    const items = [{ value: '', html: '<span class="faint">Kein Projekt</span>', search: 'kein' }];
+    S.teams.forEach(tm => {
+      const ps = S.projects.filter(p => p.teamId === tm.id);
+      if (!ps.length) return;
+      items.push({ label: (tm.icon || '') + ' ' + tm.name, search: '' });
+      ps.forEach(p => items.push({ value: p.id, html: projectChip(p), search: p.name + ' ' + tm.name }));
+    });
+    openMenu(anchor, items, { selected: [t.projectId], search: true, onPick: v => save({ projectId: v }) });
+  },
+  recurrence(anchor, t, save) {
+    openMenu(anchor, Shared.RECURRENCES.map(r => ({ value: r.key, html: (r.key ? icon('repeat', 'sm') : '') + '<span>' + esc(r.label) + '</span>', search: r.label })),
+      { selected: [t.recurrence], search: false, onPick: v => save({ recurrence: v }) });
+  },
+  tags(anchor, t, save) {
+    openMenu(anchor, allTags().map(x => ({ value: x, html: tagChip(x), search: x })), {
+      multi: true, create: true, selected: t.tags, placeholder: 'Tag suchen oder neu anlegen…',
+      onPick: (v, sel) => save({ tags: sel }),
+    });
+  },
+  /**
+   * Progress: "Automatisch" (from status and sub-tasks, stored as 0) or "Manuell" (1-100 %),
+   * set with a slider in 1 % steps (Shift + arrow: 10) or typed into the number field.
+   */
+  progress(anchor, t, save) {
+    const manual = t.progress > 0;
+    const v = Math.max(1, progressOf(t));
+    const seg = (mode, label, on) => '<button type="button" class="seg-b' + (on ? ' on' : '') + '" data-mode="' + mode + '" aria-pressed="' + on + '">' + label + '</button>';
+    openPop(anchor,
+      '<div class="prog-ed"><div class="seg" role="group" aria-label="Fortschritt">' + seg('auto', 'Automatisch', !manual) + seg('manual', 'Manuell', manual) + '</div>' +
+      (manual
+        ? '<div class="prog-row"><input type="range" min="1" max="100" step="1" value="' + v + '" aria-label="Fortschritt in Prozent">' +
+          '<label class="prog-num"><input type="number" min="0" max="100" step="1" value="' + v + '" aria-label="Fortschritt in Prozent eingeben"><span>%</span></label></div>' +
+          '<div class="hint">0 % schaltet auf automatisch zurück.</div>'
+        : '<div class="hint">' + progressOf(t) + ' % – berechnet aus Status und Unteraufgaben.</div>') + '</div>',
+      pop => {
+        const set = n => {
+          const p = Math.round(Number(n));
+          if (!isFinite(p)) return;
+          save({ progress: Math.min(100, Math.max(0, p)) });
+        };
+        $('[data-mode="auto"]', pop).addEventListener('click', () => { if (manual) { closePop(); save({ progress: 0 }); } });
+        $('[data-mode="manual"]', pop).addEventListener('click', () => { if (!manual) { closePop(); save({ progress: v }); } });
+        if (!manual) return;
+        const r = $('input[type=range]', pop);
+        const num = $('input[type=number]', pop);
+        r.addEventListener('input', () => { num.value = r.value; });
+        r.addEventListener('change', () => set(r.value));
+        r.addEventListener('keydown', e => {
+          if (!e.shiftKey || ['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'].indexOf(e.key) < 0) return;
+          e.preventDefault();
+          const next = Math.min(100, Math.max(1, Number(r.value) + (e.key === 'ArrowUp' || e.key === 'ArrowRight' ? 10 : -10)));
+          r.value = num.value = next;
+          set(next);
+        });
+        num.addEventListener('input', () => { if (num.value !== '') r.value = Math.min(100, Math.max(1, Number(num.value))); });
+        num.addEventListener('change', () => set(num.value));
+        num.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); set(num.value); } });
+      });
+  },
+  dueDate(anchor, t, save) { dateEditor(anchor, t.dueDate, v => save({ dueDate: v })); },
+  startDate(anchor, t, save) { dateEditor(anchor, t.startDate, v => save({ startDate: v })); },
+  estimate(anchor, t, save) {
+    openPop(anchor,
+      '<div style="padding:4px"><input class="input" type="number" min="0" step="0.25" value="' + esc(t.estimate || '') + '" placeholder="Stunden"></div>' +
+      '<div class="pop-quick">' + [0.5, 1, 2, 4, 8, 16].map(h => '<button class="btn sm outline" data-h="' + h + '">' + fmtHours(h) + '</button>').join('') + '</div>',
+      pop => {
+        const input = $('input', pop);
+        const done = v => { closePop(); save({ estimate: Number(v) || 0 }); };
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') done(input.value); });
+        pop.addEventListener('click', e => { const b = e.target.closest('[data-h]'); if (b) done(b.dataset.h); });
+        input.addEventListener('change', () => save({ estimate: Number(input.value) || 0 }));
+      });
+  },
+};
+function dateEditor(anchor, value, onSave) {
+  const t = TODAY();
+  const quick = [
+    ['Heute', t], ['Morgen', Shared.addDays(t, 1)], ['Nächster Mo', Shared.addDays(Shared.mondayOf(t), 7)],
+    ['In 1 Woche', Shared.addDays(t, 7)],
+  ];
+  openPop(anchor,
+    '<div style="padding:4px"><input class="input" type="date" value="' + esc(value || '') + '"></div>' +
+    '<div class="pop-quick">' + quick.map(q => '<button class="btn sm outline" data-d="' + q[1] + '">' + q[0] + '</button>').join('') + '</div>' +
+    (value ? '<div class="pop-sep"></div><button class="pop-item" data-d="">' + icon('x', 'sm') + 'Datum entfernen</button>' : ''),
+    pop => {
+      const input = $('input', pop);
+      input.addEventListener('change', () => { if (Shared.isDate(input.value) || !input.value) { onSave(input.value); } });
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') closePop(); });
+      pop.addEventListener('click', e => {
+        const b = e.target.closest('[data-d]');
+        if (b) { closePop(); onSave(b.dataset.d); }
+      });
+    });
+}
+/** data-action="prop" data-id data-field — used by peek, table and cards. */
+A.prop = (el, e) => {
+  e.stopPropagation();
+  // in the task panel changes wait for "Übernehmen"; in tables and cards they save at once
+  const inPeek = el.closest('#peek') && S.peekId === el.dataset.id;
+  const t = inPeek ? peekTask() : task(el.dataset.id);
+  if (!t) return;
+  PROP_EDITORS[el.dataset.field](el, t, patch => (inPeek ? stageTask(t.id, patch) : patchTask(t.id, patch, { keepPeek: false })));
+};
+
+/* ---------------- modals & forms ---------------- */
+let modalSubmit = null;
+let modalReturn = null;
+let modalDirty = false;
+function openModal(o) {
+  closePop();
+  modalSubmit = o.onSubmit;
+  if (!$('#modal-root').children.length) modalReturn = document.activeElement;
+  modalDirty = false;
+  $('#modal-root').innerHTML =
+    '<div class="modal-bg" data-action="modal-bg"><form class="modal' + (o.wide ? ' wide' : '') + '" data-on-submit="modal" autocomplete="off" role="dialog" aria-modal="true" aria-labelledby="modal-title">' +
+    '<div class="modal-head"><span id="modal-title">' + esc(o.title) + '</span><button type="button" class="icon-btn" data-action="modal-close" aria-label="Schließen" title="Schließen (Esc)">' + icon('x') + '</button></div>' +
+    '<div class="modal-body">' + o.body + '</div>' +
+    '<div class="modal-foot">' + (o.danger ? '<button type="button" class="btn danger left" data-action="modal-danger">' + esc(o.danger.label) + '</button>' : '') +
+    (o.noCancel ? '' : '<button type="button" class="btn" data-action="modal-close">Abbrechen</button>') +
+    '<button type="submit" class="btn primary">' + esc(o.submitLabel || 'Speichern') + '</button></div></form></div>';
+  A['modal-danger'] = () => o.danger && o.danger.onClick();
+  const m = $('#modal-root .modal');
+  const first = $('input:not([type=hidden]):not([type=checkbox]):not([disabled]), textarea, select', m) || $('.modal-foot button[type=submit]', m);
+  if (first) first.focus();
+  m.addEventListener('input', () => { modalDirty = true; });
+  // keep Tab inside the dialog
+  m.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const f = $$('button:not([disabled]), input:not([type=hidden]):not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])', m).filter(x => x.offsetParent);
+    if (!f.length) return;
+    if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+    else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+  });
+  if (o.mount) o.mount(m);
+}
+function closeModal() {
+  $('#modal-root').innerHTML = '';
+  modalSubmit = null;
+  // focus goes back to where the user was
+  if (modalReturn && document.contains(modalReturn) && modalReturn.focus) modalReturn.focus();
+  modalReturn = null;
+}
+A['modal-close'] = () => closeModal();
+// a click next to the dialog closes it only when nothing was typed yet, so input is never lost by accident
+A['modal-bg'] = (el, e) => {
+  if (e.target !== el) return;
+  if (!modalDirty) { closeModal(); return; }
+  const m = $('.modal', el);
+  m.classList.remove('nudge'); void m.offsetWidth; m.classList.add('nudge');
+};
+ON.submit.modal = form => {
+  if (!modalSubmit) return;
+  const btn = $('button[type=submit]', form);
+  btn.disabled = true;
+  btn.classList.add('loading');
+  const done = () => { btn.disabled = false; btn.classList.remove('loading'); };
+  Promise.resolve(modalSubmit(formValues(form))).then(ok => { if (ok !== false) { modalDirty = false; closeModal(); } else done(); })
+    .catch(err => { done(); fail(err); });
+};
+function formValues(form) {
+  const out = {};
+  $$('[name]', form).forEach(el => {
+    if (el.type === 'checkbox') {
+      if (!out[el.name]) out[el.name] = [];
+      if (el.checked) out[el.name].push(el.value);
+    } else if (el.type === 'radio') {
+      if (el.checked) out[el.name] = el.value;
+    } else out[el.name] = el.value;
+  });
+  return out;
+}
+const COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
+/** Colour row. opts.palette limits the choice, opts.taken = { colour: team name } shows those crossed out and not selectable. */
+function colorField(value, opts) {
+  opts = opts || {};
+  const palette = opts.palette || COLORS;
+  const taken = opts.taken || {};
+  value = value || palette.find(c => !taken[c]) || palette[0];
+  return '<input type="hidden" name="color" value="' + esc(value) + '"><div class="color-row">' +
+    palette.map(c => taken[c] && c !== value
+      ? '<button type="button" class="taken" style="background:var(--c-' + c + ')" disabled title="' + esc('Bereits vergeben an „' + taken[c] + '“') + '" aria-label="' + esc('Bereits vergeben an „' + taken[c] + '“') + '"></button>'
+      : '<button type="button" class="' + (c === value ? 'on' : '') + '" style="background:var(--c-' + c + ')" data-action="pick-color" data-v="' + c + '" title="Farbe wählen" aria-label="Farbe wählen"></button>').join('') + '</div>';
+}
+/** Colours of teams that share people with `people` (except the team itself): those cannot be used again. */
+function takenTeamColors(people, teamId) {
+  const taken = {};
+  S.teams.forEach(t => { if (t.id !== teamId && teamMembers(t).some(e => people.indexOf(e) >= 0)) taken[t.color] = t.name; });
+  return taken;
+}
+A['pick-color'] = el => {
+  const row = el.parentNode;
+  const form = el.closest('#view form');
+  if (form) form.setAttribute('data-touched', '1');
+  $$('button', row).forEach(b => b.classList.toggle('on', b === el));
+  row.previousElementSibling.value = el.dataset.v;
+};
+/**
+ * The one people picker for forms: chips plus "+ Person hinzufügen", which opens the
+ * directory search (a few letters are enough, several at once, invite by e-mail).
+ * The value is a comma separated list in a hidden input; collectPeople() reads it.
+ * opts: single (exactly one person), empty (text shown when nobody is picked),
+ * prefer (emails listed first), add (button label), hint.
+ */
+function peoplePicker(name, selected, opts) {
+  opts = opts || {};
+  const sel = (selected || []).filter(Boolean);
+  const add = opts.add || (opts.single ? 'Person wählen' : 'Person hinzufügen');
+  return '<div class="pp-field" data-pp="' + esc(name) + '"' + (opts.single ? ' data-single="1"' : '') +
+    (opts.empty ? ' data-empty="' + esc(opts.empty) + '"' : '') + (opts.prefer ? ' data-prefer="' + esc(opts.prefer.join(',')) + '"' : '') +
+    ' data-add="' + esc(add) + '"><input type="hidden" name="' + esc(name) + '" value="' + esc(sel.join(',')) + '">' +
+    '<div class="nt-people">' + ppChips(sel, opts.single, opts.empty, add) + '</div></div>' +
+    (opts.hint ? '<div class="hint" style="margin-top:4px">' + esc(opts.hint) + '</div>' : '');
+}
+function ppChips(sel, single, empty, add) {
+  return (sel.length ? sel.map(e => '<span class="nt-chip">' + avatar(e) + '<span>' + esc(user(e).name) + (e === S.me.email ? ' (ich)' : '') + '</span>' +
+    (single ? '' : '<button type="button" class="nt-x" data-action="pp-remove" data-v="' + esc(e) + '" aria-label="Entfernen" title="Entfernen">' + icon('x', 'sm') + '</button>') + '</span>').join('')
+    : (empty ? '<span class="pp-empty">' + icon('users', 'sm') + esc(empty) + '</span>' : '')) +
+    '<button type="button" class="nt-add" data-action="pp-add" title="Name oder E-Mail suchen">' + icon(single ? 'user' : 'plus', 'sm') + esc(add) + '</button>';
+}
+function ppValue(box) { return String($('input[type=hidden]', box).value || '').split(',').filter(Boolean); }
+function ppSet(box, sel) {
+  $('input[type=hidden]', box).value = sel.join(',');
+  $('.nt-people', box).innerHTML = ppChips(sel, !!box.dataset.single, box.dataset.empty, box.dataset.add);
+  const form = box.closest('form');
+  if (form) form.setAttribute('data-touched', '1');
+}
+A['pp-add'] = el => {
+  const box = el.closest('.pp-field');
+  const prefer = String(box.dataset.prefer || '').split(',').filter(Boolean);
+  peopleModal({
+    title: box.dataset.title || (box.dataset.single ? 'Person wählen' : 'Mitglieder verwalten'), selected: ppValue(box), single: !!box.dataset.single, prefer: prefer,
+    all: box.dataset.empty ? { label: box.dataset.empty, people: prefer } : null,
+    onChange: list => ppSet(box, list),
+  });
+};
+A['pp-remove'] = el => {
+  const box = el.closest('.pp-field');
+  ppSet(box, ppValue(box).filter(e => e !== el.dataset.v));
+};
+function collectPeople(v, name) {
+  return String(v[name] || '').split(/[,;\s]+/).filter(Boolean);
+}
+/* Links (tasks and the project banner): one chip per link with the icon of its kind, opens in a new tab */
+const LINK_KINDS = () => ({ mail: ['mail', L('Mail öffnen', 'Open mail')], drive: ['folder', 'Google Drive'], meet: ['video', 'Google Meet'],
+  snowflake: ['snow', 'Snowflake'], databricks: ['db', 'Databricks'], web: ['link', ''] });
+function linkChip(l, rm) {
+  const kind = Shared.linkKind(l.url);
+  const k = LINK_KINDS()[kind];
+  const label = l.title || k[1] || String(l.url).replace(/^https?:\/\//, '').split(/[/?#]/)[0];
+  return '<span class="lk"><a class="lk-a k-' + kind + '" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer" title="' + esc(l.url) + '">' + icon(k[0], 'sm') + '<span>' + esc(label) + '</span></a>' +
+    (rm ? '<button type="button" class="lk-x" data-action="link-rm" data-kind="' + rm.kind + '" data-id="' + esc(rm.id) + '" data-i="' + rm.i + '"' +
+      ' title="' + esc(L('Link entfernen', 'Remove link')) + '" aria-label="' + esc(L('Link entfernen: ', 'Remove link: ') + label) + '">' + icon('x', 'sm') + '</button>' : '') + '</span>';
+}
+/** kind: 'task' | 'project'; edit: may add and remove. */
+function linksHtml(links, kind, id, edit) {
+  return (links || []).map((l, i) => linkChip(l, edit ? { kind: kind, id: id, i: i } : null)).join('') +
+    (edit ? '<button type="button" class="lk-add" data-action="link-add" data-kind="' + kind + '" data-id="' + esc(id) + '">' + icon('plus', 'sm') + L('Link', 'Link') + '</button>' : '');
+}
+/** Links written into a task description (Gmail threads, documents …) that are not in its link list yet. */
+function descLinksHtml(t) {
+  const known = (t.links || []).map(l => l.url);
+  return Shared.findLinks(t.description).filter(u => known.indexOf(u) < 0).slice(0, 12).map(u => linkChip({ title: '', url: u })).join('');
+}
+const linkOwner = (kind, id) => (kind === 'task' ? task(id) : project(id));
+function saveLinks(kind, id, links) {
+  const o = linkOwner(kind, id);
+  const before = o.links;
+  o.links = links;
+  render();
+  const req = kind === 'task' ? call('tasks.save', { id: id, links: links }).then(changed => applyTasks(changed))
+    : call('projects.setLinks', { projectId: id, links: links }).then(saved => Object.assign(o, saved));
+  return req.then(() => render()).catch(err => { o.links = before; render(); fail(err); });
+}
+A['link-add'] = el => {
+  const kind = el.dataset.kind, id = el.dataset.id;
+  openModal({
+    title: L('Link hinzufügen', 'Add link'),
+    body: field(L('Adresse', 'Address'), '<input class="input" name="url" required placeholder="https://…" autocomplete="off">') +
+      field(L('Titel (optional)', 'Title (optional)'), '<input class="input" name="title" maxlength="120" placeholder="' + esc(L('z. B. Dashboard, Notebook, Mailverlauf', 'e.g. dashboard, notebook, mail thread')) + '">') +
+      '<p class="hint">' + esc(L('Snowflake, Databricks, Google Drive, Gmail-Verläufe oder jede andere Webseite. Für einen Mailverlauf die Adresse der Mail in Gmail kopieren.',
+        'Snowflake, Databricks, Google Drive, Gmail threads or any other web page. For a mail thread copy the address of the mail in Gmail.')) + '</p>',
+    submitLabel: L('Hinzufügen', 'Add'),
+    onSubmit: v => {
+      const add = Shared.cleanLinks([{ title: v.title, url: v.url }]);
+      if (!add.length) { toast(L('Bitte eine Web- oder Mailadresse angeben.', 'Please enter a web or mail address.')); return false; }
+      const o = linkOwner(kind, id);
+      return saveLinks(kind, id, Shared.cleanLinks((o.links || []).concat(add)));
+    },
+  });
+};
+A['link-rm'] = el => {
+  const o = linkOwner(el.dataset.kind, el.dataset.id);
+  if (o) saveLinks(el.dataset.kind, el.dataset.id, (o.links || []).filter((_, i) => i !== Number(el.dataset.i)));
+};
+
+function selectField(name, options, value) {
+  return '<select class="select" name="' + name + '">' + options.map(o =>
+    '<option value="' + esc(o.key) + '"' + (o.key === value ? ' selected' : '') + '>' + esc(o.label) + '</option>').join('') + '</select>';
+}
+function field(label, inner) { return '<label class="field"><span>' + esc(label) + '</span>' + inner + '</label>'; }
+function divField(label, inner) { return '<div class="field"><span>' + esc(label) + '</span>' + inner + '</div>'; }
+
+/* Team */
+function teamModal(t) {
+  t = t || { members: [S.me.email], lead: S.me.email, color: '' };
+  const taken = takenTeamColors(t.id ? teamMembers(t) : [S.me.email], t.id);
+  openModal({
+    title: t.id ? 'Team bearbeiten' : 'Neues Team',
+    body: field('Name', '<input class="input" name="name" required maxlength="80" value="' + esc(t.name || '') + '" placeholder="z. B. Produkt, Vertrieb, Design">') +
+      divField('Farbe', colorField(t.color, { palette: Shared.TEAM_COLORS, taken: taken }) +
+        '<div class="hint" style="margin-top:6px">Jedes Team hat eine eigene Farbe. Durchgestrichene Farben gehören schon zu Teams mit denselben Personen (höchstens ' + Shared.MAX_TEAMS + ' Teams pro Person).</div>') +
+      field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(t.description || '') + '</textarea>') +
+      (t.id ? '' : divField('Team-Lead', peoplePicker('lead', [S.me.email], { single: true }))) +
+      divField('Mitglieder', peoplePicker('members', t.members, { add: 'Personen hinzufügen' })),
+    submitLabel: t.id ? 'Speichern' : 'Team anlegen',
+    danger: t.id ? { label: 'Team löschen', onClick: () => confirmDelete('Team „' + t.name + '“ löschen? Projekte werden entfernt, Aufgaben bleiben erhalten.', () =>
+      call('teams.remove', { id: t.id }).then(() => reloadAll()).then(() => go('home'))) } : null,
+    onSubmit: v => call('teams.save', Object.assign({ id: t.id }, v, { lead: collectPeople(v, 'lead')[0] || t.lead || S.me.email, members: collectPeople(v, 'members') }))
+      .then(saved => reloadAll().then(() => go('team', saved.id))),
+  });
+}
+A['team-new'] = () => teamModal();
+/** "+" in the member list: search the directory (or invite by e-mail) and add or remove people. */
+A['team-members'] = el => {
+  const t = team(el.dataset.id);
+  if (!t) return;
+  peopleModal({
+    title: 'Mitglieder verwalten', sub: 'Team ' + t.name, selected: teamMembers(t), keep: teamLeads(t),
+    keepHint: L('Leads bleiben Mitglied. Zum Entfernen zuerst die Lead-Rolle entziehen.', 'Leads stay members. To remove one, take the lead role away first.'),
+    lead: { is: e => teamLeads(t).indexOf(e) >= 0, can: canSetTeamRoles(t),
+      set: (e, on) => call('teams.setRole', { teamId: t.id, email: e, lead: on }).then(saved => { Object.assign(t, saved); PM.o.keep = teamLeads(t); render(); }) },
+    onChange: members => {
+      const before = t.members;
+      t.members = members;
+      render();
+      call('teams.save', { id: t.id, name: t.name, icon: t.icon, color: t.color, description: t.description, lead: t.lead, members: members })
+        .then(saved => { Object.assign(t, saved); render(); })
+        .catch(err => { t.members = before; render(); fail(err); });
+    },
+  });
+};
+A['team-edit'] = el => teamModal(team(el.dataset.id));
+
+/* Project */
+/** Colour row for a project of team `teamId`: colours of the team's other projects are crossed out (until all are used). */
+function projectColorField(p, teamId) {
+  const taken = Shared.takenProjectColors(S.projects, teamId, p.id);
+  const full = Shared.PROJECT_PALETTE.every(c => taken[c]);
+  const value = Shared.PROJECT_PALETTE.indexOf(p.color) >= 0 && (full || !taken[p.color]) ? p.color : Shared.freeProjectColor(S.projects, teamId, p.id);
+  return colorField(value, { palette: Shared.PROJECT_PALETTE, taken: full ? {} : taken }) +
+    (full ? '<div class="hint">Alle ' + Shared.PROJECT_PALETTE.length + ' Farben sind in diesem Team vergeben, ab jetzt wiederholen sie sich.</div>' : '');
+}
+const PROJECT_MEMBERS_HINT = 'Niemand gewählt = das ganze Team gehört dazu. Sobald du Personen wählst, gehören nur diese zum Projekt – auch aus anderen Teams oder per E-Mail eingeladen.';
+function projectModal(p, teamId) {
+  const tid = teamId || (myTeams()[0] || S.teams[0] || {}).id;
+  p = p || { teamId: tid, status: 'active', color: Shared.freeProjectColor(S.projects, tid), members: [] };
+  if (!S.teams.length) { toast('Lege zuerst ein Team an.'); return teamModal(); }
+  openModal({
+    title: p.id ? 'Projekt bearbeiten' : 'Neues Projekt',
+    body: field('Name', '<input class="input" name="name" required maxlength="120" value="' + esc(p.name || '') + '">') +
+      '<div class="row">' + field('Team', selectField('teamId', S.teams.map(t => ({ key: t.id, label: (t.icon || '') + ' ' + t.name })), p.teamId)) +
+      field('Status', selectField('status', Shared.PROJECT_STATUSES, p.status)) + '</div>' +
+      divField('Farbe', '<div data-project-colors>' + projectColorField(p, p.teamId) + '</div>') +
+      '<div class="row">' + field('Start', '<input class="input" type="date" name="startDate" value="' + esc(p.startDate || '') + '">') +
+      field('Ende', '<input class="input" type="date" name="endDate" value="' + esc(p.endDate || '') + '">') + '</div>' +
+      field('Beschreibung', '<textarea class="textarea" name="description" style="min-height:60px">' + esc(p.description || '') + '</textarea>') +
+      divField('Projektmitglieder', peoplePicker('members', p.members, { add: 'Personen hinzufügen', empty: 'Ganzes Team', prefer: team(p.teamId) ? teamMembers(team(p.teamId)) : [],
+        hint: PROJECT_MEMBERS_HINT })),
+    submitLabel: p.id ? 'Speichern' : 'Projekt anlegen',
+    danger: p.id ? { label: 'Projekt löschen', onClick: () => confirmDelete('Projekt „' + p.name + '“ löschen? Die Aufgaben bleiben erhalten.', () =>
+      call('projects.remove', { id: p.id }).then(() => reloadAll()).then(() => go('team', p.teamId))) } : null,
+    // another team: other colours are taken there; keep the chosen one if it is still free
+    mount: m => $('select[name=teamId]', m).addEventListener('change', e => {
+      const box = $('[data-project-colors]', m);
+      box.innerHTML = projectColorField(Object.assign({}, p, { color: $('input[name=color]', box).value }), e.target.value);
+    }),
+    onSubmit: v => call('projects.save', Object.assign({ id: p.id }, v, { members: collectPeople(v, 'members') }))
+      .then(saved => reloadAll().then(() => go('project', saved.id))),
+  });
+}
+/** "+ Personen hinzufügen" on the project page: same search as for tasks and teams, saved right away. */
+A['project-members'] = el => {
+  const p = project(el.dataset.id);
+  if (!p) return;
+  const t = team(p.teamId);
+  const crew = t ? teamMembers(t) : [];
+  peopleModal({
+    title: 'Mitglieder verwalten', sub: 'Projekt ' + p.name, selected: p.members.slice(), prefer: crew,
+    all: { label: 'Ganzes Team' + (t ? ' ' + t.name : ''), people: crew },
+    roles: e => (t && teamLeads(t).indexOf(e) >= 0 ? 'Team-Lead' : crew.indexOf(e) >= 0 ? 'Teammitglied' : 'Gast'),
+    lead: { is: e => projectLeads(p).indexOf(e) >= 0, can: canSetProjectRoles(p),
+      set: (e, on) => call('projects.setRole', { projectId: p.id, email: e, lead: on }).then(saved => { Object.assign(p, saved); render(); }) },
+    onChange: members => saveProjectMembers(p, members),
+  });
+};
+A['project-unmember'] = el => {
+  const p = project(el.dataset.id);
+  if (!p) return;
+  const members = projectMembers(p).filter(e => e !== el.dataset.v);
+  saveProjectMembers(p, members);
+  toast(user(el.dataset.v).name + ' aus dem Projekt entfernt', { action: { label: 'Rückgängig', fn: () => saveProjectMembers(p, members.concat([el.dataset.v])) } });
+};
+A['project-whole-team'] = el => { const p = project(el.dataset.id); if (p) saveProjectMembers(p, []); };
+function saveProjectMembers(p, members) {
+  const before = p.members;
+  p.members = members.slice();
+  render();
+  return call('projects.save', { id: p.id, name: p.name, teamId: p.teamId, icon: p.icon, color: p.color, description: p.description,
+    status: p.status, startDate: p.startDate, endDate: p.endDate, members: p.members })
+    .then(saved => { Object.assign(p, saved); render(); })
+    .catch(err => { p.members = before; render(); fail(err); });
+}
+A['project-new'] = el => projectModal(null, el.dataset.team);
+A['project-edit'] = el => projectModal(project(el.dataset.id));
+
+/* Event */
+function eventModal(ev, date) {
+  ev = ev || { type: 'meeting', startDate: date || TODAY(), teamId: S.cal.teamId || '' };
+  openModal({
+    title: ev.id ? 'Termin bearbeiten' : 'Neuer Termin',
+    body: field('Titel', '<input class="input" name="title" required value="' + esc(ev.title || '') + '">') +
+      '<div class="row">' + field('Art', selectField('type', Shared.EVENT_TYPES, ev.type)) +
+      field('Team', selectField('teamId', [{ key: '', label: 'Alle' }].concat(S.teams.map(t => ({ key: t.id, label: t.name }))), ev.teamId)) + '</div>' +
+      '<div class="row">' + field('Von', '<input class="input" type="date" name="startDate" required value="' + esc(ev.startDate) + '">') +
+      field('Bis', '<input class="input" type="date" name="endDate" value="' + esc(ev.endDate || '') + '">') + '</div>' +
+      field('Notiz', '<textarea class="textarea" name="note" style="min-height:60px">' + esc(ev.note || '') + '</textarea>'),
+    danger: ev.id ? { label: 'Löschen', onClick: () => call('events.remove', { id: ev.id }).then(() => { closeModal(); calReload(); }).catch(fail) } : null,
+    onSubmit: v => call('events.save', Object.assign({ id: ev.id }, v)).then(() => calReload()),
+  });
+}
+A['event-new'] = el => eventModal(null, el && el.dataset.date);
+A['event-edit'] = (el, e) => {
+  e.stopPropagation();
+  const ev = calFind('events', el.dataset.id);
+  if (ev && ev.type === 'jf') jfOpen(ev.seriesId, ev.startDate);
+  else if (ev) eventModal(ev);
+};
+
+/* Absence */
+function absenceModal(a) {
+  a = a || { type: 'vacation', email: S.me.email, startDate: TODAY() };
+  openModal({
+    title: a.id ? 'Abwesenheit bearbeiten' : 'Abwesenheit eintragen',
+    body: (S.me.admin ? divField('Person', peoplePicker('email', [a.email || S.me.email], { single: true })) : '') +
+      field('Art', selectField('type', Shared.ABSENCE_TYPES, a.type)) +
+      '<div class="row">' + field('Von', '<input class="input" type="date" name="startDate" required value="' + esc(a.startDate) + '">') +
+      field('Bis', '<input class="input" type="date" name="endDate" value="' + esc(a.endDate || '') + '">') + '</div>' +
+      field('Notiz (nur für dich und Admins sichtbar)', '<input class="input" name="note" value="' + esc(a.note || '') + '">'),
+    danger: a.id ? { label: 'Löschen', onClick: () => call('absences.remove', { id: a.id }).then(() => { closeModal(); calReload(); }).catch(fail) } : null,
+    onSubmit: v => call('absences.save', Object.assign({ id: a.id }, v, v.email ? { email: collectPeople(v, 'email')[0] } : {})).then(res => {
+      const w = res.warnings || [];
+      if (w.length) {
+        toast('Achtung: ' + w.map(x => fmtDate(x.date, { absolute: true }) + ' ' + x.teamName + ' ' + x.absent + '/' + x.total).slice(0, 3).join(', ') +
+          (w.length > 3 ? ' …' : '') + ' – mindestens ' + res.threshold + ' % des Teams sind dann weg.', { warn: true });
+      } else toast('Abwesenheit gespeichert.');
+      calReload();
+    }),
+  });
+}
+A['absence-new'] = () => absenceModal();
+A['absence-edit'] = (el, e) => { e.stopPropagation(); const a = calFind('absences', el.dataset.id); if (a) absenceModal(a); };
+
+/* ---------------- AI assistant ----------------
+   Free text in, preview cards out (task / event / absence). Every card can be edited or unticked;
+   "Alles anlegen" creates the kept ones and offers one undo for all of them. */
+let assistState = null;
+A.assistant = () => {
+  assistState = { items: [], source: '' };
+  openModal({
+    title: 'KI-Assistent', submitLabel: 'Alles anlegen',
+    body: '<p class="hint" style="margin:0 0 8px">Beschreib in eigenen Worten, was angelegt werden soll: Aufgaben, Termine oder Urlaub. Du siehst vorher eine Vorschau und entscheidest.</p>' +
+      '<textarea class="textarea ai-in" rows="4" placeholder="z. B. Lege für Anna morgen „Angebot prüfen“ an, 2h. Ich bin nächste Woche Montag bis Mittwoch im Urlaub."></textarea>' +
+      '<div class="ai-bar"><button type="button" class="btn outline" data-action="ai-run">' + icon('sparkle', 'sm') + 'Vorschlag erstellen</button>' +
+      '<span class="hint">' + (IS_MAC ? 'Cmd' : 'Strg') + ' + Enter</span></div><div id="ai-prev"></div>',
+    onSubmit: () => assistCreate(),
+    mount: m => {
+      $('.ai-in', m).addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); A['ai-run'](); } });
+      const edit = e => {
+        const el = e.target.closest('[data-ai-i]');
+        if (!el) return;
+        const it = assistState.items[Number(el.dataset.aiI)];
+        if (el.type === 'checkbox') { it.keep = el.checked; el.closest('.ai-card').classList.toggle('off', !el.checked); } else it[el.dataset.aiF] = el.value;
+      };
+      m.addEventListener('input', edit);
+      m.addEventListener('change', edit);
+      m.addEventListener('click', e => {
+        const b = e.target.closest('[data-ai-people]');
+        if (!b) return;
+        const it = assistState.items[Number(b.dataset.aiPeople)];
+        peopleModal({ title: 'Zuständige', sub: it.title, selected: (it.assignees && it.assignees.length ? it.assignees : [S.me.email]).slice(), min: 1, addLabel: 'Zuweisen',
+          onChange: list => { it.assignees = list.length ? list : [S.me.email]; drawAssist(); } });
+      });
+    },
+  });
+};
+A['ai-run'] = () => {
+  const ta = $('#modal-root .ai-in');
+  if (!ta.value.trim()) { ta.focus(); return Promise.resolve(); }
+  $('#ai-prev').innerHTML = '<div class="ai-loading">' + icon('sparkle', 'sm') + (S.ai.enabled ? 'Gemini denkt nach…' : 'Wird erkannt…') + '</div>';
+  return call('ai.assist', { text: ta.value }).then(res => {
+    assistState = { items: res.items.map(x => Object.assign({ keep: true }, x)), source: res.source, warning: res.warning || '' };
+    drawAssist();
+  }).catch(err => { $('#ai-prev').innerHTML = ''; fail(err); });
+};
+/** Why the rules made this proposal: no key yet, or the AI did not answer (with Google's reason). */
+function assistNotice(st) {
+  if (st.warning) {
+    return '<div class="notice">' + esc(L('Die KI hat nicht geantwortet, deshalb wurde mit Regeln erkannt (ein Eintrag pro Satz). Grund: ', 'The AI did not answer, so rules were used (one entry per sentence). Reason: ') +
+      shortMsg(st.warning)) + (S.me.admin ? ' ' + esc(L('Details unter Einstellungen → „Verbindung testen“.', 'Details under Settings → “Test connection”.')) : '') + '</div>';
+  }
+  return S.ai.enabled ? '' : '<div class="notice">Dummy-Vorschlag, KI noch nicht verbunden: Die Einträge wurden mit Regeln erkannt (ein Eintrag pro Satz). Für Gemini in den Skripteigenschaften <code>VERTEX_API_KEY</code> setzen.</div>';
+}
+function drawAssist() {
+  const st = assistState;
+  const TYPES = { task: ['checksq', 'Aufgabe'], event: ['calendar', 'Termin'], absence: ['plane', 'Abwesenheit'] };
+  const date = (i, f, v, label) => '<label class="ai-d"><span>' + label + '</span><input class="input" type="date" data-ai-i="' + i + '" data-ai-f="' + f + '" value="' + esc(v || '') + '"></label>';
+  const card = (it, i) => {
+    const ty = TYPES[it.type] || TYPES.task;
+    const head = it.type === 'absence'
+      ? '<span class="ai-title">' + esc(absenceType(it.absenceType).label) + ' · ' + esc(user(it.email).name) + '</span>'
+      : '<input class="input ai-title" data-ai-i="' + i + '" data-ai-f="title" value="' + esc(it.title || '') + '" aria-label="' + esc(L('Titel', 'Title')) + '">';
+    const meta = it.type === 'task'
+      ? date(i, 'dueDate', it.dueDate, 'Fällig') + '<span class="ai-meta"><button type="button" class="ai-people" data-ai-people="' + i + '" title="Zuständige ändern">' +
+        (it.assignees && it.assignees.length ? avatars(it.assignees, 3) : avatar(S.me.email)) + icon('plus', 'sm') + '</button>' +
+        (it.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(it.estimate)) + '</span>' : '') + (it.priority ? prioTag(it.priority) : '') +
+        (it.projectId && project(it.projectId) ? projectChip(project(it.projectId)) : '') + '</span>'
+      : date(i, 'startDate', it.startDate, 'Von') + date(i, 'endDate', it.endDate, 'Bis');
+    return '<div class="ai-card' + (it.keep ? '' : ' off') + '"><label class="ai-k"><input type="checkbox" data-ai-i="' + i + '"' + (it.keep ? ' checked' : '') + ' aria-label="' + esc(L('Übernehmen', 'Take over')) + '"></label>' +
+      '<div class="ai-main"><div class="ai-row"><span class="ai-type">' + icon(ty[0], 'sm') + ty[1] + '</span>' + head + '</div><div class="ai-row">' + meta + '</div></div></div>';
+  };
+  $('#ai-prev').innerHTML = (st.source === 'rules' ? assistNotice(st) : '') +
+    (st.items.length ? '<div class="ai-cards">' + st.items.map(card).join('') + '</div>' : '<div class="empty-w">Nichts erkannt. Formuliere es etwas konkreter, z. B. mit Datum und Person.</div>');
+}
+/** Proposals of the assistant panel: the same form, filled in; nothing is created before "Alles anlegen". */
+function assistWith(items) {
+  A.assistant();
+  assistState = { items: (items || []).map(x => Object.assign({ keep: true }, x)), source: 'ai' };
+  drawAssist();
+}
+/** The kept cards, checked again on the server and created together or not at all; one undo for all. */
+function assistCreate() {
+  if (!assistState || !assistState.items.length) return A['ai-run']().then(() => false);
+  const keep = assistState.items.filter(x => x.keep).map(x => { const o = Object.assign({}, x); delete o.keep; return o; });
+  if (!keep.length) { toast('Nichts ausgewählt.'); return false; }
+  const REMOVE = { task: 'tasks.remove', event: 'events.remove', absence: 'absences.remove' };
+  return call('ai.apply', { items: keep }).then(r => reloadAll().then(() => {
+    S.cap.data = null; S.briefing = null;
+    const created = r.created;
+    toast(created.length + (created.length === 1 ? ' Eintrag angelegt' : ' Einträge angelegt'), { duration: 8000, action: { label: 'Rückgängig', fn: () =>
+      Promise.all(created.map(c => call(REMOVE[c.type], { id: c.id }))).then(() => reloadAll()).then(() => toast('Rückgängig gemacht.')).catch(fail) } });
+  }));
+}
+
+function confirmDelete(text, fn) {
+  openModal({
+    title: 'Wirklich löschen?',
+    body: '<p style="margin:0 0 8px">' + esc(text) + '</p>',
+    submitLabel: 'Löschen',
+    onSubmit: () => Promise.resolve(fn()).catch(fail),
+  });
+}
+
+function reloadAll() {
+  return call('bootstrap').then(d => { Object.assign(S, d); S.cap.data = null; calInvalidate(); render(); });
+}
+
+/* ---------------- command palette ---------------- */
+let palState = null;
+function parseCtx() {
+  return {
+    today: TODAY(), me: S.me.email,
+    users: S.users.map(u => ({ email: u.email, name: u.name })),
+    teams: S.teams.map(t => ({ id: t.id, name: t.name })),
+    projects: S.projects.map(p => ({ id: p.id, name: p.name })),
+  };
+}
+function tokenChip(tk) {
+  switch (tk.type) {
+    case 'due': return '<span class="chip accent">' + icon('calendar', 'sm') + 'Fällig ' + esc(fmtDate(tk.value)) + '</span>';
+    case 'start': return '<span class="chip">' + icon('clock', 'sm') + 'Start ' + esc(fmtDate(tk.value)) + '</span>';
+    case 'assignee': return '<span class="chip">' + avatar(tk.value) + esc(user(tk.value).name) + '</span>';
+    case 'team': return teamChip(team(tk.value));
+    case 'project': return '<span class="chip">' + projectChip(project(tk.value)) + '</span>';
+    case 'tag': return tagChip(tk.value);
+    case 'priority': return '<span class="chip">' + prioTag(tk.value) + '</span>';
+    case 'estimate': return '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(tk.value)) + '</span>';
+    case 'recurrence': return '<span class="chip accent">' + icon('repeat', 'sm') + esc((Shared.RECURRENCES.find(r => r.key === tk.value) || {}).label) + '</span>';
+    default: return '';
+  }
+}
+/** Colours the quick-add syntax inside the input line (a mirror layer behind the transparent input). */
+const QA_RULES = [
+  ['qa-assign', /@[\p{L}\d._-]+/gu],
+  ['qa-team', /\+[\p{L}\d._-]+/gu],
+  ['qa-proj', /#[\p{L}\d._-]+/gu],
+  ['qa-prio', /![\p{L}]+/gu],
+  ['qa-est', /(?<![\p{L}\d])\d+(?:[.,]\d+)?\s?(?:h|std|min|m)(?![\p{L}\d])/giu],
+  ['qa-rec', /(?<![\p{L}\d])(?:jede[nrs]?\s(?:tag|werktag|montag|dienstag|mittwoch|donnerstag|freitag|woche|monat)|täglich|werktags|wöchentlich|monatlich)(?![\p{L}\d])/giu],
+  ['qa-date', /(?<![\p{L}\d])(?:heute|morgen|übermorgen|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|nächste woche|ende der woche|in \d+ (?:tag|tagen|wochen)|\d{1,2}\.\d{1,2}\.(?:\d{2,4})?)(?![\p{L}\d])/giu],
+];
+function qaHighlight(text) {
+  const marks = [];
+  QA_RULES.forEach(r => {
+    r[1].lastIndex = 0;
+    let m;
+    while ((m = r[1].exec(text))) {
+      const from = m.index, to = from + m[0].length;
+      if (!marks.some(x => from < x.to && to > x.from)) marks.push({ from: from, to: to, cls: r[0] });
+      if (m[0].length === 0) r[1].lastIndex++;
+    }
+  });
+  marks.sort((x, y) => x.from - y.from);
+  let out = '', pos = 0;
+  marks.forEach(m => { out += esc(text.slice(pos, m.from)) + '<span class="' + m.cls + '">' + esc(text.slice(m.from, m.to)) + '</span>'; pos = m.to; });
+  return out + esc(text.slice(pos));
+}
+function openPalette(prefill) {
+  closePop();
+  palState = { hover: 0, items: [] };
+  $('#palette-root').innerHTML =
+    '<div class="palette-bg" data-action="palette-bg"><div class="palette" role="dialog" aria-modal="true" aria-label="Suchen und erstellen">' +
+    '<div class="palette-in">' + icon('bolt', 'lg') + '<div class="qa-wrap"><div class="qa-hl" id="pal-hl"></div>' +
+    '<input id="pal-in" placeholder="Aufgabe eingeben oder suchen" autocomplete="off" spellcheck="false" value="' + esc(prefill || '') + '"></div></div>' +
+    '<div class="palette-preview" id="pal-prev"></div><div class="palette-list" id="pal-list"></div>' +
+    '<div class="qa-legend"><span class="qa-date">morgen</span><small>Fällig</small><span class="qa-date">15.11.</span><small>Datum</small><span class="qa-assign">@anna</span><small>zuweisen</small>' +
+    '<span class="qa-team">+team</span><small>Team</small><span class="qa-proj">#website</span><small>Projekt oder Tag</small><span class="qa-prio">!hoch</span><small>Priorität</small>' +
+    '<span class="qa-est">2h</span><small>Aufwand</small><span class="qa-rec">jeden montag</span><small>Wiederholung</small></div>' +
+    '<div class="palette-foot"><span>↵ prüfen und anlegen</span><span>Strg+↵ sofort anlegen</span><span>↑↓ auswählen</span><span style="margin-left:auto">Esc schließen</span></div></div></div>';
+  const input = $('#pal-in');
+  input.focus();
+  input.addEventListener('input', drawPalette);
+  input.addEventListener('keydown', e => {
+    const n = palState.items.length;
+    if (e.key === 'ArrowDown') { palState.hover = (palState.hover + 1) % n; drawPalette(true); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { palState.hover = (palState.hover - 1 + n) % n; drawPalette(true); e.preventDefault(); }
+    if (e.key === 'Enter') { e.preventDefault(); runPaletteItem(palState.items[palState.hover], e.ctrlKey || e.metaKey); }
+  });
+  drawPalette();
+}
+A.palette = () => openPalette();
+A['palette-bg'] = (el, e) => { if (e.target === el) closePalette(); };
+function closePalette() { $('#palette-root').innerHTML = ''; palState = null; }
+
+function drawPalette(keepHover) {
+  const q = $('#pal-in').value;
+  $('#pal-hl').innerHTML = qaHighlight(q);
+  const parsed = Shared.parse(q, parseCtx());
+  const items = [];
+  if (q.trim()) items.push({ kind: 'create', parsed: parsed, html: icon('plus') + '<span>Aufgabe anlegen: <b>' + esc(parsed.title) + '</b></span>' });
+  const ql = q.trim().toLowerCase();
+  const nav = [
+    { kind: 'nav', view: 'dash', label: 'Übersicht', ic: icon('home') },
+    { kind: 'nav', view: 'home', label: 'Meine Aufgaben', ic: icon('checksq') },
+    { kind: 'nav', view: 'all', label: 'Alle Aufgaben', ic: icon('inbox') },
+    { kind: 'nav', view: 'calendar', label: 'Kalender', ic: icon('calendar') },
+    { kind: 'nav', view: 'capacity', label: 'Verfügbarkeit', ic: icon('users') },
+    { kind: 'nav', view: 'settings', label: 'Einstellungen', ic: icon('settings') },
+  ].concat(S.teams.map(t => ({ kind: 'nav', view: 'team', id: t.id, label: t.name, ic: mark(t) })))
+    .concat(S.projects.map(p => ({ kind: 'nav', view: 'project', id: p.id, label: p.name, ic: mark(p) })));
+  nav.filter(n => !ql || n.label.toLowerCase().indexOf(ql) >= 0).slice(0, ql ? 4 : 5)
+    .forEach(n => items.push(Object.assign(n, { html: n.ic + '<span>' + esc(n.label) + '</span><small>Öffnen</small>' })));
+  if (ql) {
+    S.tasks.filter(t => t.title.toLowerCase().indexOf(ql) >= 0).slice(0, 6).forEach(t => items.push({
+      kind: 'task', id: t.id, html: '<span class="check' + (isDone(t) ? ' on' : '') + '" style="margin:0"></span><span>' + esc(t.title) + '</span><small>' + esc(fmtDate(t.dueDate)) + '</small>',
+    }));
+    // people: open their tasks
+    S.users.filter(u => (u.name + ' ' + u.email).toLowerCase().indexOf(ql) >= 0).slice(0, 4).forEach(u => items.push({
+      kind: 'person', email: u.email, html: avatar(u.email) + '<span>' + esc(u.name) + '</span><small>Aufgaben ansehen</small>',
+    }));
+  }
+  palState.items = items;
+  if (!keepHover) palState.hover = 0;
+  $('#pal-prev').innerHTML = q.trim() ? '<div class="qa-title">' + esc(parsed.title || 'Ohne Titel') + '</div><div class="qa-chips">' + parsed.tokens.map(tokenChip).join('') + '</div>' : '';
+  $('#pal-list').innerHTML = items.map((it, i) => '<button class="pop-item' + (i === palState.hover ? ' hover' : '') + '" data-action="pal-item" data-i="' + i + '">' + it.html + '</button>').join('');
+}
+A['pal-item'] = (el, e) => runPaletteItem(palState.items[Number(el.dataset.i)], e.ctrlKey || e.metaKey);
+
+function runPaletteItem(it, open) {
+  if (!it) return;
+  if (it.kind === 'nav') { closePalette(); go(it.view, it.id); return; }
+  if (it.kind === 'task') { closePalette(); openPeek(it.id); return; }
+  if (it.kind === 'person') {
+    closePalette();
+    go('all');
+    setPrefs({ people: [it.email], quick: 'open' });
+    return;
+  }
+  const text = $('#pal-in').value;
+  const fromParse = p => {
+    const f = contextDefaults();
+    ['title', 'dueDate', 'startDate', 'priority', 'recurrence', 'projectId'].forEach(k => { if (p[k]) f[k] = p[k]; });
+    if (p.estimate) f.estimate = p.estimate;
+    if (p.assignees && p.assignees.length) f.assignees = p.assignees;
+    if (p.teams && p.teams.length) f.teams = (f.teams || []).concat(p.teams);
+    if (p.tags && p.tags.length) f.tags = p.tags;
+    return f;
+  };
+  closePalette();
+  // Enter shows the recognised task in the confirm dialog; Ctrl/Cmd+Enter creates it right away
+  const go2 = p => (open ? confirmCreate(fromParse(p)) : newTaskModal(fromParse(p)));
+  if (S.ai.enabled) {
+    toast('KI analysiert die Eingabe…');
+    call('ai.parse', { text: text }).then(go2).catch(() => go2(it.parsed));
+  } else go2(it.parsed);
+}
+A['new-task'] = el => {
+  const preset = el && el.dataset && el.dataset.preset ? JSON.parse(el.dataset.preset) : {};
+  newTaskModal(contextDefaults(preset));
+};
+
+/* ---------------- new task: confirm before anything is saved ---------------- */
+/** Creates the task and offers "Öffnen" and "Rückgängig". */
+function confirmCreate(fields) {
+  return createTask(fields, { open: false }).then(t => {
+    if (!t) return;
+    toast('Aufgabe angelegt: ' + t.title, { duration: 7000, actions: [
+      { label: 'Öffnen', fn: () => openPeek(t.id) },
+      { label: 'Rückgängig', fn: () => { const x = task(t.id); if (x) deleteWithUndo(x); } },
+    ] });
+    return t;
+  });
+}
+/**
+ * Small form, filled from where the user is (project, team, day, time slot, quick-add text).
+ * Nothing reaches the server until "Aufgabe anlegen" (or Enter in the title) is pressed.
+ */
+function newTaskModal(preset) {
+  preset = Object.assign({}, preset || {});
+  // who does it: chips with search (like "Zugewiesen"), at least one person, me by default
+  let people = (preset.assignees && preset.assignees.length ? preset.assignees : [S.me.email]).slice();
+  const drawPeople = () => {
+    const box = $('#modal-root .nt-people');
+    if (!box) return;
+    box.innerHTML = people.map(e => '<span class="nt-chip">' + avatar(e) + '<span>' + esc(user(e).name) + (e === S.me.email ? ' (ich)' : '') + '</span>' +
+      (people.length > 1 ? '<button type="button" class="nt-x" data-nt-remove="' + esc(e) + '" aria-label="Entfernen" title="Entfernen">' + icon('x', 'sm') + '</button>' : '') + '</span>').join('') +
+      '<button type="button" class="nt-add" data-nt-add title="Person suchen oder per E-Mail einladen">' + icon('plus', 'sm') + 'Person</button>' +
+      (people.indexOf(S.me.email) < 0 ? '<button type="button" class="nt-me" data-nt-me>Mir zuweisen</button>' : '');
+  };
+  const projectOptions = [{ key: '', label: 'Kein Projekt' }];
+  S.teams.forEach(tm => S.projects.filter(p => p.teamId === tm.id && p.status !== 'done')
+    .forEach(p => projectOptions.push({ key: p.id, label: tm.name + ' › ' + p.name })));
+  const prioOptions = [{ key: '', label: 'Keine Priorität' }].concat(Shared.PRIORITIES.map(p => ({ key: p.key, label: p.label })));
+  openModal({
+    title: 'Neue Aufgabe', submitLabel: 'Aufgabe anlegen',
+    body: field('Titel', '<input class="input" name="title" required maxlength="300" value="' + esc(preset.title || '') + '" placeholder="Was ist zu tun?">' +
+        '<span class="field-err" hidden>Bitte einen Titel eingeben.</span>') +
+      divField('Zuständig', '<div class="nt-people"></div>') +
+      '<div class="row">' + field('Fällig', '<input class="input" type="date" name="dueDate" value="' + esc(preset.dueDate || '') + '">') +
+      field('Priorität', selectField('priority', prioOptions, preset.priority || '')) + '</div>' +
+      field('Projekt', selectField('projectId', projectOptions, preset.projectId || '')) +
+      field('Aufwand (Stunden)', '<input class="input" type="number" min="0" step="0.25" name="estimate" value="' + esc(preset.estimate || '') + '" placeholder="z. B. 2">') +
+      (preset.planDate && preset.planStart ? '<p class="hint">Wird am ' + esc(fmtDate(preset.planDate, { absolute: true })) + ' um ' + fmtClock(preset.planStart) + ' eingeplant.</p>' : ''),
+    onSubmit: v => {
+      const title = String(v.title || '').trim();
+      if (!title) { const e = $('#modal-root .field-err'); if (e) e.hidden = false; return false; }
+      const fields = Object.assign({}, preset, {
+        title: title, assignees: people.length ? people.slice() : [S.me.email], dueDate: v.dueDate || '',
+        projectId: v.projectId || '', priority: v.priority || '', estimate: Number(v.estimate) || 0,
+      });
+      if (!fields.dueDate) delete fields.dueDate;
+      confirmCreate(fields);
+      return true;
+    },
+    mount: m => {
+      drawPeople();
+      m.addEventListener('click', e => {
+        const rm = e.target.closest('[data-nt-remove]');
+        if (rm) { people = people.filter(x => x !== rm.dataset.ntRemove); if (!people.length) people = [S.me.email]; drawPeople(); return; }
+        if (e.target.closest('[data-nt-me]')) { people = people.concat([S.me.email]); drawPeople(); return; }
+        const add = e.target.closest('[data-nt-add]');
+        if (!add) return;
+        // people of the project/team in context come first
+        peopleModal({
+          title: 'Zuständige', sub: 'Wer kümmert sich um die neue Aufgabe?', selected: people.slice(), min: 1, addLabel: 'Zuweisen',
+          prefer: relevantPeople({ projectId: $('select[name=projectId]', m).value, teams: preset.teams || [] }),
+          onChange: list => { people = list.length ? list : [S.me.email]; drawPeople(); },
+        });
+      });
+    },
+  });
+}
+</script>
