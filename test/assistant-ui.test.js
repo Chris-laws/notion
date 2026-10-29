@@ -64,4 +64,14 @@ describe('assistant panel', () => {
     await until(() => !$('#asst-root .asst'));
     assert.equal($('#asst-root .asst'), null);
   });
+  test('the quick-add form says why the rules answered: no key, or the AI did not answer (with the reason)', async () => {
+    w.eval("A.assistant(); assistState = { items: [{ type: 'task', title: 'X', keep: true }], source: 'rules', warning: 'Vertex AI antwortet mit 403: API key not valid. Please pass a valid API key.' }; drawAssist()");
+    await until(() => $('#modal-root .notice'));
+    assert.match($('#modal-root .notice').textContent, /nicht geantwortet.*403: API key not valid/);
+    assert.doesNotMatch($('#modal-root .notice').textContent, /noch nicht verbunden/);
+    w.eval("S.ai.enabled = false; assistState.warning = ''; drawAssist()");
+    assert.match($('#modal-root .notice').textContent, /noch nicht verbunden/);
+    w.eval('closeModal()');
+  });
 });
+

@@ -1921,7 +1921,7 @@ function aiAdminRow() {
       '<label class="pe-done"><input type="checkbox" data-on-change="ai-assistant-on"' + (S.ai.assistant !== false ? ' checked' : '') + '> ' + esc(L('Assistent für alle eingeschaltet', 'Assistant on for everybody')) + '</label>' +
       (S.ai.callsToday ? '<span class="faint">' + esc(L('KI-Aufrufe heute: ', 'AI calls today: ') + S.ai.callsToday) + '</span>' : '') +
       (S.aiTest ? '<span class="ai-test ' + (S.aiTest.ok ? 'ok' : 'bad') + '" role="status">' + esc((S.aiTest.ok ? L('Gemini antwortet: ', 'Gemini answers: ') + S.aiTest.answer : shortMsg(S.aiTest.error)) +
-        (S.aiTest.model ? ' · ' + S.aiTest.model : '') + (S.aiTest.ms !== undefined ? ' · ' + S.aiTest.ms + ' ms' : '')) + '</span>' +
+        (S.aiTest.model ? ' · ' + S.aiTest.model : '') + (S.aiTest.style ? ' · ' + S.aiTest.style.split(' (')[0] : '') + (S.aiTest.note ? ' · ' + S.aiTest.note : '') + (S.aiTest.ms !== undefined ? ' · ' + S.aiTest.ms + ' ms' : '')) + '</span>' +
         (S.aiTest.ok ? '' : '<button class="linkbtn" data-action="ai-test-why">' + esc(L('Details', 'Details')) + '</button>') : '') + '</div>';
 }
 function settingsPage() {
@@ -1952,10 +1952,10 @@ function settingsPage() {
       '✅ <b>Vertex AI is on</b> (model <code>' + esc(S.ai.model) + '</code>). Briefing, quick add and task breakdown use Gemini.')
     : L('<b>Regelbasierter Modus.</b> Alle smarten Funktionen laufen bereits mit Regeln (Quick-Add-Parser, Kapazitäts-Vorschläge, Briefing). ' +
       'Für KI: im Apps-Script-Projekt unter <i>Projekteinstellungen → Skripteigenschaften</i> den Wert <code>VERTEX_API_KEY</code> setzen ' +
-      '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optional <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.',
+      '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optional <code>VERTEX_MODEL</code> und <code>VERTEX_API_STYLE</code> (auto, gemini oder vertex).',
     '<b>Rule-based mode.</b> All smart features already work with rules (quick-add parser, capacity suggestions, briefing). ' +
       'For AI: in the Apps Script project under <i>Project settings → Script properties</i> set <code>VERTEX_API_KEY</code> ' +
-      '(placeholder: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optionally <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.')) +
+      '(placeholder: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optionally <code>VERTEX_MODEL</code> and <code>VERTEX_API_STYLE</code> (auto, gemini or vertex).')) +
     (S.me.admin ? aiAdminRow() : '') + '</div>';
 
   let admin = '';

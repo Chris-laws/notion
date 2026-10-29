@@ -235,3 +235,34 @@ describe('review findings (v60)', () => {
   });
 });
 
+
+describe('the two ways to Gemini with an API key', () => {
+  const ok = { code: 200, body: { candidates: [{ content: { parts: [{ text: 'OK' }] } }] } };
+  const no = { code: 401, body: { error: { message: 'API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal.' } } };
+  test('auto: Vertex refuses API keys, so the Gemini API is used and kept for the day; a project id is not used', () => {
+    const { app } = world();
+    setProp(app, 'VERTEX_API_KEY', 'AIzaTest');
+    setProp(app, 'VERTEX_PROJECT_ID', 'lidl-ki-123');
+    const calls = app.fakeFetch(url => (/aiplatform/.test(url) ? no : ok));
+    const t = app.call('ai.test', {});
+    assert.equal(t.ok, true);
+    assert.match(calls[0].url, /^https:\/\/aiplatform\.googleapis\.com\/v1\/publishers\/google\/models\/gemini-2\.5-flash:generateContent$/, 'global, without the project');
+    assert.equal(calls[1].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
+    assert.equal(calls[1].opts.headers['x-goog-api-key'], 'AIzaTest');
+    assert.match(t.style, /Gemini API/);
+    assert.match(t.note, /VERTEX_PROJECT_ID/);
+    app.call('ai.test', {});
+    assert.equal(calls.length, 3, 'the second time straight to the Gemini API');
+  });
+  test('fixed ways; clear messages for the usual errors', () => {
+    const { app } = world();
+    setProp(app, 'VERTEX_API_KEY', 'AIzaTest');
+    setProp(app, 'VERTEX_API_STYLE', 'vertex');
+    app.fakeFetch(() => no);
+    assert.match(app.call('ai.test', {}).error, /401.*keine API-Schlüssel/);
+    setProp(app, 'VERTEX_API_STYLE', 'gemini');
+    const calls = app.fakeFetch(() => ({ code: 403, body: { error: { message: 'Requests to this API generativelanguage.googleapis.com method are blocked.' } } }));
+    assert.match(app.call('ai.test', {}).error, /Generative Language API/);
+    assert.match(calls[0].url, /generativelanguage/);
+  });
+});

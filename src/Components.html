@@ -891,10 +891,18 @@ A['ai-run'] = () => {
   if (!ta.value.trim()) { ta.focus(); return Promise.resolve(); }
   $('#ai-prev').innerHTML = '<div class="ai-loading">' + icon('sparkle', 'sm') + (S.ai.enabled ? 'Gemini denkt nach…' : 'Wird erkannt…') + '</div>';
   return call('ai.assist', { text: ta.value }).then(res => {
-    assistState = { items: res.items.map(x => Object.assign({ keep: true }, x)), source: res.source };
+    assistState = { items: res.items.map(x => Object.assign({ keep: true }, x)), source: res.source, warning: res.warning || '' };
     drawAssist();
   }).catch(err => { $('#ai-prev').innerHTML = ''; fail(err); });
 };
+/** Why the rules made this proposal: no key yet, or the AI did not answer (with Google's reason). */
+function assistNotice(st) {
+  if (st.warning) {
+    return '<div class="notice">' + esc(L('Die KI hat nicht geantwortet, deshalb wurde mit Regeln erkannt (ein Eintrag pro Satz). Grund: ', 'The AI did not answer, so rules were used (one entry per sentence). Reason: ') +
+      shortMsg(st.warning)) + (S.me.admin ? ' ' + esc(L('Details unter Einstellungen → „Verbindung testen“.', 'Details under Settings → “Test connection”.')) : '') + '</div>';
+  }
+  return S.ai.enabled ? '' : '<div class="notice">Dummy-Vorschlag, KI noch nicht verbunden: Die Einträge wurden mit Regeln erkannt (ein Eintrag pro Satz). Für Gemini in den Skripteigenschaften <code>VERTEX_API_KEY</code> setzen.</div>';
+}
 function drawAssist() {
   const st = assistState;
   const TYPES = { task: ['checksq', 'Aufgabe'], event: ['calendar', 'Termin'], absence: ['plane', 'Abwesenheit'] };
@@ -913,8 +921,7 @@ function drawAssist() {
     return '<div class="ai-card' + (it.keep ? '' : ' off') + '"><label class="ai-k"><input type="checkbox" data-ai-i="' + i + '"' + (it.keep ? ' checked' : '') + ' aria-label="' + esc(L('Übernehmen', 'Take over')) + '"></label>' +
       '<div class="ai-main"><div class="ai-row"><span class="ai-type">' + icon(ty[0], 'sm') + ty[1] + '</span>' + head + '</div><div class="ai-row">' + meta + '</div></div></div>';
   };
-  $('#ai-prev').innerHTML = (st.source === 'rules'
-    ? '<div class="notice">Dummy-Vorschlag, KI noch nicht verbunden: Die Einträge wurden mit Regeln erkannt (ein Eintrag pro Satz). Für Gemini in den Skripteigenschaften <code>VERTEX_API_KEY</code> setzen.</div>' : '') +
+  $('#ai-prev').innerHTML = (st.source === 'rules' ? assistNotice(st) : '') +
     (st.items.length ? '<div class="ai-cards">' + st.items.map(card).join('') + '</div>' : '<div class="empty-w">Nichts erkannt. Formuliere es etwas konkreter, z. B. mit Datum und Person.</div>');
 }
 /** Proposals of the assistant panel: the same form, filled in; nothing is created before "Alles anlegen". */

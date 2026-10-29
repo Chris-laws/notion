@@ -4,12 +4,10 @@
  * Vertex AI takes over or enriches the result.
  *
  * Configure in Apps Script: Project Settings -> Script Properties
- *   VERTEX_API_KEY     API key (Gemini Enterprise Agent Platform, formerly Vertex AI; express mode or a
- *                      standard Google Cloud key restricted to the Agent Platform API). Placeholder until set.
+ *   VERTEX_API_KEY     Google API key (AIza…). Placeholder until set.
+ *   VERTEX_API_STYLE   "auto" (default), "vertex" (Agent Platform express mode) or "gemini" (Gemini API)
  *   VERTEX_MODEL       default gemini-2.5-flash (any model the key may use)
- *   VERTEX_PROJECT_ID  optional: GCP project to call a regional endpoint
- *   VERTEX_LOCATION    optional, default "global"
- *   VERTEX_ENDPOINT    optional: the whole address with {model}, e.g.
+ *   VERTEX_ENDPOINT    optional for the Vertex way: the whole address with {model}, e.g.
  *                      https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent
  *   VERTEX_KEY_IN      "header" (x-goog-api-key, default) or "query" (?key=)
  * The key never leaves the server; the browser only learns whether AI is on.
@@ -41,10 +39,18 @@ const Ai = {
     const start = Date.now();
     try {
       const answer = String(Ai.generate_('Antworte nur mit dem Wort OK.', false)).trim().slice(0, 200);
-      return { ok: true, model: model, ms: Date.now() - start, answer: answer, url: Ai.url_().replace(/key=[^&]+/, 'key=…') };
+      return Object.assign(Ai.testInfo_(), { ok: true, model: model, ms: Date.now() - start, answer: answer });
     } catch (e) {
-      return { ok: false, model: model, ms: Date.now() - start, error: String(e.message || e).slice(0, 500), url: Ai.url_().replace(/key=[^&]+/, 'key=…') };
+      return Object.assign(Ai.testInfo_(), { ok: false, model: model, ms: Date.now() - start, error: String(e.message || e).slice(0, 500) });
     }
+  },
+
+  /** Which way and address the test used (key masked); a project id set from earlier is pointed out. */
+  testInfo_() {
+    const style = Ai.style_();
+    return { style: style === 'gemini' ? 'Gemini API (generativelanguage.googleapis.com)' : 'Vertex AI / Agent Platform (aiplatform.googleapis.com)',
+      url: Ai.url_(style).replace(/key=[^&]+/, 'key=…'),
+      note: PropertiesService.getScriptProperties().getProperty('VERTEX_PROJECT_ID') ? 'VERTEX_PROJECT_ID wird mit API-Schlüssel nicht verwendet und kann gelöscht werden.' : '' };
   },
 
   /** Natural-language quick add. Client parses locally; this refines with Gemini. */
@@ -542,39 +548,70 @@ const Ai = {
     return out.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   },
 
-  /** Calls Gemini on Vertex AI. Returns parsed JSON when json = true. */
-  /** The address of generateContent: VERTEX_ENDPOINT, a project endpoint, or the global one (express mode). */
-  url_() {
+  /**
+   * Two ways to Gemini with an API key:
+   *  - "vertex": Agent Platform (Vertex AI) in express mode, global address without project
+   *    (a project or region address does not take API keys, so VERTEX_PROJECT_ID is not used);
+   *  - "gemini": the Gemini API (generativelanguage.googleapis.com), for keys of that API.
+   * VERTEX_API_STYLE "auto" (default) starts with Vertex and, when Google answers that API keys are not
+   * taken there, uses the Gemini API instead and keeps that choice for the day.
+   */
+  style_() {
+    const want = String(Config.get('VERTEX_API_STYLE') || 'auto').toLowerCase();
+    if (want === 'gemini' || want === 'vertex') return want;
+    return CacheService.getScriptCache().get('aistyle:' + Util.today()) || 'vertex';
+  },
+  url_(style) {
     const model = encodeURIComponent(Config.get('VERTEX_MODEL'));
-    const project = Config.get('VERTEX_PROJECT_ID');
-    const location = Config.get('VERTEX_LOCATION') || 'global';
-    const host = location === 'global' ? 'aiplatform.googleapis.com' : location + '-aiplatform.googleapis.com';
     const own = Config.get('VERTEX_ENDPOINT');
-    const url = /^https:\/\/[a-z0-9.-]+\.googleapis\.com\//i.test(own) ? own.replace('{model}', model)
-      : project ? 'https://' + host + '/v1/projects/' + encodeURIComponent(project) + '/locations/' + encodeURIComponent(location) + '/publishers/google/models/' + model + ':generateContent'
+    const url = (style || Ai.style_()) === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent'
+      : /^https:\/\/[a-z0-9.-]+\.googleapis\.com\//i.test(own) ? own.replace('{model}', model)
         : 'https://aiplatform.googleapis.com/v1/publishers/google/models/' + model + ':generateContent';
     return Config.get('VERTEX_KEY_IN') === 'query' ? url + (url.indexOf('?') < 0 ? '?' : '&') + 'key=' + encodeURIComponent(Config.get('VERTEX_API_KEY')) : url;
   },
+  /** Calls Gemini (the way chosen above). Returns parsed JSON when json = true. */
   generate_(prompt, json) {
     if (!Assistant.budget_(Auth.email(), String(prompt).length)) throw new Error(Ai.LIMIT);
-    const key = Config.get('VERTEX_API_KEY');
-    const res = UrlFetchApp.fetch(Ai.url_(), {
+    const style = Ai.style_();
+    try {
+      return Ai.call_(style, prompt, json);
+    } catch (e) {
+      const auto = String(Config.get('VERTEX_API_STYLE') || 'auto').toLowerCase() === 'auto';
+      if (!(auto && style === 'vertex' && /API keys are not supported/i.test(e.message))) throw e;
+      const out = Ai.call_('gemini', prompt, json);
+      CacheService.getScriptCache().put('aistyle:' + Util.today(), 'gemini', 86400);
+      return out;
+    }
+  },
+  call_(style, prompt, json) {
+    const res = UrlFetchApp.fetch(Ai.url_(style), {
       method: 'post',
       contentType: 'application/json',
-      headers: Config.get('VERTEX_KEY_IN') === 'query' ? {} : { 'x-goog-api-key': key },
+      headers: Config.get('VERTEX_KEY_IN') === 'query' ? {} : { 'x-goog-api-key': Config.get('VERTEX_API_KEY') },
       muteHttpExceptions: true,
       payload: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: Object.assign({ temperature: 0.2 }, json ? { responseMimeType: 'application/json' } : {}),
       }),
     });
-    if (res.getResponseCode() !== 200) {
-      let why = '';
-      try { why = JSON.parse(res.getContentText()).error.message; } catch (e) { why = ''; }
-      throw new Error('Vertex AI antwortet mit ' + res.getResponseCode() + (why ? ': ' + String(why).slice(0, 300) : ''));
-    }
+    if (res.getResponseCode() !== 200) throw new Error(Ai.why_(style, res.getResponseCode(), res.getContentText()));
     const body = JSON.parse(res.getContentText());
     const text = (((body.candidates || [])[0] || {}).content || { parts: [] }).parts.map(x => x.text || '').join('');
     return json ? JSON.parse(text) : text;
+  },
+  /** Google's answer, with what to do for the usual cases. */
+  why_(style, code, body) {
+    let why = '';
+    try { why = JSON.parse(body).error.message; } catch (e) { why = ''; }
+    const name = style === 'gemini' ? 'Gemini API' : 'Vertex AI';
+    let hint = '';
+    if (style === 'gemini' && (code === 403 || code === 400) && /blocked|not been used|disabled|API key not valid/i.test(why)) {
+      hint = ' – Beim Schlüssel muss die „Generative Language API“ erlaubt und im Google-Cloud-Projekt aktiviert sein.';
+    } else if (code === 401 && /API keys are not supported/i.test(why)) {
+      hint = ' – Diese Adresse nimmt keine API-Schlüssel an. VERTEX_ENDPOINT löschen; VERTEX_API_STYLE auf „auto“ oder „gemini“.';
+    } else if (code === 404) {
+      hint = ' – Modell nicht gefunden: unter VERTEX_MODEL ein Modell eintragen, das euer Projekt nutzen darf.';
+    }
+    return name + ' antwortet mit ' + code + (why ? ': ' + String(why).slice(0, 300) : '') + hint;
   },
 };
