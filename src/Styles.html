@@ -1589,6 +1589,8 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .ed-img { display: inline-grid; place-items: center; cursor: pointer; }
 .ed-img input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .ed-img:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.ask-ai { border-radius: 999px; gap: 6px; padding: 0 14px; font-weight: 700; flex: none; }
+@media (max-width: 720px) { .ask-ai span { display: none; } .ask-ai { padding: 0 9px; } }
 .msg-full { white-space: pre-wrap; word-break: break-word; font-size: 12.5px; max-height: 50vh; overflow: auto; margin: 0; }
 .toast span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .dv-save { font-size: 12.5px; color: var(--text-2); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }

@@ -883,7 +883,8 @@ function renderTopbar() {
       (c.view ? '<button data-action="nav" data-view="' + c.view + '" data-id="' + esc(c.id) + '">' + c.html + '</button>'
         : '<button class="current">' + c.html + '</button>')).join('') + '</nav>' +
     (cal ? '<div class="spacer"></div>' : '<button class="top-search" data-action="palette" title="' + SEARCH_HINT + '">' + icon('search', 'sm') + '<span>Aufgaben, Projekte und Personen suchen …</span></button>') +
-    (S.ai.assistant !== false ? '<button class="icon-btn" data-action="asst"' + ' title="' + esc(L('Assistent (Strg/⌘ + J)', 'Assistant (Ctrl/⌘ + J)')) + '" aria-label="' + esc(L('Assistent', 'Assistant')) + '">' + icon('sparkle') + '</button>' : '') +
+    (S.ai.assistant !== false ? '<button class="btn sm primary ask-ai" data-action="asst" title="' + esc(L('KI-Assistent (Strg/⌘ + J)', 'AI assistant (Ctrl/⌘ + J)')) + '" aria-label="Ask AI">' +
+      icon('sparkle', 'sm') + '<span>Ask AI</span></button>' : '') +
     (['home', 'all', 'dash', 'calendar', 'capacity'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : '') + prefControls());
 }
 
