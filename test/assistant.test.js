@@ -276,6 +276,7 @@ describe('Gemini with the sign-in of the deploying account (Google Cloud project
     assert.equal(t.ok, true);
     assert.equal(calls[0].url, 'https://aiplatform.googleapis.com/v1/projects/lidl-ki-123/locations/global/publishers/google/models/gemini-2.5-flash:generateContent');
     assert.equal(calls[0].opts.headers.Authorization, 'Bearer test-token');
+    assert.equal(calls[0].opts.headers['x-goog-user-project'], 'lidl-ki-123', 'billed to the own project: no link of the Apps Script project needed');
     assert.equal(calls[0].opts.headers['x-goog-api-key'], undefined);
     assert.match(t.style, /Anmeldung/);
     setProp(app, 'VERTEX_LOCATION', 'europe-west3');
@@ -288,7 +289,8 @@ describe('Gemini with the sign-in of the deploying account (Google Cloud project
     const answer = (code, message) => { app.fakeFetch(() => ({ code: code, body: { error: { message: message } } })); return app.call('ai.test', {}).error; };
     assert.match(answer(403, "Permission 'aiplatform.endpoints.predict' denied on resource"), /Rolle „Vertex AI User“/);
     assert.match(answer(403, 'Vertex AI API has not been used in project lidl-ki-123 before or it is disabled.'), /Agent Platform API.*aktivieren/);
-    assert.match(answer(403, 'Vertex AI API has not been used in project 98765 before or it is disabled.'), /nicht mit eurem Google-Cloud-Projekt verknüpft/);
+    assert.match(answer(403, 'Vertex AI API has not been used in project 98765 before or it is disabled.'), /serviceusage\.services\.use/);
+    assert.match(answer(403, 'Caller does not have required permission to use project lidl-ki-123. Grant the caller the roles/serviceusage.serviceUsageConsumer role'), /Service Usage Consumer/);
     assert.match(answer(401, 'Request had insufficient authentication scopes.'), /setup/);
   });
 });

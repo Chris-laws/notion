@@ -586,7 +586,8 @@ const Ai = {
   },
   /** The sign-in (token of the account the app runs as) or the key. */
   auth_(style) {
-    if (style === 'oauth') return { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+    // the project is named as the one that pays and counts: no link of the Apps Script project needed
+    if (style === 'oauth') return { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), 'x-goog-user-project': Config.get('VERTEX_PROJECT_ID') };
     return Config.get('VERTEX_KEY_IN') === 'query' ? {} : { 'x-goog-api-key': Config.get('VERTEX_API_KEY') };
   },
   /** Calls Gemini (the way chosen above). Returns parsed JSON when json = true. */
@@ -623,12 +624,13 @@ const Ai = {
   oauthHint_(code, why) {
     if (/has not been used in project|is disabled|SERVICE_DISABLED/i.test(why)) {
       return /project (\d+)/.test(why) && !new RegExp(String(Config.get('VERTEX_PROJECT_ID'))).test(why)
-        ? ' – Das Apps-Script-Projekt ist noch nicht mit eurem Google-Cloud-Projekt verknüpft: Apps Script → Projekteinstellungen → Google Cloud-Projekt → Projekt ändern → Projektnummer eintragen.'
+        ? ' – Google rechnet über das Standardprojekt von Apps Script ab. Dein Konto braucht im Projekt das Recht „serviceusage.services.use“ (Rolle „Service Usage Consumer“, in Bearbeiter/Inhaber enthalten); sonst das Apps-Script-Projekt mit dem Cloud-Projekt verknüpfen (Projekteinstellungen → Google Cloud-Projekt; dafür muss jemand mit OAuth-Rechten einmal den Zustimmungsbildschirm „Intern“ anlegen).'
         : ' – In der Cloud-Konsole „Agent Platform API“ (früher Vertex AI API) aktivieren.';
     }
     if (code === 401 || /insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(why)) {
       return ' – Die Anmeldung fehlt: im Apps-Script-Editor einmal „setup“ ausführen und die neue Berechtigung „Google Cloud“ zulassen.';
     }
+    if (/serviceusage|USER_PROJECT_DENIED/i.test(why)) return ' – Dein Konto braucht im Projekt die Rolle „Service Usage Consumer“ (oder Bearbeiter/Inhaber).';
     if (code === 403) return ' – Dein Konto braucht im Projekt die Rolle „Vertex AI User“ (Agent Platform User) oder höher.';
     if (code === 404) return ' – Projekt-ID, Region (VERTEX_LOCATION) oder Modell (VERTEX_MODEL) prüfen.';
     return '';
