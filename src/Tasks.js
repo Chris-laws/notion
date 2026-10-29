@@ -36,6 +36,7 @@ const Tasks = {
         if (!prev) throw new Error('Aufgabe nicht gefunden – evtl. wurde sie gelöscht.');
         if (!Access.canSeeTask(prev, ctx)) throw new Error('Keine Berechtigung für diese Aufgabe.');
         if (fields.parentId !== undefined) Tasks.checkParent_(fields.parentId, p.id);
+        Tasks.checkPlace_(fields, prev, ctx);
         // new people only once the change is allowed
         Users.ensure(fields.assignees);
         fields.updatedAt = now;
@@ -51,6 +52,7 @@ const Tasks = {
         return changed;
       }
       Tasks.checkParent_(fields.parentId, null);
+      Tasks.checkPlace_(fields, null, ctx);
       Users.ensure(fields.assignees);
       const task = Object.assign({
         id: Util.uid('t_'),
@@ -83,6 +85,17 @@ const Tasks = {
       if (task.status === 'done') task.completedAt = now;
       return [Db.insert('Tasks', task)];
     });
+  },
+
+  /** A task goes only into projects and teams the person belongs to (taking it out is always allowed). */
+  checkPlace_(f, prev, ctx) {
+    if (ctx.admin) return;
+    if (f.projectId && f.projectId !== (prev && prev.projectId)) {
+      const project = Db.get('Projects', f.projectId);
+      if (!project || !Access.canManageProject(project, ctx)) throw new Error('Keine Berechtigung für dieses Projekt.');
+    }
+    const before = prev ? prev.teams || [] : [];
+    if ((f.teams || []).some(id => before.indexOf(id) < 0 && !ctx.teamIds[id])) throw new Error('Keine Berechtigung.');
   },
 
   spawnNext_(t, email) {

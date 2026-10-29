@@ -39,8 +39,14 @@ Everything below is done with a **company account** (ideally a dedicated technic
 | `ADMIN_EMAILS` | comma-separated admin addresses of the responsible team |
 | `APP_NAME` | `LidlFlow` |
 | `DEFAULT_COUNTRY`, `DEFAULT_HOURS_PER_WEEK`, `ABSENCE_WARN_PERCENT` | company defaults |
-| `VERTEX_API_KEY` | keep the placeholder until AI use is approved; then create a **new** key in the company's Google Cloud project and enter it here |
-| `VERTEX_PROJECT_ID`, `VERTEX_LOCATION` | company GCP project and an EU region (e.g. `europe-west3`) |
+| `VERTEX_API_KEY` | keep the placeholder until AI use is approved; then a Google Cloud API key of the company project, restricted to the **Agent Platform API** (Gemini Enterprise Agent Platform, formerly Vertex AI). Sent in the `x-goog-api-key` header |
+| `VERTEX_MODEL` | the Gemini model the key may use (default `gemini-2.5-flash`; see *Agent Platform → Models* in the Cloud console) |
+| `VERTEX_PROJECT_ID`, `VERTEX_LOCATION` | optional: company GCP project and a region (e.g. `europe-west3`) for a regional endpoint; empty = global endpoint (express mode) |
+| `VERTEX_ENDPOINT` | optional: the full address with `{model}`, e.g. `https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent` (only `*.googleapis.com` is accepted) |
+| `VERTEX_KEY_IN` | `header` (default) or `query` (`?key=`) |
+| `AI_ASSISTANT` | `on` (default) or `off`: the assistant panel for everybody (admins also switch it in *Einstellungen*) |
+| `AI_USER_DAILY` | AI answers per person and day (default `40`); above it the assistant answers with rules |
+| `AI_DAILY_CHARS` | characters sent to the model per day for everybody (default `2000000`); only counts are kept |
 | `ALLOW_DEMO_DATA` | empty |
 
 Keys are never put into code; the `secrets` check fails if one appears in the repository.
@@ -66,7 +72,7 @@ New version later: `npm run guard`, `clasp push`, run `setup()` again (adds new 
 | `drive.file` | documents and jour fixe minutes as Markdown files in the app's own Drive folder `LidlFlow`; the app can only see files it created itself, nothing else in Drive. The app talks to the Drive REST API with its own token (`ScriptApp.getOAuthToken`, through `UrlFetchApp`), because the built-in `DriveApp` service would require access to the whole Drive |
 | `userinfo.email` | identify the signed-in person (Google SSO) |
 
-No access to Gmail, contacts or other Drive files is requested, and nothing is written to any calendar.
+No access to Gmail, contacts or other Drive files is requested, and nothing is written to any calendar. The AI (assistant, quick report, quick add) needs `script.external_request` for the Agent Platform API; if the organisation blocks external requests for Apps Script, the app keeps working with rules and *Verbindung testen* names the reason.
 
 **Jour fixe.** The project tab *Jour Fixe* holds the meeting series (on top, with their next meeting) and an archive of all minutes (newest first). Minutes are a form like a classic minutes sheet: date, minute taker, present and absent people, numbered topics with a responsible person, and lines of type I (information), A (action, with responsible and due date, can become a project task), B (decision) and N (note); open A lines move on to the next meeting. A meeting's minutes file is only created with the first save. Several people can write the same minutes: saving names the version it started from, and when someone saved in between, the app merges both topic by topic and line by line; only when both changed the same field does it show both versions. The last 50 versions of each minutes are kept (who, when, what changed) and can be viewed and restored. The file holds the minutes as a Markdown table plus the form data in an HTML comment at the end, so it reads well in Drive and opens unchanged in the app. The minutes are stored as `.md` files in the Drive of the deploying account: `LidlFlow/Projects/<team>/<project>/Jour Fixe/<series>/<date> <series>.md`; earlier versions in `…/<project>/.versions`. The database keeps the metadata (sheets `Docs`, `DocVersions`, `JfSeries`, `Folders`). Markdown files were chosen over Google Docs because the app writes exactly what people typed (no formatting lost on each save) and no `documents` scope is needed. Users never need access to the files: the app reads and writes them as the owner and shows them to project members only. Nothing is ever deleted for good: older versions and removed files go to the Drive trash. Deleting moves files to the Drive trash. The root folder id is the script property `DRIVE_ROOT_FOLDER_ID`; to move everything to a shared drive later, move the `LidlFlow` folder there (ids stay the same).
 
@@ -76,6 +82,7 @@ No access to Gmail, contacts or other Drive files is requested, and nothing is w
 
 - **Storage:** all data lives in the database spreadsheet in the company Workspace.
 - **External calls:** Nager.Date receives only country code and year. Google's public holiday calendars are only read, never written. Vertex AI (optional) receives task texts and names for the AI functions; switch it on only after approval by data protection.
+- **Assistant:** answers from what the asking person may see only (built on the server from the same permission checks as the rest of the app; at most 60 entries per question). It never changes anything itself: proposals open the confirmation form and are created together or not at all, through the normal permission checks. Texts from tasks and minutes reach the model fenced as data, never as instructions; the model's answer is checked (citations must be entries the person sees, proposals pass the quick-add checks) and shown as plain text. Without a key, or when the limit is reached or the call fails, rules answer. Usage is kept as counts per day only, no questions or answers. *Settings → Verbindung testen* (admins) shows model, response time and Google's own error message.
 - **No external scripts:** all code is inline. The Inter font comes from Google Fonts (asynchronous, with the system font as fallback); if the company does not allow Google Fonts, remove the four font lines at the top of `src/Index.html`.
 - **Browser storage:** each browser keeps the last loaded state of the signed-in person (tasks and people they may see) in `localStorage` for at most 7 days to start quickly, plus view settings. It is bound to that person and replaced on the next start.
 - **Health data:** a sick leave is shown as "sick" only to the person and to admins; everyone else sees "away". Absence notes are visible to the person and admins only.

@@ -436,6 +436,35 @@ function netBanner() {
 window.addEventListener('online', () => { netBanner(); toast('Wieder online.'); refresh(); });
 window.addEventListener('offline', netBanner);
 
+/** Cmd/Ctrl + K: search; Cmd/Ctrl + J: the assistant. True when it was one of them. */
+function modShortcut(e, k) {
+  if (k === 'k' || e.code === 'KeyK') { openPalette(); return true; }
+  if ((k === 'j' || e.code === 'KeyJ') && S.ai.assistant !== false) { A.asst(); return true; }
+  return false;
+}
+/* ---------------- parts loaded on first use ---------------- */
+const CHUNKS = {};
+/** The inside of the first style or script block of a part (tags built here, so this page has none in its code). */
+function chunkPart(html, tag) {
+  const a = html.indexOf('<' + tag + '>'), b = html.lastIndexOf('</' + tag + '>');
+  return a >= 0 && b > a ? html.slice(a + tag.length + 2, b) : '';
+}
+/** Fetches a part of the page (its style and script) once, when it is first needed. */
+function loadChunk(name) {
+  if (!CHUNKS[name]) {
+    CHUNKS[name] = call('ui.chunk', { name: name }).then(r => {
+      const css = chunkPart(r.html, 'style');
+      const js = chunkPart(r.html, 'script');
+      if (css) { const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st); }
+      const sc = document.createElement('script');
+      sc.textContent = js;
+      document.head.appendChild(sc);
+    }).catch(err => { delete CHUNKS[name]; throw err; });
+  }
+  return CHUNKS[name];
+}
+A.asst = () => loadChunk('Assistant').then(() => asstOpen()).catch(fail);
+
 /* ---------------- task data ---------------- */
 function applyTasks(list) {
   if (list && list.length) S.reportDirty = true;
@@ -768,7 +797,7 @@ function renderTopbar() {
       (c.view ? '<button data-action="nav" data-view="' + c.view + '" data-id="' + esc(c.id) + '">' + c.html + '</button>'
         : '<button class="current">' + c.html + '</button>')).join('') + '</nav>' +
     (cal ? '<div class="spacer"></div>' : '<button class="top-search" data-action="palette" title="' + SEARCH_HINT + '">' + icon('search', 'sm') + '<span>Aufgaben, Projekte und Personen suchen …</span></button>') +
-    (S.ai.enabled && !cal ? '<span class="chip accent">' + icon('sparkle', 'sm') + 'KI aktiv</span>' : '') +
+    (S.ai.assistant !== false ? '<button class="icon-btn" data-action="asst"' + ' title="' + esc(L('Assistent (Strg/⌘ + J)', 'Assistant (Ctrl/⌘ + J)')) + '" aria-label="' + esc(L('Assistent', 'Assistant')) + '">' + icon('sparkle') + '</button>' : '') +
     (['home', 'all', 'dash', 'calendar', 'capacity'].indexOf(r.view) < 0 ? '<button class="btn primary" data-action="new-task">' + icon('plus', 'sm') + 'Neue Aufgabe</button>' : '') + prefControls());
 }
 
@@ -801,7 +830,7 @@ window.addEventListener('keydown', e => {
   const a = document.activeElement;
   const typing = !!a && (/INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.isContentEditable);
   const k = String(e.key || '').toLowerCase();
-  if ((e.metaKey || e.ctrlKey) && (k === 'k' || e.code === 'KeyK')) { e.preventDefault(); openPalette(); return; }
+  if ((e.metaKey || e.ctrlKey) && modShortcut(e, k)) { e.preventDefault(); return; }
   if (e.key === 'Escape') {
     if (closeTopLayer()) { e.preventDefault(); return; }
     if (S.peekId && !typing) { closePeek(); return; }

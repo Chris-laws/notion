@@ -1907,6 +1907,23 @@ function countrySelect(value) {
 }
 const AVATAR_COLORS = ['#e16b5c', '#e5894a', '#d9a72a', '#5aa36b', '#3e8ed0', '#7a6ad8', '#c45fa0', '#4aa8a8', '#8a7a6a'];
 
+A['ai-test'] = el => {
+  el.disabled = true;
+  call('ai.test', {}).then(r => { S.aiTest = r; render(); }).catch(err => { S.aiTest = { ok: false, error: err.message }; render(); });
+};
+ON.change['ai-assistant-on'] = el => call('ai.setAssistant', { on: el.checked }).then(r => { S.ai.assistant = r.assistant; render(); }).catch(fail);
+A['ai-test-why'] = () => msgDetails(S.aiTest.error + (S.aiTest.url ? '\n\n' + S.aiTest.url : '') + (/UrlFetchApp|permission|Berechtigung/i.test(S.aiTest.error)
+  ? L('\n\nDie App braucht für KI externe Aufrufe (UrlFetchApp). Ist das in eurer Organisation gesperrt, muss die Google-Workspace-Administration es für dieses Skript freigeben.',
+    '\n\nAI needs external calls (UrlFetchApp). If your organisation blocks them, your Google Workspace admin has to allow them for this script.') : ''), 'Vertex AI');
+/** Admins: switch the assistant, test the connection (model, time, Google's message). */
+function aiAdminRow() {
+  return '<div class="row-btns" style="margin-top:8px"><button class="btn sm" data-action="ai-test">' + icon('sparkle', 'sm') + esc(L('Verbindung testen', 'Test connection')) + '</button>' +
+      '<label class="pe-done"><input type="checkbox" data-on-change="ai-assistant-on"' + (S.ai.assistant !== false ? ' checked' : '') + '> ' + esc(L('Assistent für alle eingeschaltet', 'Assistant on for everybody')) + '</label>' +
+      (S.ai.callsToday ? '<span class="faint">' + esc(L('KI-Aufrufe heute: ', 'AI calls today: ') + S.ai.callsToday) + '</span>' : '') +
+      (S.aiTest ? '<span class="ai-test ' + (S.aiTest.ok ? 'ok' : 'bad') + '" role="status">' + esc((S.aiTest.ok ? L('Gemini antwortet: ', 'Gemini answers: ') + S.aiTest.answer : shortMsg(S.aiTest.error)) +
+        ' · ' + S.aiTest.model + (S.aiTest.ms !== undefined ? ' · ' + S.aiTest.ms + ' ms' : '')) + '</span>' +
+        (S.aiTest.ok ? '' : '<button class="linkbtn" data-action="ai-test-why">' + esc(L('Details', 'Details')) + '</button>') : '') + '</div>';
+}
 function settingsPage() {
   const me = S.me;
   const days = String(me.workDays || '').split(',');
@@ -1938,7 +1955,8 @@ function settingsPage() {
       '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optional <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.',
     '<b>Rule-based mode.</b> All smart features already work with rules (quick-add parser, capacity suggestions, briefing). ' +
       'For AI: in the Apps Script project under <i>Project settings → Script properties</i> set <code>VERTEX_API_KEY</code> ' +
-      '(placeholder: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optionally <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.')) + '</div>';
+      '(placeholder: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optionally <code>VERTEX_MODEL</code>, <code>VERTEX_PROJECT_ID</code>, <code>VERTEX_LOCATION</code>.')) +
+    (S.me.admin ? aiAdminRow() : '') + '</div>';
 
   let admin = '';
   if (me.admin) {

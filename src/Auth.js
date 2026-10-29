@@ -105,6 +105,11 @@ const Config = {
     VERTEX_MODEL: 'gemini-2.5-flash',
     VERTEX_PROJECT_ID: '',
     VERTEX_LOCATION: 'global',
+    VERTEX_ENDPOINT: '',
+    VERTEX_KEY_IN: 'header',
+    AI_ASSISTANT: 'on',
+    AI_USER_DAILY: '40',
+    AI_DAILY_CHARS: '2000000',
     ALLOW_DEMO_DATA: '',
   },
 

@@ -5,13 +5,25 @@
    ========================================================================== */
 
 /* ---------------- toasts ---------------- */
+/** One short line for a message: no web addresses, no technical reason in brackets, at most about 140 characters. */
+function shortMsg(msg) {
+  let s = String(msg).replace(/\s*\((?:Google|Drive)[^)]*\)\s*$/, '').replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').trim();
+  if (s.length > 140) s = s.slice(0, 137).replace(/\s+\S*$/, '') + ' …';
+  return s;
+}
+/** The full text of a message (with Google's reason), to read or copy. */
+function msgDetails(msg, title) {
+  openModal({ title: title || L('Details', 'Details'), body: '<pre class="msg-full">' + esc(msg) + '</pre>', submitLabel: L('Schließen', 'Close'), onSubmit: () => closeModal() });
+}
 function toast(msg, opts) {
   opts = opts || {};
   const el = document.createElement('div');
   el.className = 'toast' + (opts.error ? ' err' : opts.warn ? ' warn' : '');
   if (opts.error) el.setAttribute('role', 'alert');
-  const actions = opts.actions || (opts.action ? [opts.action] : []);
-  el.innerHTML = '<span>' + esc(msg) + '</span>' + actions.map(a => '<button>' + esc(a.label) + '</button>').join('');
+  const short = shortMsg(msg);
+  // long or technical messages: one short line, the rest behind "Details"
+  const actions = (opts.actions || (opts.action ? [opts.action] : [])).concat(short !== String(msg) ? [{ label: L('Details', 'Details'), fn: () => msgDetails(msg) }] : []);
+  el.innerHTML = '<span>' + esc(short) + '</span>' + actions.map(a => '<button>' + esc(a.label) + '</button>').join('');
   $$('button', el).forEach((b, i) => { b.onclick = () => { actions[i].fn(); el.remove(); }; });
   $('#toasts').appendChild(el);
   setTimeout(() => el.remove(), opts.duration || (opts.error || opts.warn ? 8000 : 3800));
@@ -51,6 +63,8 @@ function closeTopLayer() {
   if (closePop()) return true;
   if (closePeopleModal()) return true;
   if ($('#modal-root').children.length) { closeModal(); return true; }
+  // the assistant panel (loaded on first use)
+  if ($('#asst-root .asst') && typeof asstClose === 'function') { asstClose(); return true; }
   return false;
 }
 
@@ -889,44 +903,38 @@ function drawAssist() {
     const ty = TYPES[it.type] || TYPES.task;
     const head = it.type === 'absence'
       ? '<span class="ai-title">' + esc(absenceType(it.absenceType).label) + ' · ' + esc(user(it.email).name) + '</span>'
-      : '<input class="input ai-title" data-ai-i="' + i + '" data-ai-f="title" value="' + esc(it.title || '') + '">';
+      : '<input class="input ai-title" data-ai-i="' + i + '" data-ai-f="title" value="' + esc(it.title || '') + '" aria-label="Titel">';
     const meta = it.type === 'task'
       ? date(i, 'dueDate', it.dueDate, 'Fällig') + '<span class="ai-meta"><button type="button" class="ai-people" data-ai-people="' + i + '" title="Zuständige ändern">' +
         (it.assignees && it.assignees.length ? avatars(it.assignees, 3) : avatar(S.me.email)) + icon('plus', 'sm') + '</button>' +
         (it.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(it.estimate)) + '</span>' : '') + (it.priority ? prioTag(it.priority) : '') +
         (it.projectId && project(it.projectId) ? projectChip(project(it.projectId)) : '') + '</span>'
       : date(i, 'startDate', it.startDate, 'Von') + date(i, 'endDate', it.endDate, 'Bis');
-    return '<div class="ai-card' + (it.keep ? '' : ' off') + '"><label class="ai-k"><input type="checkbox" data-ai-i="' + i + '"' + (it.keep ? ' checked' : '') + '></label>' +
+    return '<div class="ai-card' + (it.keep ? '' : ' off') + '"><label class="ai-k"><input type="checkbox" data-ai-i="' + i + '"' + (it.keep ? ' checked' : '') + ' aria-label="Übernehmen"></label>' +
       '<div class="ai-main"><div class="ai-row"><span class="ai-type">' + icon(ty[0], 'sm') + ty[1] + '</span>' + head + '</div><div class="ai-row">' + meta + '</div></div></div>';
   };
   $('#ai-prev').innerHTML = (st.source === 'rules'
     ? '<div class="notice">Dummy-Vorschlag, KI noch nicht verbunden: Die Einträge wurden mit Regeln erkannt (ein Eintrag pro Satz). Für Gemini in den Skripteigenschaften <code>VERTEX_API_KEY</code> setzen.</div>' : '') +
     (st.items.length ? '<div class="ai-cards">' + st.items.map(card).join('') + '</div>' : '<div class="empty-w">Nichts erkannt. Formuliere es etwas konkreter, z. B. mit Datum und Person.</div>');
 }
+/** Proposals of the assistant panel: the same form, filled in; nothing is created before "Alles anlegen". */
+function assistWith(items) {
+  A.assistant();
+  assistState = { items: (items || []).map(x => Object.assign({ keep: true }, x)), source: 'ai' };
+  drawAssist();
+}
+/** The kept cards, checked again on the server and created together or not at all; one undo for all. */
 function assistCreate() {
   if (!assistState || !assistState.items.length) return A['ai-run']().then(() => false);
-  const keep = assistState.items.filter(x => x.keep);
+  const keep = assistState.items.filter(x => x.keep).map(x => { const o = Object.assign({}, x); delete o.keep; return o; });
   if (!keep.length) { toast('Nichts ausgewählt.'); return false; }
-  const created = [];
-  const jobs = keep.map(it => {
-    if (it.type === 'event') {
-      return call('events.save', { title: it.title, type: it.eventType, startDate: it.startDate, endDate: it.endDate, teamId: it.teamId })
-        .then(e => created.push(['events.remove', e.id]));
-    }
-    if (it.type === 'absence') {
-      return call('absences.save', { email: it.email, type: it.absenceType, startDate: it.startDate, endDate: it.endDate })
-        .then(a => created.push(['absences.remove', a.id]));
-    }
-    const f = { title: it.title || 'Ohne Titel' };
-    ['dueDate', 'assignees', 'projectId', 'priority', 'estimate', 'recurrence', 'tags', 'teams'].forEach(k => { if (it[k] && (!Array.isArray(it[k]) || it[k].length)) f[k] = it[k]; });
-    return Promise.resolve(createTask(f)).then(t => { if (t) created.push(['tasks.remove', t.id]); });
-  });
-  return Promise.all(jobs).then(() => {
-    calInvalidate(); S.cap.data = null; S.briefing = null;
-    render();
+  const REMOVE = { task: 'tasks.remove', event: 'events.remove', absence: 'absences.remove' };
+  return call('ai.apply', { items: keep }).then(r => reloadAll().then(() => {
+    S.cap.data = null; S.briefing = null;
+    const created = r.created;
     toast(created.length + (created.length === 1 ? ' Eintrag angelegt' : ' Einträge angelegt'), { duration: 8000, action: { label: 'Rückgängig', fn: () =>
-      Promise.all(created.map(c => call(c[0], { id: c[1] }))).then(() => reloadAll()).then(() => toast('Rückgängig gemacht.')).catch(fail) } });
-  });
+      Promise.all(created.map(c => call(REMOVE[c.type], { id: c.id }))).then(() => reloadAll()).then(() => toast('Rückgängig gemacht.')).catch(fail) } });
+  }));
 }
 
 function confirmDelete(text, fn) {

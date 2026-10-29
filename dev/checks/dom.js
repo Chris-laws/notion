@@ -74,7 +74,11 @@ function tour(w) {
     ['jour fixe task form', "A['proto-add-topic'](); jfTaskMask(true, S.protoEdit.model.topics.length - 1)", 300],
     ['jour fixe series form', "closeModal(); jfModal(jfData().series[0], '" + proj.id + "', '" + proj.teamId + "')", 300],
     ['team/jour fixe', "closeModal(); A['proto-discard'](); S.teamTab = 'jf'; go('team', '" + proj.teamId + "')", 300],
-    ['empty list', "closePeek(); go('home'); setPrefs({ quick: 'done', search: 'zzzz-nichts' })"],
+    // the assistant (loaded on first use): panel, an answer, proposals in the confirmation form
+    ['assistant', 'A.asst()', 700],
+    ['assistant answer', 'asstAsk(ASST_QUICK()[0])', 500],
+    ['assistant proposals', "asstClose(); assistWith([{ type: 'task', title: 'Vorschlag' }])", 300],
+    ['empty list', "closeModal(); closePeek(); go('home'); setPrefs({ quick: 'done', search: 'zzzz-nichts' })"],
     ['dashboard again', "setPrefs({ search: '', quick: 'open' }); S.report.data = {}; go('dash')", 700],
   );
   return steps;

@@ -4,10 +4,14 @@
  * Vertex AI takes over or enriches the result.
  *
  * Configure in Apps Script: Project Settings -> Script Properties
- *   VERTEX_API_KEY     API key (Vertex AI express mode). Placeholder until set.
- *   VERTEX_MODEL       default gemini-2.5-flash
+ *   VERTEX_API_KEY     API key (Gemini Enterprise Agent Platform, formerly Vertex AI; express mode or a
+ *                      standard Google Cloud key restricted to the Agent Platform API). Placeholder until set.
+ *   VERTEX_MODEL       default gemini-2.5-flash (any model the key may use)
  *   VERTEX_PROJECT_ID  optional: GCP project to call a regional endpoint
  *   VERTEX_LOCATION    optional, default "global"
+ *   VERTEX_ENDPOINT    optional: the whole address with {model}, e.g.
+ *                      https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent
+ *   VERTEX_KEY_IN      "header" (x-goog-api-key, default) or "query" (?key=)
  * The key never leaves the server; the browser only learns whether AI is on.
  */
 const Ai = {
@@ -20,10 +24,26 @@ const Ai = {
     return {
       enabled: Ai.enabled(),
       model: Config.get('VERTEX_MODEL'),
+      assistant: Assistant.on(),
+      callsToday: Assistant.callsToday(),
       hint: Ai.enabled()
         ? 'Vertex AI ist verbunden.'
         : 'Regelbasierter Modus. Für KI-Funktionen in den Skripteigenschaften VERTEX_API_KEY setzen.',
     };
+  },
+
+  /** Admins: one short call to Gemini; the answer, or what went wrong (no key, Google's reason, external calls blocked). */
+  test() {
+    if (!Auth.isAdmin(Auth.currentUser())) throw new Error('Keine Berechtigung.');
+    const model = Config.get('VERTEX_MODEL');
+    if (!Ai.enabled()) return { ok: false, model: model, error: 'Kein Schlüssel hinterlegt: in den Skripteigenschaften VERTEX_API_KEY setzen.' };
+    const start = Date.now();
+    try {
+      const answer = String(Ai.generate_('Antworte nur mit dem Wort OK.', false)).trim().slice(0, 200);
+      return { ok: true, model: model, ms: Date.now() - start, answer: answer, url: Ai.url_().replace(/key=[^&]+/, 'key=…') };
+    } catch (e) {
+      return { ok: false, model: model, ms: Date.now() - start, error: String(e.message || e).slice(0, 500), url: Ai.url_().replace(/key=[^&]+/, 'key=…') };
+    }
   },
 
   /** Natural-language quick add. Client parses locally; this refines with Gemini. */
@@ -121,12 +141,14 @@ const Ai = {
   },
 
   parseContext_(me) {
+    const ctx = Access.context(me);
     return {
       today: Util.today(),
       me: me.email,
       users: Users.list().map(u => ({ email: u.email, name: u.name })),
-      teams: Db.all('Teams').map(t => ({ id: t.id, name: t.name })),
-      projects: Db.all('Projects').map(x => ({ id: x.id, name: x.name })),
+      // only teams and projects the person belongs to: the model gets no others, proposals cannot point elsewhere
+      teams: Db.all('Teams').filter(t => ctx.admin || ctx.teamIds[t.id]).map(t => ({ id: t.id, name: t.name })),
+      projects: Db.all('Projects').filter(x => Access.canManageProject(x, ctx)).map(x => ({ id: x.id, name: x.name })),
     };
   },
 
@@ -231,7 +253,7 @@ const Ai = {
     const me = Auth.currentUser();
     const range = ['day', 'week', 'month'].indexOf(p && p.range) >= 0 ? p.range : 'week';
     const en = !!(p && p.lang === 'en');
-    const cacheKey = 'rep:' + me.email + ':' + range + ':' + (en ? 'en' : 'de');
+    const cacheKey = 'rep:' + Util.today() + ':' + me.email + ':' + range + ':' + (en ? 'en' : 'de');
     const cache = CacheService.getScriptCache();
     if (!(p && p.fresh)) {
       const hit = cache.get(cacheKey);
@@ -321,7 +343,9 @@ const Ai = {
       .map(t => ({ id: t.id, title: t.title, overdueDays: age(t.dueDate), priority: t.priority }));
     const projectsById = {};
     Db.all('Projects').forEach(x => { projectsById[x.id] = x; });
+    const jf = Ai.jfWeek_(ctx, from, to);
     const context = {
+      jourFixe: jf,
       period: label, today: today,
       tasks: { open: open.length, overdue: overdue.length, dueInPeriod: due.length, doneInPeriod: done.length, withoutEstimate: noEstimate.length, risky: risky },
       projects: projects.slice(0, 5).map(x => ({ name: x.name, ends: x.end, done: x.done, total: x.total })),
@@ -360,6 +384,7 @@ const Ai = {
       text = parts.length ? L('Wichtig ' + label + ': ', 'Important ' + label + ': ') + parts.join(', ') + '.'
         : L('Für ' + label + ' gibt es nichts Kritisches – Team vollständig, keine Engpässe.', 'Nothing critical ' + label + ' – team complete, no bottlenecks.');
       risky.slice(0, 2).forEach(t => points.push({ text: t.title + L(' – seit ' + t.overdueDays + ' Tagen überfällig', ' – overdue for ' + t.overdueDays + ' days'), taskId: t.id }));
+      if (jf.length) points.push(Ai.jfPoint_(jf, day, en));
       if (team.away.length) points.push({ text: L('Abwesend: ', 'Away: ') + team.away.slice(0, 3).join(', '), view: 'capacity' });
       if (team.holidays.length) points.push({ text: L('Feiertag: ', 'Holiday: ') + team.holidays[0], view: 'calendar' });
       if (team.utilization !== null && team.utilization > 100) points.push({ text: L('Deine Auslastung liegt bei ', 'Your workload is ') + team.utilization + ' %', view: 'capacity' });
@@ -370,8 +395,8 @@ const Ai = {
     if (warnings.length || absences.length) quietActions.push({ label: L('Verfügbarkeit ansehen', 'View availability'), view: 'capacity' });
     else if (utilization > 100) quietActions.push({ label: L('Arbeit verteilen', 'Spread the work'), view: 'capacity' });
     const out = { range: range, from: from, to: to, kpis: kpis, bullets: bullets.slice(0, 5), actions: quietActions, points: points,
-      news: news.items, since: news.since, warnings: warnings.slice(0, 5), text: text, source: source, at: new Date().toISOString() };
-    cache.put(cacheKey, JSON.stringify(out), 300);
+      news: news.items, since: news.since, warnings: warnings.slice(0, 5), jf: jf, text: text, source: source, at: new Date().toISOString() };
+    cache.put(cacheKey, JSON.stringify(out), 21600);
     return out;
   },
 
@@ -501,20 +526,40 @@ const Ai = {
     return Object.assign(facts, { text: text, source: source });
   },
 
+  jfPoint_(jf, day, en) {
+    const open = j => (j.open ? (en ? ' (' + j.open + ' open)' : ' (' + j.open + ' offen)') : '');
+    return { text: 'Jour Fixe: ' + jf.slice(0, 3).map(j => j.title + ' ' + day(j.date) + open(j)).join(', '), view: 'all' };
+  },
+  /** Jour fixe meetings of the period in the person's projects, with open and anchored items. */
+  jfWeek_(ctx, from, to) {
+    const o = Jf.overview_(ctx, '');
+    const out = [];
+    o.series.forEach(s => Shared.jfDates(s, from, to).forEach(d => {
+      const m = o.minutes.find(x => x.seriesId === s.id && x.date === d);
+      out.push({ title: s.title, date: d, time: s.time || '', open: m ? m.openCount : s.carry.open.length, pinned: m ? m.pinnedCount : s.carry.pinned.length, done: !!m });
+    }));
+    return out.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  },
+
   /** Calls Gemini on Vertex AI. Returns parsed JSON when json = true. */
-  generate_(prompt, json) {
-    const key = Config.get('VERTEX_API_KEY');
-    const model = Config.get('VERTEX_MODEL');
+  /** The address of generateContent: VERTEX_ENDPOINT, a project endpoint, or the global one (express mode). */
+  url_() {
+    const model = encodeURIComponent(Config.get('VERTEX_MODEL'));
     const project = Config.get('VERTEX_PROJECT_ID');
     const location = Config.get('VERTEX_LOCATION') || 'global';
     const host = location === 'global' ? 'aiplatform.googleapis.com' : location + '-aiplatform.googleapis.com';
-    const url = project
-      ? 'https://' + host + '/v1/projects/' + project + '/locations/' + location + '/publishers/google/models/' + model + ':generateContent'
-      : 'https://aiplatform.googleapis.com/v1/publishers/google/models/' + model + ':generateContent';
-    const res = UrlFetchApp.fetch(url, {
+    const own = Config.get('VERTEX_ENDPOINT');
+    const url = /^https:\/\/[a-z0-9.-]+\.googleapis\.com\//i.test(own) ? own.replace('{model}', model)
+      : project ? 'https://' + host + '/v1/projects/' + encodeURIComponent(project) + '/locations/' + encodeURIComponent(location) + '/publishers/google/models/' + model + ':generateContent'
+        : 'https://aiplatform.googleapis.com/v1/publishers/google/models/' + model + ':generateContent';
+    return Config.get('VERTEX_KEY_IN') === 'query' ? url + (url.indexOf('?') < 0 ? '?' : '&') + 'key=' + encodeURIComponent(Config.get('VERTEX_API_KEY')) : url;
+  },
+  generate_(prompt, json) {
+    const key = Config.get('VERTEX_API_KEY');
+    const res = UrlFetchApp.fetch(Ai.url_(), {
       method: 'post',
       contentType: 'application/json',
-      headers: { 'x-goog-api-key': key },
+      headers: Config.get('VERTEX_KEY_IN') === 'query' ? {} : { 'x-goog-api-key': key },
       muteHttpExceptions: true,
       payload: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -522,7 +567,9 @@ const Ai = {
       }),
     });
     if (res.getResponseCode() !== 200) {
-      throw new Error('Vertex AI antwortet mit ' + res.getResponseCode());
+      let why = '';
+      try { why = JSON.parse(res.getContentText()).error.message; } catch (e) { why = ''; }
+      throw new Error('Vertex AI antwortet mit ' + res.getResponseCode() + (why ? ': ' + String(why).slice(0, 300) : ''));
     }
     const body = JSON.parse(res.getContentText());
     const text = (((body.candidates || [])[0] || {}).content || { parts: [] }).parts.map(x => x.text || '').join('');

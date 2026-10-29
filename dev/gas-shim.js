@@ -153,6 +153,14 @@
     },
   };
   root.Logger = { log: function () { if (!root.__GAS_QUIET__) console.log.apply(console, arguments); } };
+  // the HTML files of the project (set by dev/load.js and dev/build-preview.js)
+  root.HtmlService = root.HtmlService || {
+    createHtmlOutputFromFile(name) {
+      const files = root.__FILES__ || {};
+      if (!(name in files)) throw new Error('No HTML file named ' + name);
+      return { getContent: () => files[name] };
+    },
+  };
   root.UrlFetchApp = {
     fetch(url, opts) {
       if (/^https:\/\/www\.googleapis\.com\/(upload\/)?drive\/v3\/files/.test(url)) return root.__driveRest(url, opts || {});

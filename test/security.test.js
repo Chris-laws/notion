@@ -25,7 +25,7 @@ function world() {
 
 /** What an in-domain outsider tries on data that is not theirs. Every route needs an entry. */
 const ATTEMPTS = w => ({
-  'bootstrap': null, 'tasks.list': null, 'ai.status': null, 'ai.report': null, 'ai.briefing': null, 'ai.parse': null, 'ai.assist': null,
+  'bootstrap': null, 'tasks.list': null, 'ai.status': null, 'ai.test': {}, 'ai.ask': null, 'ui.chunk': null, 'ai.setAssistant': { on: false }, 'ai.apply': { items: [{ type: 'task', title: 'x', projectId: w.project.id }] }, 'ai.report': null, 'ai.briefing': null, 'ai.parse': null, 'ai.assist': null,
   'calendar.range': null, 'capacity': null, 'availability': null, 'users.save': { email: ANNA, name: 'Gehackt' },
   'tasks.save': { id: w.task.id, title: 'Gehackt' },
   'tasks.move': { items: [{ id: w.task.id, status: 'done' }] },

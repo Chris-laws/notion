@@ -306,6 +306,13 @@ function protoHead(m, version) {
     '<dt>' + L('Anwesend', 'Present') + '</dt><dd>' + people(m.present) + '</dd>' +
     '<dt>' + L('Abwesend', 'Absent') + '</dt><dd>' + people(m.absent) + '</dd></dl>';
 }
+/** "Speichert …" while the save runs in the background, then "Gespeichert"; a mark when Drive has no copy yet. */
+function docState(d) {
+  const save = d.saving ? '<span class="dv-save" role="status">' + esc(L('Speichert …', 'Saving …')) + '</span>'
+    : d.savedAt ? '<span class="dv-save ok" role="status">' + icon('check', 'sm') + esc(d.mergedWith ? L('Gespeichert, mit ' + user(d.mergedWith).name + ' zusammengeführt', 'Saved, merged with ' + user(d.mergedWith).name) : L('Gespeichert', 'Saved')) + '</span>' : '';
+  const drive = S.driveIssue && d.id ? '<button type="button" class="dv-drive" data-action="drive-issue">' + icon('alert', 'sm') + esc(L('Drive-Ablage ausstehend', 'Drive copy pending')) + '</button>' : '';
+  return save + drive;
+}
 function protoViewer() {
   const d = S.doc;
   const loading = d.content === undefined;
@@ -315,7 +322,8 @@ function protoViewer() {
     (d.updatedBy ? esc(' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) : '') + '</small></div>' +
     (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') +
     (d.canWrite && d.id ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' : '') +
-    (d.canWrite && !loading ? '<button class="btn sm primary" data-action="proto-edit">' + L('Bearbeiten', 'Edit') + '</button>' : '') + '</div>' +
+    docState(d) +
+    (d.canWrite && !loading ? '<button class="btn sm primary" data-action="proto-edit"' + (d.saving ? ' disabled' : '') + '>' + L('Bearbeiten', 'Edit') + '</button>' : '') + '</div>' +
     // the header at once; the table as a skeleton until the text is there
     (loading ? skLines(6) : protoHead(m, d.version) + protoTable(m, { actions: d.canWrite && d.id, docId: d.id })) + '</div>';
 }
@@ -334,11 +342,19 @@ function changeText(c) {
   return parts.join(' · ') || L('keine inhaltliche Änderung', 'no change in content');
 }
 /** Every version: who, when, what changed; view any of them, restore an earlier one (as a new version). */
+/** Admins (the files are in the app owner's Drive): a small link to the file of the minutes. */
+function driveLink(d) {
+  return S.me.admin && d && d.fileId ? '<a class="ver-drive" href="https://drive.google.com/file/d/' + encodeURIComponent(d.fileId) + '/view" target="_blank" rel="noopener noreferrer">' +
+    icon('open', 'sm') + esc(L('In Drive öffnen', 'Open in Drive')) + '</a>' : '';
+}
 A['doc-versions'] = el => {
   const id = el.dataset.id;
-  call('docs.versions', { id: id }).then(list => openModal({
+  const link = driveLink(S.doc && S.doc.id === id ? S.doc : null);
+  // open at once with a placeholder; the list fills in when it is there
+  openModal({ title: L('Versionen', 'Versions'), body: link + '<div class="list-plain ver-list">' + skLines(4) + '</div>', submitLabel: L('Schließen', 'Close'), onSubmit: () => closeModal() });
+  call('docs.versions', { id: id }).then(list => $('#modal-root .ver-list') && openModal({
     title: L('Versionen', 'Versions'),
-    body: '<div class="list-plain ver-list">' + list.map(v => '<div class="li"><span class="grow"><b>' + esc(L('Version ', 'Version ') + v.version) + '</b>' +
+    body: link + '<div class="list-plain ver-list">' + list.map(v => '<div class="li"><span class="grow"><b>' + esc(L('Version ', 'Version ') + v.version) + '</b>' +
       (v.current ? ' <span class="chip soft">' + esc(L('aktuell', 'current')) + '</span>' : '') +
       '<br><span class="faint">' + esc(user(v.by).name + ' · ' + fmtDate(String(v.at).slice(0, 10), { absolute: true }) + ' ' + String(v.at).slice(11, 16)) + '</span>' +
       (v.change ? '<br><span class="ver-ch">' + esc(changeText(v.change)) + '</span>' : '') + '</span>' +
@@ -504,33 +520,52 @@ A['proto-discard'] = () => {
   render({ peek: false });
 };
 A['proto-save'] = () => protoSave();
+/**
+ * "Übernehmen": the minutes show at once ("Speichert …") while the save runs in the background. The draft stays
+ * in the browser until the server has it; a conflict or an error brings the form back with everything typed.
+ */
 function protoSave() {
   const e = S.protoEdit;
   const content = Shared.protoToText(e.model);
   const payload = e.id ? { id: e.id, title: e.title, content: content, baseVersion: e.base, baseContent: e.saved }
     : { projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content, baseContent: e.saved };
+  const back = () => { S.protoEdit = e; render({ peek: false }); };
+  clearInterval(docLockTimer);
+  S.protoEdit = null;
+  S.doc = Object.assign({}, S.doc, { id: e.id, projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content, canWrite: true, draft: false, saving: true, savedAt: 0 });
+  render({ peek: false });
   return call('docs.save', payload).then(r => {
-    if (r.conflict) return protoConflict(r);
+    if (r.conflict) { back(); return protoConflict(r); }
     store.set(protoKey(e), null);
-    // the save released the "is editing" mark itself; Drive catches up in the background
-    clearInterval(docLockTimer);
-    S.protoEdit = null;
-    toast(r.merged ? L('Gespeichert und mit den Änderungen von ' + user(r.mergedWith).name + ' zusammengeführt', 'Saved and merged with the changes of ' + user(r.mergedWith).name)
-      : L('Protokoll gespeichert', 'Minutes saved'));
-    S.doc = Object.assign({}, r, { content: r.content || content, canWrite: true });
+    S.doc = Object.assign({}, r, { content: r.content || content, canWrite: true, saving: false, savedAt: Date.now(), mergedWith: r.merged ? r.mergedWith : '' });
     delete S.doc.jf;
     docRemember(S.doc);
     if (r.jf) S.jf = r.jf;
     render({ peek: false });
     docFlush(r.id);
-  }).catch(fail);
+  }).catch(err => { back(); fail(err); });
 }
-/** Writes the saved minutes into Drive (file and earlier version); nobody waits for it, a refusal is shown. */
+/** Writes the saved minutes into Drive (file and earlier version); nobody waits for it. */
 function docFlush(id) {
   call('docs.flush', { id: id }, { quiet: true }).then(f => {
-    if (f && f.error) toast(L('Gespeichert. Google Drive hat es noch nicht übernommen: ', 'Saved. Google Drive has not taken it yet: ') + f.error);
+    if (f && f.error) driveTrouble(f.error);
+    else if (f && !f.pending && S.driveIssue) { S.driveIssue = null; render({ peek: false }); }
   }).catch(() => {});
 }
+/**
+ * Drive did not take the file (the minutes are saved in the database and stay readable): a quiet mark in the
+ * header of the minutes with the reason behind "Details"; a short note at most once per session.
+ */
+function driveTrouble(reason) {
+  S.driveIssue = String(reason || '');
+  if (!S.driveToasted) { S.driveToasted = true; toast(L('Gespeichert. Die Ablage in Google Drive klappt noch nicht.', 'Saved. Storing in Google Drive does not work yet.'), { warn: true }); }
+  if (S.doc) render({ peek: false });
+}
+A['drive-issue'] = () => msgDetails(L('Das Protokoll ist gespeichert und für alle lesbar. Nur die Kopie als Datei in Google Drive fehlt noch; sie wird beim nächsten Speichern und nachts nachgeholt.\n\n' +
+  'Was tun: im Apps-Script-Editor einmal „setup“ ausführen und die Drive-Berechtigung zulassen. Steht unten „Drive API has not been used“, muss im Google-Cloud-Projekt des Skripts die Google Drive API aktiviert werden.\n\nMeldung von Google:\n',
+  'The minutes are saved and readable for everybody. Only the copy as a file in Google Drive is missing; it is made with the next save and at night.\n\n' +
+  'What to do: run "setup" once in the Apps Script editor and allow Drive. If the text below says "Drive API has not been used", enable the Google Drive API in the Cloud project of the script.\n\nGoogle said:\n') + (S.driveIssue || ''),
+  L('Ablage in Google Drive', 'Storage in Google Drive'));
 /** Someone saved in between: keep mine (on top of theirs) or take theirs. Nothing is lost silently. */
 function protoConflict(r) {
   const cur = r.current;

@@ -13,6 +13,15 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
+/** Parts of the page loaded when first used (they do not slow down the start). */
+const Ui = {
+  CHUNKS: ['Assistant'],
+  chunk(p) {
+    if (Ui.CHUNKS.indexOf(p && p.name) < 0) throw new Error('Unbekannter Teil.');
+    return { name: p.name, html: include(p.name + 'Ui') };
+  },
+};
+
 /** Used by the HTML templates: <?!= include('Styles') ?> */
 function include(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
@@ -49,6 +58,11 @@ const ROUTES = {
   'capacity': p => Capacity.forTeam(p),
   'availability': p => Availability.forTeam(p),
   'ai.status': () => Ai.status(),
+  'ai.test': () => Ai.test(),
+  'ai.ask': p => Assistant.ask(p),
+  'ai.apply': p => Assistant.apply(p),
+  'ai.setAssistant': p => Assistant.setOn(p),
+  'ui.chunk': p => Ui.chunk(p),
   'ai.parse': p => Ai.parse(p),
   'ai.assist': p => Ai.assist(p),
   'ai.report': p => Ai.report(p),

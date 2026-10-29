@@ -114,7 +114,7 @@ describe('minutes form', () => {
     due.dispatchEvent(new w.Event('change', { bubbles: true }));
     await wait(200);
     click($('[data-action="proto-save"]'));
-    await until(() => $('.pt'));
+    await until(() => $('.dv-save.ok') && $('.pt'));
     assert.match($('.pt').textContent, /Budget/);
     const before = w.eval('S.tasks.length');
     click($('[data-action="proto-task"]'));
@@ -140,7 +140,7 @@ describe('minutes form', () => {
   test('the version list shows who changed what; any version opens read only', async () => {
     await until(() => $('[data-action="doc-versions"]'));
     click($('[data-action="doc-versions"]'));
-    await until(() => $('#modal-root .ver-list'));
+    await until(() => $('#modal-root .ver-list .li'));
     const first = $('#modal-root .ver-list .li');
     assert.match(first.textContent, /aktuell/);
     assert.ok($('#modal-root [data-action="doc-version-view"]'));
@@ -198,7 +198,7 @@ describe('jour fixe v54', () => {
     await until(() => $('.pe-topic [data-action="proto-pin"][aria-pressed="true"]'));
     assert.equal(w.eval('S.protoEdit.model.topics[0].pinned'), true);
     click($('[data-action="proto-save"]'));
-    await until(() => $('.pt .pt-pin'));
+    await until(() => $('.dv-save.ok') && $('.pt .pt-pin'));
     assert.ok($('.pt .pt-pin'), 'anchor marker in the minutes');
   });
   test('a topic becomes a task: the project of the jour fixe is preselected, another one can be chosen', async () => {
@@ -283,7 +283,7 @@ describe('tasks from the minutes in a form (v57)', () => {
     const calls = [];
     w.eval('window.__calls = []; const oc = call; call = function (m) { window.__calls.push(m); return oc.apply(null, arguments); }');
     click($('[data-action="proto-save"]'));
-    await until(() => $('.pt') && !$('.proto-edit'));
+    await until(() => $('.dv-save.ok') && $('.pt') && !$('.proto-edit'));
     await wait(100);
     const sent = JSON.parse(w.eval('JSON.stringify(window.__calls)'));
     calls.push(...sent);
@@ -401,7 +401,7 @@ describe('simulation in the page: two people, drafts', () => {
     await saveAs(other, "m => { m.topics.push({ id: 'zz', title: 'Von nebenan', items: [] }); }");
     w.eval("S.protoEdit.model.topics.push({ id: 'yy', title: 'Von mir', items: [] }); protoRender()");
     click($('[data-action="proto-save"]'));
-    await until(() => $('.doc-view .pt') && !$('.proto-edit'));
+    await until(() => $('.dv-save.ok') && $('.doc-view .pt') && !$('.proto-edit'));
     assert.equal($('#modal-root form'), null, 'no conflict dialog');
     assert.match($('.doc-view .pt').textContent, /Von nebenan/);
     assert.match($('.doc-view .pt').textContent, /Von mir/);
@@ -415,7 +415,7 @@ describe('simulation in the page: two people, drafts', () => {
     await until(() => $('#modal-root .de-preview'));
     assert.match($('#modal-root .de-preview').textContent, /Titel von nebenan/);
     $('#modal-root form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-    await until(() => $('.doc-view .pt') && !$('.proto-edit'));
+    await until(() => $('.dv-save.ok') && $('.doc-view .pt') && !$('.proto-edit'));
     assert.match($('.doc-view .pt').textContent, /Mein Titel/);
   });
   test('an unsaved draft survives closing the page and comes back when the meeting is opened again', async () => {
@@ -427,5 +427,65 @@ describe('simulation in the page: two people, drafts', () => {
     await openSaved();
     assert.equal($('.pe-topic input[data-path="topics.0.title"]').value, 'Entwurf bleibt');
     click($('[data-action="proto-discard"]'));
+  });
+});
+
+describe('calm messages and saving in the background (v60)', () => {
+  test('a long message with a web address shows one short line; "Details" opens the full text', async () => {
+    w.eval("document.querySelector('#toasts').innerHTML = ''");
+    const long = 'Die App darf noch nicht in Google Drive speichern. Bitte im Apps-Script-Editor einmal „setup“ ausführen und die Berechtigung zulassen. (Google 403: Google Drive API has not been used in project 123 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=123 then retry.)';
+    w.eval(`toast(${JSON.stringify(long)}, { error: true })`);
+    const t = $('#toasts .toast');
+    assert.doesNotMatch(t.textContent, /https|Google 403/);
+    assert.ok(t.textContent.length < 200);
+    const btn = [...t.querySelectorAll('button')].find(b => /Details/.test(b.textContent));
+    assert.ok(btn, 'a Details button');
+    click(btn);
+    await until(() => $('#modal-root .msg-full'));
+    assert.match($('#modal-root .msg-full').textContent, /https:\/\/console/);
+    w.eval('closeModal()');
+  });
+  async function openEditor() {
+    w.eval(`S.doc = null; S.protoEdit = null; S.projTab = 'jf'; go('project', ${JSON.stringify(pid)})`);
+    await until(() => $('.jf-active .jf-row'));
+    const m = w.eval(`jfData().minutes.find(x => x.projectId === ${JSON.stringify(pid)})`);
+    await w.eval(`jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
+    await until(() => $('.doc-view .pt'));
+    click($('[data-action="proto-edit"]'));
+    await until(() => $('.proto-edit'));
+  }
+  test('"Übernehmen" shows the minutes at once with "Speichert…", then "Gespeichert"; no toast for it', async () => {
+    await openEditor();
+    w.eval("document.querySelector('#toasts').innerHTML = ''");
+    const title = $('.pe-topic input[data-path="topics.0.title"]');
+    title.value = 'Im Hintergrund gespeichert';
+    title.dispatchEvent(new w.Event('input', { bubbles: true }));
+    await wait(200);
+    click($('[data-action="proto-save"]'));
+    assert.ok($('.doc-view .pt'), 'the minutes are there right away');
+    assert.match($('.doc-view .pt').textContent, /Im Hintergrund gespeichert/);
+    assert.match($('.doc-view .dv-save').textContent, /Speichert/);
+    await until(() => /Gespeichert/.test(($('.doc-view .dv-save') || {}).textContent || ''));
+    assert.match($('.doc-view .dv-save').textContent, /Gespeichert/);
+    assert.doesNotMatch($('#toasts').textContent, /Protokoll gespeichert/);
+  });
+  test('"Versionen" opens at once and fills in', async () => {
+    click($('[data-action="doc-versions"]'));
+    assert.ok($('#modal-root .ver-list'), 'open at once');
+    await until(() => $('#modal-root .ver-list [data-action="doc-version-view"]'));
+    assert.ok($('#modal-root .ver-list [data-action="doc-version-view"]'));
+    w.eval('closeModal()');
+  });
+  test('Drive refusing to store the file: no red message on every save, a quiet note in the header with details', async () => {
+    w.eval("document.querySelector('#toasts').innerHTML = ''; S.driveIssue = null; S.driveToasted = false");
+    w.eval("driveTrouble('Die App darf noch nicht in Google Drive speichern. (Google 403: Drive API disabled https://console.developers.google.com/x)')");
+    w.eval("driveTrouble('Die App darf noch nicht in Google Drive speichern. (Google 403: Drive API disabled https://console.developers.google.com/x)')");
+    assert.ok($$('#toasts .toast').length <= 1, 'at most one short note per session');
+    w.eval('render()');
+    await until(() => $('.doc-view .dv-drive'));
+    click($('.doc-view [data-action="drive-issue"]'));
+    await until(() => $('#modal-root .msg-full'));
+    assert.match($('#modal-root').textContent, /setup/);
+    w.eval('closeModal(); S.driveIssue = null; render()');
   });
 });
