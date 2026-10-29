@@ -1952,10 +1952,10 @@ function settingsPage() {
       '✅ <b>Vertex AI is on</b> (model <code>' + esc(S.ai.model) + '</code>). Briefing, quick add and task breakdown use Gemini.')
     : L('<b>Regelbasierter Modus.</b> Alle smarten Funktionen laufen bereits mit Regeln (Quick-Add-Parser, Kapazitäts-Vorschläge, Briefing). ' +
       'Für KI: im Apps-Script-Projekt unter <i>Projekteinstellungen → Skripteigenschaften</i> den Wert <code>VERTEX_API_KEY</code> setzen ' +
-      '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optional <code>VERTEX_MODEL</code> und <code>VERTEX_API_STYLE</code> (auto, gemini oder vertex).',
+      '(Platzhalter: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), oder (Anmeldung über euer Google-Cloud-Projekt) <code>VERTEX_PROJECT_ID</code>; optional <code>VERTEX_MODEL</code>, <code>VERTEX_LOCATION</code>, <code>VERTEX_API_STYLE</code>.',
     '<b>Rule-based mode.</b> All smart features already work with rules (quick-add parser, capacity suggestions, briefing). ' +
       'For AI: in the Apps Script project under <i>Project settings → Script properties</i> set <code>VERTEX_API_KEY</code> ' +
-      '(placeholder: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), optionally <code>VERTEX_MODEL</code> and <code>VERTEX_API_STYLE</code> (auto, gemini or vertex).')) +
+      '(placeholder: <code>PLATZHALTER_VERTEX_AI_API_KEY</code>), or (sign-in through your Google Cloud project) <code>VERTEX_PROJECT_ID</code>; optionally <code>VERTEX_MODEL</code>, <code>VERTEX_LOCATION</code>, <code>VERTEX_API_STYLE</code>.')) +
     (S.me.admin ? aiAdminRow() : '') + '</div>';
 
   let admin = '';

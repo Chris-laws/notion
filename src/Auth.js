@@ -104,6 +104,8 @@ const Config = {
     VERTEX_API_KEY: 'PLATZHALTER_VERTEX_AI_API_KEY',
     VERTEX_MODEL: 'gemini-2.5-flash',
     VERTEX_API_STYLE: 'auto',
+    VERTEX_PROJECT_ID: '',
+    VERTEX_LOCATION: 'global',
     VERTEX_ENDPOINT: '',
     VERTEX_KEY_IN: 'header',
     AI_ASSISTANT: 'on',

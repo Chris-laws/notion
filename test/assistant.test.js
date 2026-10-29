@@ -239,10 +239,9 @@ describe('review findings (v60)', () => {
 describe('the two ways to Gemini with an API key', () => {
   const ok = { code: 200, body: { candidates: [{ content: { parts: [{ text: 'OK' }] } }] } };
   const no = { code: 401, body: { error: { message: 'API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal.' } } };
-  test('auto: Vertex refuses API keys, so the Gemini API is used and kept for the day; a project id is not used', () => {
+  test('auto with a key: Vertex refuses API keys, so the Gemini API is used and kept for the day', () => {
     const { app } = world();
     setProp(app, 'VERTEX_API_KEY', 'AIzaTest');
-    setProp(app, 'VERTEX_PROJECT_ID', 'lidl-ki-123');
     const calls = app.fakeFetch(url => (/aiplatform/.test(url) ? no : ok));
     const t = app.call('ai.test', {});
     assert.equal(t.ok, true);
@@ -250,7 +249,6 @@ describe('the two ways to Gemini with an API key', () => {
     assert.equal(calls[1].url, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
     assert.equal(calls[1].opts.headers['x-goog-api-key'], 'AIzaTest');
     assert.match(t.style, /Gemini API/);
-    assert.match(t.note, /VERTEX_PROJECT_ID/);
     app.call('ai.test', {});
     assert.equal(calls.length, 3, 'the second time straight to the Gemini API');
   });
@@ -266,3 +264,32 @@ describe('the two ways to Gemini with an API key', () => {
     assert.match(calls[0].url, /generativelanguage/);
   });
 });
+
+describe('Gemini with the sign-in of the deploying account (Google Cloud project, no key)', () => {
+  const ok = { code: 200, body: { candidates: [{ content: { parts: [{ text: 'OK' }] } }] } };
+  test('a project set: the project address with the sign-in token, no key; in a region its own host', () => {
+    const { app } = world();
+    setProp(app, 'VERTEX_PROJECT_ID', 'lidl-ki-123');
+    const calls = app.fakeFetch(() => ok);
+    assert.equal(app.call('ai.status', {}).enabled, true, 'on without a key');
+    const t = app.call('ai.test', {});
+    assert.equal(t.ok, true);
+    assert.equal(calls[0].url, 'https://aiplatform.googleapis.com/v1/projects/lidl-ki-123/locations/global/publishers/google/models/gemini-2.5-flash:generateContent');
+    assert.equal(calls[0].opts.headers.Authorization, 'Bearer test-token');
+    assert.equal(calls[0].opts.headers['x-goog-api-key'], undefined);
+    assert.match(t.style, /Anmeldung/);
+    setProp(app, 'VERTEX_LOCATION', 'europe-west3');
+    app.call('ai.test', {});
+    assert.match(calls[1].url, /^https:\/\/europe-west3-aiplatform\.googleapis\.com\/v1\/projects\/lidl-ki-123\/locations\/europe-west3\//);
+  });
+  test('clear messages: role missing, API off, project not linked, sign-in missing', () => {
+    const { app } = world();
+    setProp(app, 'VERTEX_PROJECT_ID', 'lidl-ki-123');
+    const answer = (code, message) => { app.fakeFetch(() => ({ code: code, body: { error: { message: message } } })); return app.call('ai.test', {}).error; };
+    assert.match(answer(403, "Permission 'aiplatform.endpoints.predict' denied on resource"), /Rolle „Vertex AI User“/);
+    assert.match(answer(403, 'Vertex AI API has not been used in project lidl-ki-123 before or it is disabled.'), /Agent Platform API.*aktivieren/);
+    assert.match(answer(403, 'Vertex AI API has not been used in project 98765 before or it is disabled.'), /nicht mit eurem Google-Cloud-Projekt verknüpft/);
+    assert.match(answer(401, 'Request had insufficient authentication scopes.'), /setup/);
+  });
+});
+

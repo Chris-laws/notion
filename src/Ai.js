@@ -4,8 +4,11 @@
  * Vertex AI takes over or enriches the result.
  *
  * Configure in Apps Script: Project Settings -> Script Properties
- *   VERTEX_API_KEY     Google API key (AIza…). Placeholder until set.
- *   VERTEX_API_STYLE   "auto" (default), "vertex" (Agent Platform express mode) or "gemini" (Gemini API)
+ *   VERTEX_PROJECT_ID  Google Cloud project: the app calls Gemini there with the sign-in of the account
+ *                      that runs it ("Execute as: Me"; scope cloud-platform, role Vertex AI User). No key needed.
+ *   VERTEX_LOCATION    region of that call, default "global" (e.g. europe-west3)
+ *   VERTEX_API_KEY     instead: a Google API key (AIza…), for the express mode or the Gemini API.
+ *   VERTEX_API_STYLE   "auto" (default: project set -> sign-in, else key), "oauth", "vertex" or "gemini"
  *   VERTEX_MODEL       default gemini-2.5-flash (any model the key may use)
  *   VERTEX_ENDPOINT    optional for the Vertex way: the whole address with {model}, e.g.
  *                      https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent
@@ -15,6 +18,9 @@
 const Ai = {
   LIMIT: 'Tageslimit für KI erreicht.',
   enabled() {
+    return Ai.hasKey_() || !!Config.get('VERTEX_PROJECT_ID');
+  },
+  hasKey_() {
     const key = Config.get('VERTEX_API_KEY');
     return !!key && key.indexOf('PLATZHALTER') !== 0;
   },
@@ -35,7 +41,7 @@ const Ai = {
   test() {
     if (!Auth.isAdmin(Auth.currentUser())) throw new Error('Keine Berechtigung.');
     const model = Config.get('VERTEX_MODEL');
-    if (!Ai.enabled()) return { ok: false, model: model, error: 'Kein Schlüssel hinterlegt: in den Skripteigenschaften VERTEX_API_KEY setzen.' };
+    if (!Ai.enabled()) return { ok: false, model: model, error: 'Nicht eingerichtet: in den Skripteigenschaften VERTEX_PROJECT_ID (Anmeldung über euer Google-Cloud-Projekt) oder VERTEX_API_KEY setzen.' };
     const start = Date.now();
     try {
       const answer = String(Ai.generate_('Antworte nur mit dem Wort OK.', false)).trim().slice(0, 200);
@@ -48,9 +54,9 @@ const Ai = {
   /** Which way and address the test used (key masked); a project id set from earlier is pointed out. */
   testInfo_() {
     const style = Ai.style_();
-    return { style: style === 'gemini' ? 'Gemini API (generativelanguage.googleapis.com)' : 'Vertex AI / Agent Platform (aiplatform.googleapis.com)',
-      url: Ai.url_(style).replace(/key=[^&]+/, 'key=…'),
-      note: PropertiesService.getScriptProperties().getProperty('VERTEX_PROJECT_ID') ? 'VERTEX_PROJECT_ID wird mit API-Schlüssel nicht verwendet und kann gelöscht werden.' : '' };
+    const label = { gemini: 'Gemini API (generativelanguage.googleapis.com)', oauth: 'Agent Platform mit Anmeldung (Projekt ' + Config.get('VERTEX_PROJECT_ID') + ')' };
+    return { style: label[style] || 'Vertex AI / Agent Platform (aiplatform.googleapis.com)', url: Ai.url_(style).replace(/key=[^&]+/, 'key=…'),
+      note: style !== 'oauth' && Config.get('VERTEX_PROJECT_ID') ? 'VERTEX_PROJECT_ID wird nur mit Anmeldung verwendet (VERTEX_API_STYLE = oauth oder auto).' : '' };
   },
 
   /** Natural-language quick add. Client parses locally; this refines with Gemini. */
@@ -558,16 +564,30 @@ const Ai = {
    */
   style_() {
     const want = String(Config.get('VERTEX_API_STYLE') || 'auto').toLowerCase();
-    if (want === 'gemini' || want === 'vertex') return want;
+    if (want === 'gemini' || want === 'vertex' || want === 'oauth') return want;
+    // a project set: with the sign-in of the account the app runs as (the way for company projects)
+    if (Config.get('VERTEX_PROJECT_ID')) return 'oauth';
     return CacheService.getScriptCache().get('aistyle:' + Util.today()) || 'vertex';
   },
   url_(style) {
+    style = style || Ai.style_();
     const model = encodeURIComponent(Config.get('VERTEX_MODEL'));
+    if (style === 'oauth') {
+      const loc = String(Config.get('VERTEX_LOCATION') || 'global').toLowerCase();
+      const host = loc === 'global' ? 'aiplatform.googleapis.com' : encodeURIComponent(loc) + '-aiplatform.googleapis.com';
+      return 'https://' + host + '/v1/projects/' + encodeURIComponent(Config.get('VERTEX_PROJECT_ID')) + '/locations/' + encodeURIComponent(loc) +
+        '/publishers/google/models/' + model + ':generateContent';
+    }
     const own = Config.get('VERTEX_ENDPOINT');
-    const url = (style || Ai.style_()) === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent'
+    const url = style === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent'
       : /^https:\/\/[a-z0-9.-]+\.googleapis\.com\//i.test(own) ? own.replace('{model}', model)
         : 'https://aiplatform.googleapis.com/v1/publishers/google/models/' + model + ':generateContent';
     return Config.get('VERTEX_KEY_IN') === 'query' ? url + (url.indexOf('?') < 0 ? '?' : '&') + 'key=' + encodeURIComponent(Config.get('VERTEX_API_KEY')) : url;
+  },
+  /** The sign-in (token of the account the app runs as) or the key. */
+  auth_(style) {
+    if (style === 'oauth') return { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() };
+    return Config.get('VERTEX_KEY_IN') === 'query' ? {} : { 'x-goog-api-key': Config.get('VERTEX_API_KEY') };
   },
   /** Calls Gemini (the way chosen above). Returns parsed JSON when json = true. */
   generate_(prompt, json) {
@@ -587,7 +607,7 @@ const Ai = {
     const res = UrlFetchApp.fetch(Ai.url_(style), {
       method: 'post',
       contentType: 'application/json',
-      headers: Config.get('VERTEX_KEY_IN') === 'query' ? {} : { 'x-goog-api-key': Config.get('VERTEX_API_KEY') },
+      headers: Ai.auth_(style),
       muteHttpExceptions: true,
       payload: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -599,11 +619,26 @@ const Ai = {
     const text = (((body.candidates || [])[0] || {}).content || { parts: [] }).parts.map(x => x.text || '').join('');
     return json ? JSON.parse(text) : text;
   },
+  /** What to do when the call with the sign-in is refused. */
+  oauthHint_(code, why) {
+    if (/has not been used in project|is disabled|SERVICE_DISABLED/i.test(why)) {
+      return /project (\d+)/.test(why) && !new RegExp(String(Config.get('VERTEX_PROJECT_ID'))).test(why)
+        ? ' – Das Apps-Script-Projekt ist noch nicht mit eurem Google-Cloud-Projekt verknüpft: Apps Script → Projekteinstellungen → Google Cloud-Projekt → Projekt ändern → Projektnummer eintragen.'
+        : ' – In der Cloud-Konsole „Agent Platform API“ (früher Vertex AI API) aktivieren.';
+    }
+    if (code === 401 || /insufficient authentication scopes|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(why)) {
+      return ' – Die Anmeldung fehlt: im Apps-Script-Editor einmal „setup“ ausführen und die neue Berechtigung „Google Cloud“ zulassen.';
+    }
+    if (code === 403) return ' – Dein Konto braucht im Projekt die Rolle „Vertex AI User“ (Agent Platform User) oder höher.';
+    if (code === 404) return ' – Projekt-ID, Region (VERTEX_LOCATION) oder Modell (VERTEX_MODEL) prüfen.';
+    return '';
+  },
   /** Google's answer, with what to do for the usual cases. */
   why_(style, code, body) {
     let why = '';
     try { why = JSON.parse(body).error.message; } catch (e) { why = ''; }
     const name = style === 'gemini' ? 'Gemini API' : 'Vertex AI';
+    if (style === 'oauth') return name + ' antwortet mit ' + code + (why ? ': ' + String(why).slice(0, 300) : '') + Ai.oauthHint_(code, why);
     let hint = '';
     if (style === 'gemini' && (code === 403 || code === 400) && /blocked|not been used|disabled|API key not valid/i.test(why)) {
       hint = ' – Beim Schlüssel muss die „Generative Language API“ erlaubt und im Google-Cloud-Projekt aktiviert sein.';
