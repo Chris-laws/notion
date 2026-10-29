@@ -482,11 +482,14 @@ function imgFill() {
   });
 }
 // previews are filled when they appear on the page: looked for once per frame, not on every change
-new MutationObserver(() => {
-  if (imgFill.planned) return;
+const imgObserver = new MutationObserver(() => {
+  // a page that is being closed schedules nothing more
+  if (imgFill.planned || !document.defaultView) return;
   imgFill.planned = true;
-  (window.requestAnimationFrame || setTimeout)(imgFill);
-}).observe(document.documentElement, { childList: true, subtree: true });
+  setTimeout(imgFill, 16);
+});
+imgObserver.observe(document.documentElement, { childList: true, subtree: true });
+window.addEventListener('pagehide', () => imgObserver.disconnect());
 A['img-view'] = el => imgLoad(el.dataset.id).then(src => openModal({ title: (el.querySelector('img') || {}).alt || L('Bild', 'Image'), wide: true, noCancel: true,
   body: '<img class="lf-big" src="' + src + '" alt="">', submitLabel: L('Schließen', 'Close'), onSubmit: () => closeModal() })).catch(fail);
 /** Where an image in this field belongs: the open task, or the project of the minutes being written. */

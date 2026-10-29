@@ -331,10 +331,9 @@ describe('opening a jour fixe (v58)', () => {
   test('the next meeting opens at once, without asking the server', async () => {
     await tab();
     spy();
-    const before = Date.now();
     click($('.jf-active .jf-row.next .jf-hit'));
+    // in the same tick as the click (no await in between): nothing was waited for
     assert.ok($('.proto-edit') || $('.doc-view'), 'shown in the same moment');
-    assert.ok(Date.now() - before < 200);
     assert.deepEqual(calls().filter(m => m !== 'docs.lock'), [], 'no call to open it');
     if ($('[data-action="proto-discard"]')) click($('[data-action="proto-discard"]'));
   });
@@ -506,10 +505,12 @@ describe('saving in the background and leaving (v60 review)', () => {
     click($('[data-action="proto-save"]'));
     click($('[data-action="doc-close"]'));
     assert.ok($('.jf-active'), 'back at the list');
-    await wait(400);
+    // until the save has come back (however long that takes), then: still on the list
+    const saved = () => w.eval(`(jfData().minutes.find(x => x.id === ${JSON.stringify(m.id)}) || {}).version`) > m.version;
+    await until(saved, 10000);
+    assert.ok(saved(), 'saved');
+    await wait(50);
     assert.equal($('.doc-view'), null, 'not pulled back into the minutes');
     assert.ok(!w.eval('S.doc'), 'nothing open');
-    const again = w.eval(`jfData().minutes.find(x => x.id === ${JSON.stringify(m.id)})`);
-    assert.ok(again.version > m.version, 'and saved');
   });
 });
