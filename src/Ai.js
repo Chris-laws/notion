@@ -15,6 +15,7 @@
  * The key never leaves the server; the browser only learns whether AI is on.
  */
 const Ai = {
+  LIMIT: 'Tageslimit für KI erreicht.',
   enabled() {
     const key = Config.get('VERTEX_API_KEY');
     return !!key && key.indexOf('PLATZHALTER') !== 0;
@@ -148,7 +149,7 @@ const Ai = {
       users: Users.list().map(u => ({ email: u.email, name: u.name })),
       // only teams and projects the person belongs to: the model gets no others, proposals cannot point elsewhere
       teams: Db.all('Teams').filter(t => ctx.admin || ctx.teamIds[t.id]).map(t => ({ id: t.id, name: t.name })),
-      projects: Db.all('Projects').filter(x => Access.canManageProject(x, ctx)).map(x => ({ id: x.id, name: x.name })),
+      projects: Db.all('Projects').filter(x => (ctx.admin || ctx.projectIds[x.id]) && Access.canManageProject(x, ctx)).map(x => ({ id: x.id, name: x.name })),
     };
   },
 
@@ -555,6 +556,7 @@ const Ai = {
     return Config.get('VERTEX_KEY_IN') === 'query' ? url + (url.indexOf('?') < 0 ? '?' : '&') + 'key=' + encodeURIComponent(Config.get('VERTEX_API_KEY')) : url;
   },
   generate_(prompt, json) {
+    if (!Assistant.budget_(Auth.email(), String(prompt).length)) throw new Error(Ai.LIMIT);
     const key = Config.get('VERTEX_API_KEY');
     const res = UrlFetchApp.fetch(Ai.url_(), {
       method: 'post',

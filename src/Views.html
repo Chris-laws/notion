@@ -1921,7 +1921,7 @@ function aiAdminRow() {
       '<label class="pe-done"><input type="checkbox" data-on-change="ai-assistant-on"' + (S.ai.assistant !== false ? ' checked' : '') + '> ' + esc(L('Assistent für alle eingeschaltet', 'Assistant on for everybody')) + '</label>' +
       (S.ai.callsToday ? '<span class="faint">' + esc(L('KI-Aufrufe heute: ', 'AI calls today: ') + S.ai.callsToday) + '</span>' : '') +
       (S.aiTest ? '<span class="ai-test ' + (S.aiTest.ok ? 'ok' : 'bad') + '" role="status">' + esc((S.aiTest.ok ? L('Gemini antwortet: ', 'Gemini answers: ') + S.aiTest.answer : shortMsg(S.aiTest.error)) +
-        ' · ' + S.aiTest.model + (S.aiTest.ms !== undefined ? ' · ' + S.aiTest.ms + ' ms' : '')) + '</span>' +
+        (S.aiTest.model ? ' · ' + S.aiTest.model : '') + (S.aiTest.ms !== undefined ? ' · ' + S.aiTest.ms + ' ms' : '')) + '</span>' +
         (S.aiTest.ok ? '' : '<button class="linkbtn" data-action="ai-test-why">' + esc(L('Details', 'Details')) + '</button>') : '') + '</div>';
 }
 function settingsPage() {

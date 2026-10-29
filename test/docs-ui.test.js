@@ -489,3 +489,27 @@ describe('calm messages and saving in the background (v60)', () => {
     w.eval('closeModal(); S.driveIssue = null; render()');
   });
 });
+
+describe('saving in the background and leaving (v60 review)', () => {
+  test('closing the minutes while they are saved: the page stays where the person went', async () => {
+    w.eval(`S.doc = null; S.protoEdit = null; S.projTab = 'jf'; go('project', ${JSON.stringify(pid)})`);
+    await until(() => $('.jf-active .jf-row'));
+    const m = w.eval(`jfData().minutes.find(x => x.projectId === ${JSON.stringify(pid)})`);
+    await w.eval(`jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
+    await until(() => $('.doc-view .pt'));
+    click($('[data-action="proto-edit"]'));
+    await until(() => $('.proto-edit'));
+    const title = $('.pe-topic input[data-path="topics.0.title"]');
+    title.value = 'Gespeichert beim Weggehen';
+    title.dispatchEvent(new w.Event('input', { bubbles: true }));
+    await wait(200);
+    click($('[data-action="proto-save"]'));
+    click($('[data-action="doc-close"]'));
+    assert.ok($('.jf-active'), 'back at the list');
+    await wait(400);
+    assert.equal($('.doc-view'), null, 'not pulled back into the minutes');
+    assert.ok(!w.eval('S.doc'), 'nothing open');
+    const again = w.eval(`jfData().minutes.find(x => x.id === ${JSON.stringify(m.id)})`);
+    assert.ok(again.version > m.version, 'and saved');
+  });
+});

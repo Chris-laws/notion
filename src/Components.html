@@ -903,14 +903,14 @@ function drawAssist() {
     const ty = TYPES[it.type] || TYPES.task;
     const head = it.type === 'absence'
       ? '<span class="ai-title">' + esc(absenceType(it.absenceType).label) + ' · ' + esc(user(it.email).name) + '</span>'
-      : '<input class="input ai-title" data-ai-i="' + i + '" data-ai-f="title" value="' + esc(it.title || '') + '" aria-label="Titel">';
+      : '<input class="input ai-title" data-ai-i="' + i + '" data-ai-f="title" value="' + esc(it.title || '') + '" aria-label="' + esc(L('Titel', 'Title')) + '">';
     const meta = it.type === 'task'
       ? date(i, 'dueDate', it.dueDate, 'Fällig') + '<span class="ai-meta"><button type="button" class="ai-people" data-ai-people="' + i + '" title="Zuständige ändern">' +
         (it.assignees && it.assignees.length ? avatars(it.assignees, 3) : avatar(S.me.email)) + icon('plus', 'sm') + '</button>' +
         (it.estimate ? '<span class="chip">' + icon('hourglass', 'sm') + esc(fmtHours(it.estimate)) + '</span>' : '') + (it.priority ? prioTag(it.priority) : '') +
         (it.projectId && project(it.projectId) ? projectChip(project(it.projectId)) : '') + '</span>'
       : date(i, 'startDate', it.startDate, 'Von') + date(i, 'endDate', it.endDate, 'Bis');
-    return '<div class="ai-card' + (it.keep ? '' : ' off') + '"><label class="ai-k"><input type="checkbox" data-ai-i="' + i + '"' + (it.keep ? ' checked' : '') + ' aria-label="Übernehmen"></label>' +
+    return '<div class="ai-card' + (it.keep ? '' : ' off') + '"><label class="ai-k"><input type="checkbox" data-ai-i="' + i + '"' + (it.keep ? ' checked' : '') + ' aria-label="' + esc(L('Übernehmen', 'Take over')) + '"></label>' +
       '<div class="ai-main"><div class="ai-row"><span class="ai-type">' + icon(ty[0], 'sm') + ty[1] + '</span>' + head + '</div><div class="ai-row">' + meta + '</div></div></div>';
   };
   $('#ai-prev').innerHTML = (st.source === 'rules'

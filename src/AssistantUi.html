@@ -1,6 +1,6 @@
 <style>
 /* the assistant: loaded when first opened (ui.chunk), so it does not slow down the start */
-.asst { position: fixed; right: 16px; bottom: 16px; z-index: 70; width: min(440px, calc(100vw - 32px)); height: min(660px, calc(100vh - 32px)); display: flex; flex-direction: column;
+.asst { position: fixed; right: 16px; bottom: 16px; z-index: 45; width: min(440px, calc(100vw - 32px)); height: min(660px, calc(100vh - 32px)); display: flex; flex-direction: column;
   background: var(--bg-elevated); color: var(--text); border-radius: 18px; box-shadow: var(--shadow-pop); border: 1px solid var(--border); overflow: hidden; animation: popin .14s; }
 .asst-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .asst-h b { flex: 1; font-size: 15px; display: inline-flex; align-items: center; gap: 6px; }
@@ -81,7 +81,7 @@ function asstDraw() {
   ta.value = draft;
   ta.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); A['asst-send'](); }
-    if (e.key === 'Escape') { e.preventDefault(); asstClose(); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); asstClose(); }
   });
   const log = $('#asst-root .asst-log');
   log.scrollTop = log.scrollHeight;
@@ -99,7 +99,13 @@ function asstAsk(q) {
     ASST.msgs[ASST.msgs.length - 1] = { who: 'ai', text: shortMsg(friendlyError(err.message)) };
   }).then(() => { ASST.busy = false; asstDraw(); const ta = $(ASST_TA); if (ta) ta.focus(); });
 }
-A['asst-send'] = () => { const ta = $(ASST_TA); const q = ta.value; ta.value = ''; return asstAsk(q); };
+A['asst-send'] = () => {
+  const ta = $(ASST_TA);
+  if (ASST.busy || !ta.value.trim()) return Promise.resolve();
+  const q = ta.value;
+  ta.value = '';
+  return asstAsk(q);
+};
 A['asst-quick'] = el => asstAsk(el.textContent);
 A['asst-close'] = () => asstClose();
 A['asst-cite'] = el => {

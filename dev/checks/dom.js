@@ -71,7 +71,7 @@ function tour(w) {
     ['jour fixe tab', "closePeek(); call('jf.saveSeries', { projectId: '" + proj.id + "', title: 'Tour-JF', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: TODAY(), attendees: [S.me.email], meetLink: 'https://meet.google.com/abc-defg-hij' })" +
       ".then(() => call('jf.list', {})).then(j => { S.jf = j; S.doc = null; S.projTab = 'jf'; go('project', '" + proj.id + "'); })", 600],
     ['jour fixe minutes form', "jfOpen(jfData().series[0].id, Shared.jfDates(jfData().series[0], TODAY(), Shared.addDays(TODAY(), 30))[0])", 400],
-    ['jour fixe task form', "A['proto-add-topic'](); jfTaskMask(true, S.protoEdit.model.topics.length - 1)", 300],
+    ['jour fixe task form', "A['proto-add-topic'](); jfTasks(() => jfTaskMask(true, S.protoEdit.model.topics.length - 1))", 500],
     ['jour fixe series form', "closeModal(); jfModal(jfData().series[0], '" + proj.id + "', '" + proj.teamId + "')", 300],
     ['team/jour fixe', "closeModal(); A['proto-discard'](); S.teamTab = 'jf'; go('team', '" + proj.teamId + "')", 300],
     // the assistant (loaded on first use): panel, an answer, proposals in the confirmation form

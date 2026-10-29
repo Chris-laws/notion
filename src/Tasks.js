@@ -87,15 +87,26 @@ const Tasks = {
     });
   },
 
-  /** A task goes only into projects and teams the person belongs to (taking it out is always allowed). */
+  /**
+   * A task goes only into projects and teams the person belongs to (taking it out is always allowed).
+   * A sub-task may stay where its parent is, when the person sees the parent (e.g. assigned to it).
+   */
   checkPlace_(f, prev, ctx) {
     if (ctx.admin) return;
-    if (f.projectId && f.projectId !== (prev && prev.projectId)) {
+    const like = Tasks.parentSeen_(f, prev, ctx);
+    const kept = [prev && prev.projectId, like && like.projectId].filter(Boolean);
+    if (f.projectId && kept.indexOf(f.projectId) < 0) {
       const project = Db.get('Projects', f.projectId);
       if (!project || !Access.canManageProject(project, ctx)) throw new Error('Keine Berechtigung für dieses Projekt.');
     }
-    const before = prev ? prev.teams || [] : [];
+    const before = (prev ? prev.teams || [] : []).concat(like ? like.teams || [] : []);
     if ((f.teams || []).some(id => before.indexOf(id) < 0 && !ctx.teamIds[id])) throw new Error('Keine Berechtigung.');
+  },
+  /** The parent of a (sub-)task when the person sees it: its place may be kept. */
+  parentSeen_(f, prev, ctx) {
+    const parentId = f.parentId !== undefined ? f.parentId : prev && prev.parentId;
+    const parent = parentId ? Db.get('Tasks', parentId) : null;
+    return parent && Access.canSeeTask(parent, ctx) ? parent : null;
   },
 
   spawnNext_(t, email) {

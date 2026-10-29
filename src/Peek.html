@@ -352,6 +352,11 @@ A['peek-more'] = el => {
         ['title', 'description', 'status', 'priority', 'projectId', 'teams', 'assignees', 'tags', 'startDate', 'dueDate', 'estimate', 'parentId', 'recurrence']
           .forEach(k => { copy[k] = t[k]; });
         copy.title = t.title + ' (Kopie)';
+        // a copy outside the parent only goes where the person may put tasks (the server checks again)
+        if (!copy.parentId) {
+          if (copy.projectId && !(project(copy.projectId) && canEditProject(project(copy.projectId)))) copy.projectId = '';
+          copy.teams = (copy.teams || []).filter(id => myTeams().some(x => x.id === id));
+        }
         newTaskModal(copy);
       }
       if (v === 'sub') {

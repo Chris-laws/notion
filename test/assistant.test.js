@@ -165,3 +165,73 @@ describe('AI endpoint configurable', () => {
     assert.equal((calls[0].opts.headers || {})['x-goog-api-key'], undefined);
   });
 });
+
+describe('simulation: who sees what in the assistant', () => {
+  test('jour fixe, absences and projects of others never reach the answer or the model (outsider, member, lead)', () => {
+    const { app, project, today, S } = world();
+    setProp(app, 'VERTEX_API_KEY', 'k');
+    app.as(LEA).call('jf.saveSeries', { projectId: app.as(LEA).call('bootstrap').projects.find(p => p.name === 'Geheimprojekt').id, title: 'Geheim-JF', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: today, attendees: [LEA] });
+    app.as(LEA).call('absences.save', { email: LEA, type: 'sick', startDate: S.addDays(today, 1), endDate: S.addDays(today, 2), note: 'privat' });
+    app.as(ME).call('jf.saveSeries', { projectId: project.id, title: 'Portal-JF', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: today, attendees: [ME, ANNA] });
+    for (const who of [OUT, ANNA]) {
+      const calls = gemini(app, { answer: 'x', cite: [], proposals: [] });
+      app.as(who).call('ai.ask', { question: 'Jour Fixe und wer ist abwesend?' });
+      const prompt = JSON.parse(calls[0].opts.payload).contents[0].parts[0].text;
+      assert.doesNotMatch(prompt, /Geheim|Lea Huber|privat/, who + ' sees nothing of Lea');
+      if (who === OUT) assert.doesNotMatch(prompt, /Portal/, 'the outsider sees nothing of the team');
+      else assert.match(prompt, /Portal-JF/, 'Anna sees her project');
+    }
+    const leaOwn = gemini(app, { answer: 'x', cite: [], proposals: [] });
+    app.as(LEA).call('ai.ask', { question: 'Wer ist abwesend?' });
+    const own = JSON.parse(leaOwn[0].opts.payload).contents[0].parts[0].text;
+    assert.match(own, /abwesend \(sick\)/, 'her own sick leave she may see');
+    assert.doesNotMatch(own, /privat/, 'notes never go to the model');
+  });
+  test('a sick leave of a teammate is shown as "away", not as sick', () => {
+    const { app, today, S } = world();
+    app.as(ANNA).call('absences.save', { email: ANNA, type: 'sick', startDate: S.addDays(today, 1), endDate: S.addDays(today, 1) });
+    setProp(app, 'VERTEX_API_KEY', 'k');
+    const calls = gemini(app, { answer: 'x', cite: [], proposals: [] });
+    app.as(ME).call('ai.ask', { question: 'Wer ist abwesend?' });
+    const prompt = JSON.parse(calls[0].opts.payload).contents[0].parts[0].text;
+    assert.match(prompt, /Anna Schmidt abwesend \(other\)/);
+    assert.doesNotMatch(prompt, /Anna Schmidt abwesend \(sick\)/);
+  });
+});
+
+describe('review findings (v60)', () => {
+  test('a person assigned to a task in a project of others may add sub-tasks there; a free task still not', () => {
+    const { app, team, late } = world();
+    const project2 = app.call('projects.save', { teamId: team.id, name: 'Nur ich', members: [ME] });
+    const [t] = app.call('tasks.save', { title: 'Fremd', projectId: project2.id, assignees: [LEA] });
+    const [sub] = app.as(LEA).call('tasks.save', { title: 'Teil', projectId: project2.id, parentId: t.id });
+    assert.equal(sub.projectId, project2.id);
+    assert.match(app.as(LEA).error('tasks.save', { title: 'Lose', projectId: project2.id }), /Berechtigung/);
+    assert.ok(late);
+  });
+  test('the quick-add form still creates entries when the assistant is switched off', () => {
+    const { app, project } = world();
+    app.call('ai.setAssistant', { on: false });
+    const r = app.call('ai.apply', { items: [{ type: 'task', title: 'Per Text', projectId: project.id }] });
+    assert.equal(r.created.length, 1);
+  });
+  test('every model call counts against the daily limit (also the quick report and quick add)', () => {
+    const { app } = world();
+    setProp(app, 'VERTEX_API_KEY', 'k');
+    setProp(app, 'AI_USER_DAILY', '2');
+    const calls = app.fakeFetch(() => ({ code: 200, body: { candidates: [{ content: { parts: [{ text: JSON.stringify({ text: 'Bericht', points: [], items: [], answer: 'a', cite: [], proposals: [] }) }] } }] } }));
+    app.call('ai.report', { range: 'week', fresh: true });
+    app.call('ai.report', { range: 'week', fresh: true });
+    app.call('ai.report', { range: 'week', fresh: true });
+    app.call('ai.assist', { text: 'Angebot schreiben' });
+    assert.equal(calls.filter(c => /aiplatform\.googleapis\.com/.test(c.url)).length, 2, 'two calls to the model, then the rules');
+  });
+  test('the panel lies below dialogs, so the confirmation form is never hidden behind it', () => {
+    const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'AssistantUi.html'), 'utf8');
+    const z = Number(/\.asst \{[^}]*z-index: (\d+)/.exec(css)[1]);
+    const styles = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'Styles.html'), 'utf8');
+    const modal = Number(/\.modal-bg \{[^}]*z-index: (\d+)/.exec(styles)[1]);
+    assert.ok(z < modal, z + ' < ' + modal);
+  });
+});
+

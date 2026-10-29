@@ -26,14 +26,14 @@ const Assistant = {
     const data = Assistant.context_(me, question);
     if (!Ai.enabled()) return Assistant.rules_(question, data, en);
     const prompt = Assistant.prompt_(me, question, data, en);
-    if (!Assistant.budget_(me.email, prompt.length)) {
-      return Object.assign(Assistant.rules_(question, data, en), { note: en ? 'Daily AI limit reached: answered with rules.' : 'Tageslimit für KI erreicht: mit Regeln beantwortet.' });
-    }
     try {
       return Assistant.clean_(Ai.generate_(prompt, true), data, me, en);
     } catch (e) {
-      console.error('assistant: ' + e.message);
-      return Object.assign(Assistant.rules_(question, data, en), { note: en ? 'AI did not answer, rules answered instead.' : 'Die KI hat nicht geantwortet, die Regeln haben übernommen.' });
+      const limit = e.message === Ai.LIMIT;
+      if (!limit) console.error('assistant: ' + e.message);
+      return Object.assign(Assistant.rules_(question, data, en), { note: limit
+        ? (en ? 'Daily AI limit reached: answered with rules.' : 'Tageslimit für KI erreicht: mit Regeln beantwortet.')
+        : (en ? 'AI did not answer, rules answered instead.' : 'Die KI hat nicht geantwortet, die Regeln haben übernommen.') });
     }
   },
 
@@ -136,7 +136,7 @@ const Assistant = {
       cite: list.slice(0, 12).map(Assistant.chip_),
     });
     const byDate = k => (a, b) => String(a[k]).localeCompare(String(b[k]));
-    if (/überfällig|ueberfaellig|verspätet|overdue|late/.test(q)) {
+    if (/überfällig|ueberfaellig|verspätet|\boverdue\b|\blate\b/.test(q)) {
       return pick(all.filter(i => i.kind === 'task' && i.overdue).sort((a, b) => (b.mine - a.mine) || byDate('due')(a, b)),
         L('Überfällig:', 'Overdue:'), L('Nichts überfällig.', 'Nothing is overdue.'));
     }
@@ -144,7 +144,7 @@ const Assistant = {
       return pick(all.filter(i => i.kind === 'jf').sort(byDate('date')), L('Die nächsten Jour Fixe:', 'Next jour fixe meetings:'),
         L('Kein Jour Fixe geplant.', 'No jour fixe planned.'));
     }
-    if (/abwesend|urlaub|krank|frei|absent|away|vacation|holiday|wer ist|who is/.test(q)) {
+    if (/abwesend|urlaub|krank|\bfrei\b|\babsent\b|\baway\b|vacation|holiday|wer ist|who is/.test(q)) {
       return pick(all.filter(i => i.kind === 'absence').sort(byDate('from')), L('Abwesend in den nächsten 4 Wochen:', 'Away in the next 4 weeks:'),
         L('In den nächsten 4 Wochen ist niemand abwesend.', 'Nobody is away in the next 4 weeks.'));
     }
@@ -180,7 +180,6 @@ const Assistant = {
   /** Confirmed proposals: every item checked again, created together or not at all. */
   apply(p) {
     const me = Auth.currentUser();
-    if (!Assistant.on()) throw new Error('Der Assistent ist ausgeschaltet.');
     const list = (Array.isArray(p && p.items) ? p.items : []).slice(0, 20);
     if (!list.length) throw new Error('Nichts ausgewählt.');
     const ctx = Ai.parseContext_(me);

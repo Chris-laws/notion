@@ -154,6 +154,7 @@ A['jf-open'] = el => jfOpen(el.dataset.id, el.dataset.v);
  * Only a meeting older than the last minutes asks the server for its draft.
  */
 function jfOpen(seriesId, date) {
+  if (JF_SAVING[seriesId + ':' + date]) { toast(L('Wird gerade gespeichert – gleich noch einmal öffnen.', 'Being saved right now – open it again in a moment.')); return Promise.resolve(); }
   const s = jfData().series.find(x => x.id === seriesId);
   const saved = jfData().minutes.find(m => m.seriesId === seriesId && m.date === date);
   if (saved) return Promise.resolve(jfOpenSaved(saved));
@@ -362,7 +363,10 @@ A['doc-versions'] = el => {
       (v.current ? '</div>' : '<button type="button" class="btn sm" data-action="doc-restore" data-id="' + esc(id) + '" data-v="' + v.version + '">' + esc(L('Wiederherstellen', 'Restore')) + END_BTN)).join('') + '</div>',
     submitLabel: L('Schließen', 'Close'),
     onSubmit: () => closeModal(),
-  })).catch(fail);
+  })).catch(err => {
+    const box = $('#modal-root .ver-list');
+    if (box) box.innerHTML = '<p class="hint" role="status">' + esc(shortMsg(friendlyError(err.message))) + '</p>';
+  });
 };
 /** One version, read only (the version list stays one click away). */
 A['doc-version-view'] = el => call('docs.version', { id: el.dataset.id, version: Number(el.dataset.v) }).then(v => {
@@ -529,22 +533,38 @@ function protoSave() {
   const content = Shared.protoToText(e.model);
   const payload = e.id ? { id: e.id, title: e.title, content: content, baseVersion: e.base, baseContent: e.saved }
     : { projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content, baseContent: e.saved };
-  const back = () => { S.protoEdit = e; render({ peek: false }); };
+  const token = {};
+  const key = e.seriesId + ':' + e.date;
+  // still on these minutes? (the person may have closed them or opened others meanwhile)
+  const here = () => !!S.doc && S.doc.saveToken === token;
+  // a conflict or an error: the form comes back with everything typed (the draft is still in the browser)
+  const back = () => {
+    if (!here()) { toast(L('Das Protokoll wurde nicht gespeichert. Öffne es erneut: dein Entwurf ist noch da.', 'The minutes were not saved. Open them again: your draft is still there.'), { warn: true }); return false; }
+    S.protoEdit = e;
+    if (e.id) docLock(e.id);
+    render({ peek: false });
+    return true;
+  };
   clearInterval(docLockTimer);
   S.protoEdit = null;
-  S.doc = Object.assign({}, S.doc, { id: e.id, projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content, canWrite: true, draft: false, saving: true, savedAt: 0 });
+  JF_SAVING[key] = true;
+  S.doc = Object.assign({}, S.doc, { id: e.id, projectId: e.projectId, seriesId: e.seriesId, date: e.date, title: e.title, content: content, canWrite: true, draft: false, saving: true, savedAt: 0, saveToken: token });
   render({ peek: false });
   return call('docs.save', payload).then(r => {
-    if (r.conflict) { back(); return protoConflict(r); }
+    delete JF_SAVING[key];
+    if (r.conflict) return back() ? protoConflict(r) : null;
     store.set(protoKey(e), null);
-    S.doc = Object.assign({}, r, { content: r.content || content, canWrite: true, saving: false, savedAt: Date.now(), mergedWith: r.merged ? r.mergedWith : '' });
-    delete S.doc.jf;
-    docRemember(S.doc);
+    const saved = Object.assign({}, r, { content: r.content || content, canWrite: true, saving: false, savedAt: Date.now(), mergedWith: r.merged ? r.mergedWith : '' });
+    delete saved.jf;
+    docRemember(saved);
     if (r.jf) S.jf = r.jf;
+    if (here()) S.doc = saved;
     render({ peek: false });
     docFlush(r.id);
-  }).catch(err => { back(); fail(err); });
+  }).catch(err => { delete JF_SAVING[key]; back(); fail(err); });
 }
+/* meetings whose minutes are being saved right now: not opened a second time meanwhile */
+const JF_SAVING = {};
 /** Writes the saved minutes into Drive (file and earlier version); nobody waits for it. */
 function docFlush(id) {
   call('docs.flush', { id: id }, { quiet: true }).then(f => {
@@ -596,100 +616,11 @@ function protoConflict(r) {
     },
   });
 }
-/* ---------------- minutes: tasks from a topic or a line (a form; nothing is made before "Anlegen") ---------------- */
-/** The minutes the buttons belong to: the form (before "Übernehmen") or the saved minutes. */
-function jfTaskSource(draft) {
-  if (draft) { const e = S.protoEdit; return { model: e.model, projectId: e.projectId, docId: e.id || '', date: e.date, title: e.title }; }
-  const d = S.doc;
-  return { model: Shared.protoFromText(d.content), projectId: d.projectId, docId: d.id, date: d.date, title: d.title };
-}
-function jfPeople(src) {
-  const p = project(src.projectId);
-  return src.model.present.concat(p ? projectMembers(p) : [], S.users.map(u => u.email)).filter((x, i, a) => x && a.indexOf(x) === i);
-}
-function jfPersonField(name, people, value) {
-  return '<select class="select sm" name="' + name + '"' + ariaL(L('Verantwortlich', 'Responsible')) + '><option value="">' + esc(L('– ich –', '– me –')) + '</option>' +
-    people.map(x => '<option value="' + esc(x) + '"' + (x === value ? ' selected' : '') + '>' + esc(user(x).name) + '</option>').join('') + '</select>';
-}
-/** One line of the topic in the form: tick it to make it a sub-task; text, person and date can still be changed. */
-function jfMaskLine(i, people) {
-  const has = !!jfLive(i.taskId);
-  const on = !has && !i.done && !!String(i.text).trim();
-  return '<div class="jm-line' + (has ? ' has' : '') + '"><label class="jm-pick"><input type="checkbox" name="pick" value="' + esc(i.id) + '"' + (on ? ' checked' : '') + (has ? ' disabled' : '') +
-    ariaL(L('Als Unteraufgabe übernehmen', 'Take as sub-task')) + '><span class="pt-type t-' + i.type + '">' + i.type + '</span></label>' +
-    '<input class="input sm" name="t_' + esc(i.id) + '" value="' + esc(i.text) + '"' + ariaL(L('Unteraufgabe', 'Sub-task')) + '>' +
-    jfPersonField('o_' + i.id, people, i.owner) +
-    '<input class="input sm" type="date" name="d_' + esc(i.id) + '" value="' + esc(i.due) + '"' + ariaL(L('Fällig', 'Due')) + '>' +
-    (has ? '<span class="chip soft">' + esc(L('schon Aufgabe', 'already a task')) + '</span>' : '') + '</div>';
-}
-/**
- * The form for tasks from the minutes: project (the one of the jour fixe preselected), title, person, due date;
- * for a topic also its lines with checkboxes: the ticked ones become sub-tasks of the topic's task.
- */
-function jfTaskMask(draft, k, n) {
-  const src = jfTaskSource(draft);
-  const topic = src.model && src.model.topics[k];
-  if (!topic) return;
-  const line = n === undefined ? null : topic.items[n];
-  const people = jfPeople(src);
-  const choice = S.projects.filter(p => p.id === src.projectId || canEditProject(p));
-  const requestId = newId();
-  const head = line || { text: topic.title, owner: topic.owner, due: '' };
-  const lines = line ? '' : '<div class="field"><span class="jm-h">' + esc(L('Unteraufgaben', 'Sub-tasks')) +
-    '<label class="jm-all"><input type="checkbox" data-on-change="jm-all" checked> ' + esc(L('Alle auswählen', 'Select all')) + '</label></span>' +
-    (topic.items.length ? topic.items.map(i => jfMaskLine(i, people)).join('') : '<p class="hint">' + esc(L('Das Thema hat keine Zeilen.', 'The topic has no lines.')) + '</p>') + '</div>';
-  openModal({
-    title: line ? L('Punkt als Aufgabe', 'Item as task') : L('Thema als Aufgabe', 'Topic as task'),
-    wide: !line,
-    body: field(L('Projekt', 'Project'), selectField('projectId', choice.map(p => ({ key: p.id, label: p.name })), src.projectId)) +
-      field(L('Aufgabe', 'Task'), '<input class="input" name="title" required maxlength="300" value="' + esc(head.text) + '">') +
-      '<div class="row">' + field(L('Verantwortlich', 'Responsible'), jfPersonField('owner', people, head.owner)) +
-      field(L('Fällig', 'Due'), '<input class="input" type="date" name="due" value="' + esc(head.due) + '">') + '</div>' + lines +
-      hintP(draft ? L('Die Aufgaben entstehen sofort, das Protokoll merkt sich die Verknüpfung beim „Übernehmen“.', 'The tasks are made right away; the minutes keep the link when you apply them.')
-        : L('Nichts wird angelegt, bevor du bestätigst.', 'Nothing is made before you confirm.')),
-    submitLabel: line ? L('Aufgabe anlegen', 'Create task') : L('Aufgabe mit Unteraufgaben anlegen', 'Create task with sub-tasks'),
-    onSubmit: v => jfMakeTasks({ draft: draft, src: src, topic: topic, line: line, requestId: requestId }, v),
-  });
-}
-ON.change['jm-all'] = el => { $$('input[name="pick"]:not([disabled])', el.closest('form')).forEach(c => { c.checked = el.checked; }); };
-/** o: { draft, src, topic, line, requestId } from the form; v: its values. */
-function jfMakeTasks(o, v) {
-  const src = o.src, topic = o.topic, line = o.line;
-  const who = e => (e ? [e] : [S.me.email]);
-  const from = L('Aus dem Jour Fixe „', 'From the jour fixe "') + src.title + (L('“', '"'));
-  const picked = line ? [] : [].concat(v.pick || []);
-  const payload = { projectId: v.projectId, requestId: o.requestId, docId: src.docId, draft: !!o.draft, topicId: topic.id, item: !!line,
-    task: { title: v.title, assignees: who(v.owner), dueDate: v.due, description: from },
-    items: line ? [{ itemId: line.id, title: v.title, assignees: who(v.owner), dueDate: v.due, description: from }]
-      : picked.map(id => ({ itemId: id, title: v['t_' + id], assignees: who(v['o_' + id]), dueDate: v['d_' + id], description: from })) };
-  return call('jf.makeTasks', payload).then(r => {
-    applyTasks(r.tasks);
-    toast(r.tasks.length > 1 ? L(r.tasks.length + ' Aufgaben angelegt', r.tasks.length + ' tasks created') : L('Aufgabe angelegt: ', 'Task created: ') + r.tasks[0].title,
-      { action: { label: L('Öffnen', 'Open'), fn: () => openPeek(r.tasks[0].id) } });
-    if (r.doc) { docRemember(r.doc); docFlush(r.doc.id); }
-    if (o.draft) jfLinkDraft(topic.id, line, r.tasks, picked, r.doc);
-    else if (r.doc) { S.doc = Object.assign({}, S.doc, r.doc); render({ peek: false }); }
-  });
-}
-/** Before "Übernehmen": the form keeps the task links (saved with the minutes, so nothing is made twice). */
-function jfLinkDraft(topicId, line, tasks, picked, doc) {
-  const e = S.protoEdit;
-  if (!e) return;
-  // the server linked the saved minutes too: when that was the only change since I opened them, it is my new base
-  if (doc && e.id === doc.id && Number(doc.version) === Number(e.base) + 1) { e.base = doc.version; e.saved = doc.content; }
-  const t = e.model.topics.find(x => x.id === topicId);
-  if (!t) return;
-  if (line) { const i = t.items.find(x => x.id === line.id); if (i) i.taskId = tasks[0].id; }
-  else {
-    t.taskId = tasks[0].id;
-    picked.forEach((id, k) => { const i = t.items.find(x => x.id === id); if (i && tasks[k + 1]) i.taskId = tasks[k + 1].id; });
-  }
-  store.set(protoKey(e), { base: e.base, baseText: e.saved, model: e.model });
-  protoRender();
-}
-A['proto-task'] = el => jfTaskMask(false, Number(el.dataset.t), Number(el.dataset.i));
-A['proto-topic-task'] = el => jfTaskMask(false, Number(el.dataset.t));
-A['pe-task'] = el => jfTaskMask(true, Number(el.dataset.t), el.dataset.i === undefined ? undefined : Number(el.dataset.i));
+/* the task form of the minutes is loaded on first use (JfTasksUi.html) */
+const jfTasks = fn => loadChunk('JfTasks').then(fn).catch(fail);
+A['proto-task'] = el => jfTasks(() => jfTaskMask(false, Number(el.dataset.t), Number(el.dataset.i)));
+A['proto-topic-task'] = el => jfTasks(() => jfTaskMask(false, Number(el.dataset.t)));
+A['pe-task'] = el => jfTasks(() => jfTaskMask(true, Number(el.dataset.t), el.dataset.i === undefined ? undefined : Number(el.dataset.i)));
 
 /* ---------------- admin: storage links ---------------- */
 function storageBox() {

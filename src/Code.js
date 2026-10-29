@@ -15,7 +15,7 @@ function doGet() {
 
 /** Parts of the page loaded when first used (they do not slow down the start). */
 const Ui = {
-  CHUNKS: ['Assistant'],
+  CHUNKS: ['Assistant', 'JfTasks'],
   chunk(p) {
     if (Ui.CHUNKS.indexOf(p && p.name) < 0) throw new Error('Unbekannter Teil.');
     return { name: p.name, html: include(p.name + 'Ui') };
