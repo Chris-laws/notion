@@ -1,0 +1,38 @@
+<script>
+/**
+ * Images into a description or a line of minutes (loaded on first use): checked here, made smaller when
+ * big (at most 1600 px, JPEG), sent to the server, and the marker ![name](lf:<id>) put where the cursor is.
+ */
+const IMG_MAX_PX = 1600;
+const IMG_TYPES = /^image\/(jpeg|png|gif|webp)$/;
+function imgRead(blob) {
+  return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = ko; r.readAsDataURL(blob); });
+}
+/** Big photos get smaller in the browser (less to send and to store); small images stay as they are. */
+function imgShrink(file) {
+  if (file.size <= 1500000 || typeof createImageBitmap !== 'function' || file.type === 'image/gif') return Promise.resolve(file);
+  return createImageBitmap(file).then(bmp => {
+    const f = Math.min(1, IMG_MAX_PX / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * f);
+    c.height = Math.round(bmp.height * f);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return new Promise(ok => c.toBlob(b => ok(b || file), 'image/jpeg', 0.85));
+  }).catch(() => file);
+}
+function imgUpload(file, where, ta) {
+  if (!IMG_TYPES.test(file.type)) { toast(L('Nur Bilder (JPEG, PNG, GIF oder WebP).', 'Images only (JPEG, PNG, GIF or WebP).')); return Promise.resolve(); }
+  toast(L('Bild wird hochgeladen …', 'Uploading image …'));
+  return imgShrink(file).then(blob => imgRead(blob).then(data => call('files.upload', Object.assign({ name: file.name || 'Bild', mime: blob.type || file.type, data: data }, where))))
+    .then(r => imgInsert(typeof ta === 'function' ? ta() : ta, r.token)).catch(fail);
+}
+/** The marker at the cursor (or at the end); the field's own input handling saves it. */
+function imgInsert(ta, token) {
+  if (!ta || !document.contains(ta)) { toast(L('Bild hochgeladen. Das Feld war schon zu – bitte erneut einfügen.', 'Image uploaded. The field was closed – please paste it again.')); return; }
+  const at = typeof ta.selectionStart === 'number' ? ta.selectionStart : ta.value.length;
+  const before = ta.value.slice(0, at), after = ta.value.slice(at);
+  ta.value = before + (before && !/\s$/.test(before) ? ' ' : '') + token + (after && !/^\s/.test(after) ? ' ' : '') + after;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.dispatchEvent(new Event('change', { bubbles: true }));
+}
+</script>

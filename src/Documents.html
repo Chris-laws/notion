@@ -283,12 +283,12 @@ function protoTable(m, o) {
     const ttask = jfLive(t.taskId) ? ' <button class="md-task" data-action="open-task" data-id="' + esc(t.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
       : o.actions ? ' <button class="md-mk" data-action="proto-topic-task" data-t="' + k + '">' + icon('plus', 'sm') + L('Thema als Aufgabe', 'Topic as task') + '</button>' : '';
     rows.push('<tr class="pt-topic"><td>' + (k + 1) + '.</td><td>' + (t.pinned ? '<span class="pt-pin"' + labelled(L('Verankert: kommt ins nächste Protokoll', 'Anchored: carried to the next minutes')) + '>' + icon('pin', 'sm') + '</span>' : '') +
-      '</td><td><b>' + linkify(t.title) + '</b>' + ttask + '</td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
+      '</td><td><b>' + richText(t.title) + '</b>' + ttask + '</td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
     t.items.forEach((i, n) => {
       const task = jfLive(i.taskId) ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
         : o.actions && i.type === 'A' && !lineDone(i) ? ' <button class="md-mk" data-action="proto-task" data-t="' + k + '" data-i="' + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
       rows.push('<tr class="pt-line' + (lineDone(i) ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
-        '<td>' + linkify(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
+        '<td>' + richText(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
     });
   });
   return '<div class="md-tw"><table class="pt"><thead><tr><th>' + L('Nr.', 'No.') + '</th><th>' + L('Art', 'Type') + '</th><th>' + L('Thema', 'Topic') + '</th><th>' +

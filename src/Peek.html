@@ -225,7 +225,9 @@ function renderPeek() {
       '<div class="dt-grid"><div class="dt-col">' +
       '<div class="card-w"><h3>' + icon('text', 'sm') + 'Beschreibung</h3><p class="hint" style="margin:-6px 0 12px">Kontext, Vorgehen und Ressourcen festhalten, damit später klar ist, was zu tun ist und warum.</p>' +
       '<div class="ed-tools"><button data-action="ed-fmt" data-k="head" title="Überschrift">H</button><button data-action="ed-fmt" data-k="bullet" title="Aufzählung">' + icon('list', 'sm') + '</button>' +
-      '<button data-action="ed-fmt" data-k="check" title="Checkliste">' + icon('checksq', 'sm') + '</button><button data-action="ed-fmt" data-k="date" title="Heutiges Datum einfügen">' + icon('calendar', 'sm') + '</button></div>' +
+      '<button data-action="ed-fmt" data-k="check" title="Checkliste">' + icon('checksq', 'sm') + '</button><button data-action="ed-fmt" data-k="date" title="Heutiges Datum einfügen">' + icon('calendar', 'sm') + '</button>' +
+      '<label class="ed-img" title="' + esc(L('Bild einfügen (oder Strg+V)', 'Insert image (or Ctrl+V)')) + '"><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-on-change="img-pick" aria-label="' +
+      esc(L('Bild einfügen', 'Insert image')) + '">' + icon('folder', 'sm') + '</label></div>' +
       '<textarea class="desc big" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
       '<div class="saved">' + icon('check', 'sm') + 'Alle Änderungen gespeichert</div></div>' +
       '<div class="card-w"><h3>' + icon('link', 'sm') + L('Links & Anhänge', 'Links & attachments') + '</h3>' + taskLinksHtml(t) + '</div>' +
@@ -298,10 +300,12 @@ ON.input['peek-desc'] = el => {
   // a pasted Gmail or document link shows as a chip right away
   const box = $('#peek .lk-desc');
   if (box) box.innerHTML = descLinksHtml(task(S.peekId));
+  const imgs = $('#peek .lf-imgs');
+  if (imgs) imgs.innerHTML = textImages(el.value);
 };
 /** The task's links, then the links found in its description (Gmail threads as "Mail öffnen"). */
 function taskLinksHtml(t) {
-  return '<div class="lk-row">' + linksHtml(t.links, 'task', t.id, true) + '</div><div class="lk-row lk-desc">' + descLinksHtml(t) + '</div>';
+  return '<div class="lk-row lf-imgs">' + textImages(t.description) + '</div><div class="lk-row">' + linksHtml(t.links, 'task', t.id, true) + '</div><div class="lk-row lk-desc">' + descLinksHtml(t) + '</div>';
 }
 
 ON.keydown['add-subtask'] = (el, e) => {

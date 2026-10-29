@@ -442,6 +442,67 @@ function modShortcut(e, k) {
   if ((k === 'j' || e.code === 'KeyJ') && S.ai.assistant !== false) { A.asst(); return true; }
   return false;
 }
+/* ---------------- images in texts: the marker ![name](lf:<id>) ---------------- */
+const IMG_TOKEN = /(!\[[^\]]*\]\(lf:fl_[a-z0-9]+\))/;
+/** Text with clickable links and image markers shown as small previews (loaded when they appear). */
+function richText(s) {
+  return String(s === undefined || s === null ? '' : s).split(IMG_TOKEN).map((part, k) => {
+    const m = k % 2 ? /^!\[([^\]]*)\]\(lf:(fl_[a-z0-9]+)\)$/.exec(part) : null;
+    return m ? imgThumb(m[2], m[1]) : linkify(part);
+  }).join('');
+}
+/** The image markers of a text as previews (under a description). */
+function textImages(s) {
+  const out = [];
+  String(s || '').replace(/!\[([^\]]*)\]\(lf:(fl_[a-z0-9]+)\)/g, (m, name, id) => { out.push(imgThumb(id, name)); return m; });
+  return out.join('');
+}
+const imgThumb = (id, name) => '<button type="button" class="lf-thumb" data-action="img-view" data-id="' + id + '" aria-label="' + esc(L('Bild ansehen: ', 'View image: ') + name) + '">' +
+  '<img data-lf="' + id + '" alt="' + esc(name) + '"></button>';
+const IMG_CACHE = {};
+function imgLoad(id) {
+  if (!IMG_CACHE[id]) IMG_CACHE[id] = call('files.get', { id: id }, { quiet: true }).then(f => 'data:' + f.mime + ';base64,' + f.data).catch(err => { delete IMG_CACHE[id]; throw err; });
+  return IMG_CACHE[id];
+}
+function imgFill() {
+  $$('img[data-lf]:not([src]):not([data-busy])').forEach(img => {
+    img.dataset.busy = '1';
+    imgLoad(img.dataset.lf).then(src => { img.src = src; }).catch(() => { img.alt = L('Bild nicht verfügbar', 'Image not available'); });
+  });
+}
+// previews are filled when they appear on the page (one call per image, then from memory)
+new MutationObserver(() => imgFill()).observe(document.documentElement, { childList: true, subtree: true });
+A['img-view'] = el => imgLoad(el.dataset.id).then(src => openModal({ title: (el.querySelector('img') || {}).alt || L('Bild', 'Image'), wide: true,
+  body: '<img class="lf-big" src="' + src + '" alt="">', submitLabel: L('Schließen', 'Close'), onSubmit: () => closeModal() })).catch(fail);
+/** Where an image in this field belongs: the open task, or the project of the minutes being written. */
+function imgPlace(ta) {
+  if (ta.matches('textarea[data-on-input="peek-desc"]') && S.peekId) return { kind: 'task', taskId: S.peekId };
+  if (ta.matches('.proto-edit textarea[data-path]') && S.protoEdit) return { kind: 'project', projectId: S.protoEdit.projectId };
+  return null;
+}
+function imgDrop(files, ta) {
+  const where = imgPlace(ta);
+  if (!where || !files.length) return false;
+  // the page may draw the field anew while the image travels: then the same field of the same place
+  const path = ta.dataset.path;
+  const field = () => (document.contains(ta) ? ta : path ? $('.proto-edit textarea[data-path="' + path + '"]')
+    : S.peekId === where.taskId ? $('#peek textarea.desc') : null);
+  loadChunk('Images').then(() => files.slice(0, 5).forEach(f => imgUpload(f, where, field))).catch(fail);
+  return true;
+}
+// pasting (Strg+V) or dropping an image into a description or a line of minutes
+['paste', 'drop'].forEach(type => document.addEventListener(type, e => {
+  const ta = e.target && e.target.closest ? e.target.closest('textarea') : null;
+  const dt = e.clipboardData || e.dataTransfer;
+  const files = ta && dt ? Array.prototype.slice.call(dt.files || []).filter(f => /^image\//.test(f.type)) : [];
+  if (files.length && imgDrop(files, ta)) e.preventDefault();
+}));
+ON.change['img-pick'] = el => {
+  const ta = $('#peek textarea.desc');
+  if (ta) imgDrop(Array.prototype.slice.call(el.files || []), ta);
+  el.value = '';
+};
+
 /* ---------------- parts loaded on first use ---------------- */
 const CHUNKS = {};
 /** The inside of the first style or script block of a part (tags built here, so this page has none in its code). */

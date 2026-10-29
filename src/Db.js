@@ -59,6 +59,11 @@ const SCHEMA = {
     json: ['openItems', 'pinnedTopics'],
     num: ['version', 'size', 'fileVersion'],
   },
+  // images in descriptions and minutes: the file is in Drive, here only where it belongs
+  Files: {
+    cols: ['id', 'driveId', 'kind', 'taskId', 'projectId', 'name', 'mime', 'size', 'createdBy', 'createdAt'],
+    num: ['size'],
+  },
   // saved texts Drive does not have yet (written by docs.flush right after the save); meta: the version before
   DocPending: {
     cols: ['id', 'docId', 'version', 'content', 'meta', 'at', 'claim'],

@@ -25,7 +25,9 @@ const runtime = `
   const params = new URLSearchParams(location.search);
   globalThis.__GAS_USER__ = params.get('user') || 'demo.user@firma.de';
   globalThis.__GAS_QUIET__ = true;
-  globalThis.__FILES__ = ${JSON.stringify({ AssistantUi: read('AssistantUi.html'), JfTasksUi: read('JfTasksUi.html') }).replace(/<\/script/gi, '<\\/script')};
+  // the built-in Drive service, as in the real project (images need it)
+  globalThis.Drive = __driveAdvanced();
+  globalThis.__FILES__ = ${JSON.stringify({ AssistantUi: read('AssistantUi.html'), JfTasksUi: read('JfTasksUi.html'), ImagesUi: read('ImagesUi.html') }).replace(/<\/script/gi, '<\\/script')};
   ${server}
   setup();
   PropertiesService.getScriptProperties().setProperty('ALLOW_DEMO_DATA', 'true');

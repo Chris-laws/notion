@@ -132,12 +132,14 @@
   // the browser preview has no zlib, there gzip passes the bytes through unchanged.
   const zlib = root.__zlib || null;
   const toBytes = s => (typeof Buffer !== 'undefined' ? Buffer.from(s, 'utf8') : new TextEncoder().encode(s));
-  function Blob(bytes) {
+  function Blob(bytes, type, name) {
     this.getBytes = () => bytes;
+    this.getContentType = () => type || 'text/plain';
+    this.getName = () => name || '';
     this.getDataAsString = () => (typeof Buffer !== 'undefined' ? Buffer.from(bytes).toString('utf8') : new TextDecoder().decode(bytes));
   }
   root.Utilities = {
-    newBlob: data => new Blob(typeof data === 'string' ? toBytes(data) : data),
+    newBlob: (data, type, name) => new Blob(typeof data === 'string' ? toBytes(data) : data, type, name),
     gzip: blob => { meter('zipKB', blob.getBytes().length / 1024); return new Blob(zlib ? zlib.gzipSync(Buffer.from(blob.getBytes())) : blob.getBytes()); },
     ungzip: blob => { const out = new Blob(zlib ? zlib.gunzipSync(Buffer.from(blob.getBytes())) : blob.getBytes()); meter('zipKB', out.getBytes().length / 1024); return out; },
     base64Encode: bytes => (typeof Buffer !== 'undefined' ? Buffer.from(bytes).toString('base64') : btoa(String.fromCharCode.apply(null, Array.from(bytes)))),
@@ -190,7 +192,9 @@
     this.setName = n => { name = n; return this; };
     this.getMimeType = () => mime;
     this.getUrl = () => 'https://drive.google.com/file/d/' + this.id;
-    this.getBlob = () => ({ getDataAsString: () => data });
+    // text files as strings, images as bytes
+    if (typeof content !== 'string' && content && content.length !== undefined) data = content;
+    this.getBlob = () => (typeof data === 'string' ? { getDataAsString: () => data } : new Blob(data, mime, name));
     this.setContent = c => { meter('driveWrite'); data = String(c); return this; };
     this.getSize = () => data.length;
     this.setTrashed = t => { trashed = !!t; return this; };
@@ -238,13 +242,15 @@
       },
       create: (meta, blob) => {
         const parent = meta.parents && drive[meta.parents[0]];
-        if (blob) return { id: parent.createFile(meta.name, blob.getDataAsString(), meta.mimeType).getId() };
+        const image = blob && /^image\//.test(blob.getContentType ? blob.getContentType() : '');
+        if (blob) return { id: parent.createFile(meta.name, image ? blob.getBytes() : blob.getDataAsString(), meta.mimeType).getId() };
         return { id: (parent ? parent.createFolder(meta.name) : root.DriveApp.createFolder(meta.name)).getId() };
       },
       get: (id, o) => {
         const item = drive[id];
         if (!item) throw new Error('API call to drive.files.get failed with error: File not found: ' + id);
-        return o && o.alt === 'media' ? item.getBlob().getDataAsString() : { id: id, trashed: item.isTrashed() };
+        if (o && o.alt === 'media') { const b = item.getBlob(); return b.getBytes ? b : b.getDataAsString(); }
+        return { id: id, trashed: item.isTrashed() };
       },
       update: (meta, id, blob) => {
         const item = drive[id];

@@ -116,6 +116,20 @@ const Gdrive = {
     if (svc) { Gdrive.run_(() => svc.update(meta, id)); return; }
     Gdrive.json_('patch', Gdrive.API + '/' + encodeURIComponent(id) + '?fields=id', meta);
   },
+  /** An image (bytes) into a folder. Needs the built-in Drive service (enabled in appsscript.json). */
+  createBlob(parentId, name, blob) {
+    const svc = Gdrive.svc_();
+    if (!svc) throw new Error('Für Bilder muss in Apps Script der Dienst „Drive API“ hinzugefügt sein (Dienste → Drive API).');
+    return Gdrive.run_(() => svc.create({ name: name, parents: [parentId], mimeType: blob.getContentType() }, blob).id);
+  },
+  /** The bytes of a file (images). */
+  readBytes(id) {
+    const svc = Gdrive.svc_();
+    if (!svc) throw new Error('Für Bilder muss in Apps Script der Dienst „Drive API“ hinzugefügt sein (Dienste → Drive API).');
+    const r = Gdrive.run_(() => svc.get(id, { alt: 'media' }));
+    if (r && typeof r.getBytes === 'function') return r.getBytes();
+    return typeof r === 'string' ? Utilities.newBlob(r).getBytes() : r;
+  },
   rename(id, name) { Gdrive.patch_(id, { name: name }); },
   /** To the Drive trash (restorable there for 30 days), never deleted for good. */
   trash(id) { Gdrive.patch_(id, { trashed: true }); },

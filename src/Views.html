@@ -555,7 +555,7 @@ function gtTip(bar) {
     (t.dueDate ? '<div class="l">' + icon('calendar', 'sm') + 'Fällig ' + esc(fmtDate(t.dueDate, { absolute: true })) + '</div>' : '') +
     progressBar(t, { wide: true }) +
     (t.assignees.length ? '<div class="l">' + avatars(t.assignees, 4) + esc(t.assignees.map(e => user(e).name.split(' ')[0]).join(', ')) + '</div>' : '') +
-    (t.description ? '<p>' + esc(t.description.slice(0, 110)) + (t.description.length > 110 ? '…' : '') + '</p>' : '');
+    (t.description ? '<p>' + esc(t.description.replace(/!\[([^\]]*)\]\(lf:fl_[a-z0-9]+\)/g, '[$1]').slice(0, 110)) + (t.description.length > 110 ? '…' : '') + '</p>' : '');
   const r = bar.getBoundingClientRect();
   tip.style.left = Math.min(window.innerWidth - 300, Math.max(8, r.left + 12)) + 'px';
   tip.style.top = (r.bottom + 8 + 190 > window.innerHeight ? r.top - 8 - tip.offsetHeight : r.bottom + 8) + 'px';

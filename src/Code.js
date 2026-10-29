@@ -15,7 +15,7 @@ function doGet() {
 
 /** Parts of the page loaded when first used (they do not slow down the start). */
 const Ui = {
-  CHUNKS: ['Assistant', 'JfTasks'],
+  CHUNKS: ['Assistant', 'JfTasks', 'Images'],
   chunk(p) {
     if (Ui.CHUNKS.indexOf(p && p.name) < 0) throw new Error('Unbekannter Teil.');
     return { name: p.name, html: include(p.name + 'Ui') };
@@ -63,6 +63,8 @@ const ROUTES = {
   'ai.apply': p => Assistant.apply(p),
   'ai.setAssistant': p => Assistant.setOn(p),
   'ui.chunk': p => Ui.chunk(p),
+  'files.upload': p => Files.upload(p),
+  'files.get': p => Files.get(p),
   'ai.parse': p => Ai.parse(p),
   'ai.assist': p => Ai.assist(p),
   'ai.report': p => Ai.report(p),
