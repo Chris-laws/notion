@@ -172,6 +172,7 @@ const ICONS = {
   db: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   pin: '<path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/>',
   video: '<rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-4v12l-6-4z"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -459,20 +460,34 @@ function textImages(s) {
 }
 const imgThumb = (id, name) => '<button type="button" class="lf-thumb" data-action="img-view" data-id="' + id + '" aria-label="' + esc(L('Bild ansehen: ', 'View image: ') + name) + '">' +
   '<img data-lf="' + id + '" alt="' + esc(name) + '"></button>';
+// images seen in this page: at most 30 kept in memory; one that cannot be had is not asked for again
 const IMG_CACHE = {};
+const IMG_KEEP = 30;
 function imgLoad(id) {
-  if (!IMG_CACHE[id]) IMG_CACHE[id] = call('files.get', { id: id }, { quiet: true }).then(f => 'data:' + f.mime + ';base64,' + f.data).catch(err => { delete IMG_CACHE[id]; throw err; });
+  if (!IMG_CACHE[id]) {
+    const ids = Object.keys(IMG_CACHE);
+    if (ids.length >= IMG_KEEP) delete IMG_CACHE[ids[0]];
+    IMG_CACHE[id] = call('files.get', { id: id }, { quiet: true }).then(f => 'data:' + f.mime + ';base64,' + f.data);
+  }
   return IMG_CACHE[id];
 }
 function imgFill() {
-  $$('img[data-lf]:not([src]):not([data-busy])').forEach(img => {
+  imgFill.planned = false;
+  // the page may be gone meanwhile (closed tab, tests)
+  let list = [];
+  try { list = $$('img[data-lf]:not([src]):not([data-busy])'); } catch (e) { return; }
+  list.forEach(img => {
     img.dataset.busy = '1';
     imgLoad(img.dataset.lf).then(src => { img.src = src; }).catch(() => { img.alt = L('Bild nicht verfügbar', 'Image not available'); });
   });
 }
-// previews are filled when they appear on the page (one call per image, then from memory)
-new MutationObserver(() => imgFill()).observe(document.documentElement, { childList: true, subtree: true });
-A['img-view'] = el => imgLoad(el.dataset.id).then(src => openModal({ title: (el.querySelector('img') || {}).alt || L('Bild', 'Image'), wide: true,
+// previews are filled when they appear on the page: looked for once per frame, not on every change
+new MutationObserver(() => {
+  if (imgFill.planned) return;
+  imgFill.planned = true;
+  (window.requestAnimationFrame || setTimeout)(imgFill);
+}).observe(document.documentElement, { childList: true, subtree: true });
+A['img-view'] = el => imgLoad(el.dataset.id).then(src => openModal({ title: (el.querySelector('img') || {}).alt || L('Bild', 'Image'), wide: true, noCancel: true,
   body: '<img class="lf-big" src="' + src + '" alt="">', submitLabel: L('Schließen', 'Close'), onSubmit: () => closeModal() })).catch(fail);
 /** Where an image in this field belongs: the open task, or the project of the minutes being written. */
 function imgPlace(ta) {
@@ -490,13 +505,20 @@ function imgDrop(files, ta) {
   loadChunk('Images').then(() => files.slice(0, 5).forEach(f => imgUpload(f, where, field))).catch(fail);
   return true;
 }
-// pasting (Strg+V) or dropping an image into a description or a line of minutes
+// pasting (Strg+V) or dropping an image into a description or a line of minutes;
+// a paste that also brings text (e.g. from Word) stays text
 ['paste', 'drop'].forEach(type => document.addEventListener(type, e => {
   const ta = e.target && e.target.closest ? e.target.closest('textarea') : null;
   const dt = e.clipboardData || e.dataTransfer;
-  const files = ta && dt ? Array.prototype.slice.call(dt.files || []).filter(f => /^image\//.test(f.type)) : [];
+  if (!ta || !dt || (type === 'paste' && dt.getData && dt.getData('text/plain'))) return;
+  const files = Array.prototype.slice.call(dt.files || []).filter(f => /^image\//.test(f.type));
   if (files.length && imgDrop(files, ta)) e.preventDefault();
 }));
+// dropping files on these fields is allowed (otherwise the browser would open the image)
+document.addEventListener('dragover', e => {
+  const ta = e.target && e.target.closest ? e.target.closest('textarea') : null;
+  if (ta && imgPlace(ta) && e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) e.preventDefault();
+});
 ON.change['img-pick'] = el => {
   const ta = $('#peek textarea.desc');
   if (ta) imgDrop(Array.prototype.slice.call(el.files || []), ta);
@@ -874,7 +896,7 @@ document.addEventListener('click', e => {
 });
 ['submit', 'input', 'change', 'keydown'].forEach(type => {
   document.addEventListener(type, e => {
-    const el = e.target.closest('[data-on-' + type + ']');
+    const el = e.target.closest ? e.target.closest('[data-on-' + type + ']') : null;
     if (!el) return;
     const fn = ON[type][el.getAttribute('data-on-' + type)];
     if (fn) {

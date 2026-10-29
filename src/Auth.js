@@ -108,6 +108,8 @@ const Config = {
     VERTEX_ENDPOINT: '',
     VERTEX_KEY_IN: 'header',
     AI_ASSISTANT: 'on',
+    FILES_USER_DAILY: '50',
+    FILES_USER_DAILY_MB: '100',
     AI_USER_DAILY: '40',
     AI_DAILY_CHARS: '2000000',
     ALLOW_DEMO_DATA: '',

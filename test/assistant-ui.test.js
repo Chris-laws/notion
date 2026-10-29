@@ -60,7 +60,6 @@ describe('assistant panel', () => {
     assert.ok($$('#asst-root [data-action="asst-report"][data-fresh]').length);
   });
   test('Escape closes the panel and gives the focus back', async () => {
-    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await until(() => !$('#asst-root .asst'));
     assert.equal($('#asst-root .asst'), null);

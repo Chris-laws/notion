@@ -18,7 +18,7 @@ function world() {
   const team = app.call('teams.save', { name: 'Kern', members: [ME, ANNA] });
   const project = app.call('projects.save', { teamId: team.id, name: 'Portal', members: [] });
   const [task] = app.call('tasks.save', { title: 'Mit Bild', projectId: project.id, assignees: [ANNA] });
-  return { app, project, task };
+  return { app, team, project, task };
 }
 
 describe('images', () => {
@@ -56,10 +56,29 @@ describe('images', () => {
     assert.match(up('image/png', Buffer.from('<script>alert(1)</script>').toString('base64')), /kein gültiges Bild/);
     assert.match(up('image/png', Buffer.alloc(3 * 1024 * 1024 + 10, 1).toString('base64')), /zu groß/);
   });
-  test('the image stays readable for the project after its task was deleted', () => {
+  test('deleting a task moves its images to the Drive trash (restorable there)', () => {
     const { app, task } = world();
     const r = app.call('files.upload', { kind: 'task', taskId: task.id, name: 'a.png', mime: 'image/png', data: PNG });
+    const driveId = app.x.Db.get('Files', r.id).driveId;
     app.call('tasks.remove', { id: task.id });
-    assert.equal(app.as(ANNA).call('files.get', { id: r.id }).data, PNG);
+    assert.equal(app.ctx.DriveApp.getFileById(driveId).isTrashed(), true);
+    assert.ok(app.as(ANNA).error('files.get', { id: r.id }));
+  });
+  test('an oversized send is refused before it is decoded; per person and day there is a limit', () => {
+    const { app, task } = world();
+    const big = 'A'.repeat(Math.ceil(3 * 1024 * 1024 * 4 / 3) + 100);
+    const m = app.measure(() => assert.match(app.error('files.upload', { kind: 'task', taskId: task.id, name: 'x.png', mime: 'image/png', data: big }), /zu groß/));
+    assert.ok(!m.driveWrite);
+    app.ctx.PropertiesService.getScriptProperties().setProperty('FILES_USER_DAILY', '2');
+    app.x.Config.reset();
+    app.call('files.upload', { kind: 'task', taskId: task.id, name: '1.png', mime: 'image/png', data: PNG });
+    app.call('files.upload', { kind: 'task', taskId: task.id, name: '2.png', mime: 'image/png', data: PNG });
+    assert.match(app.error('files.upload', { kind: 'task', taskId: task.id, name: '3.png', mime: 'image/png', data: PNG }), /morgen/);
+  });
+  test('the person who uploaded but left the project no longer gets the image', () => {
+    const { app, team, project } = world();
+    const r = app.as(ANNA).call('files.upload', { kind: 'project', projectId: project.id, name: 'a.png', mime: 'image/png', data: PNG });
+    app.as(ME).call('teams.save', { id: team.id, name: 'Kern', members: [ME] });
+    assert.ok(app.as(ANNA).error('files.get', { id: r.id }));
   });
 });

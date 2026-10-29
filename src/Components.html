@@ -509,7 +509,7 @@ function openModal(o) {
     '<div class="modal-head"><span id="modal-title">' + esc(o.title) + '</span><button type="button" class="icon-btn" data-action="modal-close" aria-label="Schließen" title="Schließen (Esc)">' + icon('x') + '</button></div>' +
     '<div class="modal-body">' + o.body + '</div>' +
     '<div class="modal-foot">' + (o.danger ? '<button type="button" class="btn danger left" data-action="modal-danger">' + esc(o.danger.label) + '</button>' : '') +
-    '<button type="button" class="btn" data-action="modal-close">Abbrechen</button>' +
+    (o.noCancel ? '' : '<button type="button" class="btn" data-action="modal-close">Abbrechen</button>') +
     '<button type="submit" class="btn primary">' + esc(o.submitLabel || 'Speichern') + '</button></div></form></div>';
   A['modal-danger'] = () => o.danger && o.danger.onClick();
   const m = $('#modal-root .modal');

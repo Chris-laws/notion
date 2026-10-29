@@ -166,6 +166,7 @@ const Tasks = {
       const comments = Db.all('Comments').filter(c => ids.indexOf(c.taskId) >= 0).map(c => c.id);
       Db.removeMany('Comments', comments);
       Db.removeMany('Tasks', ids);
+      Files.dropForTasks_(ids);
       return ids;
     });
   },

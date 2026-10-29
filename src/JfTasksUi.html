@@ -56,15 +56,17 @@ function jfTaskMask(draft, k, n) {
 }
 ON.change['jm-all'] = el => { $$('input[name="pick"]:not([disabled])', el.closest('form')).forEach(c => { c.checked = el.checked; }); };
 /** o: { draft, src, topic, line, requestId } from the form; v: its values. */
+/** A task title from a line: image markers become the image name (the image stays in the minutes). */
+const noImg = s => String(s || '').replace(/!\[([^\]]*)\]\(lf:fl_[a-z0-9]+\)/g, '$1').trim();
 function jfMakeTasks(o, v) {
   const src = o.src, topic = o.topic, line = o.line;
   const who = e => (e ? [e] : [S.me.email]);
   const from = L('Aus dem Jour Fixe „', 'From the jour fixe "') + src.title + (L('“', '"'));
   const picked = line ? [] : [].concat(v.pick || []);
   const payload = { projectId: v.projectId, requestId: o.requestId, docId: src.docId, draft: !!o.draft, topicId: topic.id, item: !!line,
-    task: { title: v.title, assignees: who(v.owner), dueDate: v.due, description: from },
+    task: { title: noImg(v.title), assignees: who(v.owner), dueDate: v.due, description: from },
     items: line ? [{ itemId: line.id, title: v.title, assignees: who(v.owner), dueDate: v.due, description: from }]
-      : picked.map(id => ({ itemId: id, title: v['t_' + id], assignees: who(v['o_' + id]), dueDate: v['d_' + id], description: from })) };
+      : picked.map(id => ({ itemId: id, title: noImg(v['t_' + id]), assignees: who(v['o_' + id]), dueDate: v['d_' + id], description: from })) };
   return call('jf.makeTasks', payload).then(r => {
     applyTasks(r.tasks);
     toast(r.tasks.length > 1 ? L(r.tasks.length + ' Aufgaben angelegt', r.tasks.length + ' tasks created') : L('Aufgabe angelegt: ', 'Task created: ') + r.tasks[0].title,

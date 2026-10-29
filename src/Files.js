@@ -14,11 +14,14 @@ const Files = {
     const ctx = Access.context(Auth.currentUser());
     const mime = String((p && p.mime) || '');
     if (Files.TYPES.indexOf(mime) < 0) throw new Error('Nur Bilder (JPEG, PNG, GIF oder WebP).');
+    // too long is refused before decoding (no work for oversized sends)
+    if (String(p.data || '').length > Math.ceil(Files.MAX * 4 / 3) + 4) throw new Error('Das Bild ist zu groß (höchstens 3 MB).');
     const bytes = Utilities.base64Decode(String(p.data || ''));
     if (!bytes.length || bytes.length > Files.MAX) throw new Error('Das Bild ist zu groß (höchstens 3 MB).');
     if (!Files.looksLike_(bytes, mime)) throw new Error('Das ist kein gültiges Bild.');
     const name = Shared.safeName(String(p.name || 'Bild').slice(0, 80)) || 'Bild';
     const place = Db.tx(() => Files.place_(p, ctx));
+    Files.quota_(ctx.email, bytes.length);
     // Drive outside the lock; the row afterwards (if that fails, the file goes to the trash)
     const driveId = Gdrive.createBlob(place.folder, name, Utilities.newBlob(bytes, mime, name));
     try {
@@ -29,6 +32,24 @@ const Files = {
       try { Store.trash(driveId); } catch (x) { /* best effort */ }
       throw e;
     }
+  },
+
+  /** Per person and day at most FILES_USER_DAILY images (default 50) and FILES_USER_DAILY_MB megabytes (default 100). */
+  quota_(email, size) {
+    const c = CacheService.getScriptCache();
+    const key = 'flq:' + Util.today() + ':' + email;
+    const used = JSON.parse(c.get(key) || '{"n":0,"b":0}');
+    if (used.n >= Number(Config.get('FILES_USER_DAILY') || 50) || used.b + size > Number(Config.get('FILES_USER_DAILY_MB') || 100) * 1024 * 1024) {
+      throw new Error('Heute wurden schon sehr viele Bilder hochgeladen. Bitte morgen weiter.');
+    }
+    c.put(key, JSON.stringify({ n: used.n + 1, b: used.b + size }), 86400);
+  },
+  /** Images of deleted tasks go to the Drive trash (restorable there for 30 days). */
+  dropForTasks_(taskIds) {
+    const rows = Db.all('Files').filter(r => r.kind === 'task' && taskIds.indexOf(r.taskId) >= 0);
+    if (!rows.length) return;
+    Db.removeMany('Files', rows.map(r => r.id));
+    rows.forEach(r => { try { Store.trash(r.driveId); } catch (e) { console.error('trash image: ' + e.message); } });
   },
 
   /** Where an image belongs and may go: a task the person sees, or a project they may write in (minutes). */
@@ -64,7 +85,7 @@ const Files = {
     return { id: row.id, name: row.name, mime: row.mime, data: Utilities.base64Encode(Gdrive.readBytes(row.driveId)) };
   },
   mayRead_(row, ctx) {
-    if (ctx.admin || row.createdBy === ctx.email) return true;
+    if (ctx.admin) return true;
     const task = row.taskId ? Db.get('Tasks', row.taskId) : null;
     if (task) return Access.canSeeTask(task, ctx);
     return !!row.projectId && !!ctx.projectIds[row.projectId];

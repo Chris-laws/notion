@@ -11,7 +11,8 @@ const ctx = load({ quiet: true });
 const read = f => fs.readFileSync(path.join(SRC, f), 'utf8');
 
 let html = read('Index.html')
-  .replace(/<\?!= include\('(\w+)'\) \?>/g, (m, name) => read(name + '.html'))
+  // what the server sends: include() (comments on their own lines left out)
+  .replace(/<\?!= include\('(\w+)'\) \?>/g, (m, name) => ctx.include(name))
   .replace(/<\?!= JSON\.stringify\(String\(userEmail.*?\?>/, () => '(new URLSearchParams(location.search).get("user") || "demo.user@firma.de")')
   .replace('<?!= clientLib() ?>', () => 'var Shared = (' + ctx.SharedFactory.toString() + ')();');
 
@@ -27,7 +28,7 @@ const runtime = `
   globalThis.__GAS_QUIET__ = true;
   // the built-in Drive service, as in the real project (images need it)
   globalThis.Drive = __driveAdvanced();
-  globalThis.__FILES__ = ${JSON.stringify({ AssistantUi: read('AssistantUi.html'), JfTasksUi: read('JfTasksUi.html'), ImagesUi: read('ImagesUi.html') }).replace(/<\/script/gi, '<\\/script')};
+  globalThis.__FILES__ = ${JSON.stringify({ AssistantUi: ctx.include('AssistantUi'), JfTasksUi: ctx.include('JfTasksUi'), ImagesUi: ctx.include('ImagesUi') }).replace(/<\/script/gi, '<\\/script')};
   ${server}
   setup();
   PropertiesService.getScriptProperties().setProperty('ALLOW_DEMO_DATA', 'true');

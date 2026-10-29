@@ -227,7 +227,7 @@ function renderPeek() {
       '<div class="ed-tools"><button data-action="ed-fmt" data-k="head" title="Überschrift">H</button><button data-action="ed-fmt" data-k="bullet" title="Aufzählung">' + icon('list', 'sm') + '</button>' +
       '<button data-action="ed-fmt" data-k="check" title="Checkliste">' + icon('checksq', 'sm') + '</button><button data-action="ed-fmt" data-k="date" title="Heutiges Datum einfügen">' + icon('calendar', 'sm') + '</button>' +
       '<label class="ed-img" title="' + esc(L('Bild einfügen (oder Strg+V)', 'Insert image (or Ctrl+V)')) + '"><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-on-change="img-pick" aria-label="' +
-      esc(L('Bild einfügen', 'Insert image')) + '">' + icon('folder', 'sm') + '</label></div>' +
+      esc(L('Bild einfügen', 'Insert image')) + '">' + icon('image', 'sm') + '</label></div>' +
       '<textarea class="desc big" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
       '<div class="saved">' + icon('check', 'sm') + 'Alle Änderungen gespeichert</div></div>' +
       '<div class="card-w"><h3>' + icon('link', 'sm') + L('Links & Anhänge', 'Links & attachments') + '</h3>' + taskLinksHtml(t) + '</div>' +

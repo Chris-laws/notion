@@ -24,7 +24,14 @@ const Ui = {
 
 /** Used by the HTML templates: <?!= include('Styles') ?> */
 function include(name) {
-  return HtmlService.createHtmlOutputFromFile(name).getContent();
+  return stripComments_(HtmlService.createHtmlOutputFromFile(name).getContent());
+}
+/**
+ * The page without comments that stand on lines of their own (they stay in the code; the browser does not
+ * need them). A block comment is only removed up to its own end, never across code.
+ */
+function stripComments_(s) {
+  return String(s).replace(/^[ \t]*\/\*(?:(?!\*\/)[\s\S])*\*\/[ \t]*\r?\n/gm, '').replace(/^[ \t]*\/\/.*\r?\n/gm, '');
 }
 
 /** Shared constants and the quick-add parser, injected into the page. */

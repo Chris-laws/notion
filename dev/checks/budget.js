@@ -20,7 +20,9 @@ const BUDGET = {
 function pageSize() {
   const src = path.join(__dirname, '..', '..', 'src');
   const read = f => fs.readFileSync(path.join(src, f), 'utf8');
-  const html = read('Index.html').replace(/<\?!= include\('(\w+)'\) \?>/g, (m, n) => read(n + '.html'));
+  // as served: include() leaves out comments on their own lines
+  const ctx = require('../load').load({ quiet: true });
+  const html = read('Index.html').replace(/<\?!= include\('(\w+)'\) \?>/g, (m, n) => ctx.include(n));
   return { kb: Math.round(html.length / 1024), gzipKb: Math.round(zlib.gzipSync(html).length / 1024) };
 }
 

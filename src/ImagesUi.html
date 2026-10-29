@@ -11,19 +11,27 @@ function imgRead(blob) {
 /** Big photos get smaller in the browser (less to send and to store); small images stay as they are. */
 function imgShrink(file) {
   if (file.size <= 1500000 || typeof createImageBitmap !== 'function' || file.type === 'image/gif') return Promise.resolve(file);
+  // photos as JPEG; PNG and WebP as WebP (keeps transparency)
+  const type = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp';
   return createImageBitmap(file).then(bmp => {
     const f = Math.min(1, IMG_MAX_PX / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas');
     c.width = Math.round(bmp.width * f);
     c.height = Math.round(bmp.height * f);
     c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    return new Promise(ok => c.toBlob(b => ok(b || file), 'image/jpeg', 0.85));
+    return new Promise(ok => c.toBlob(b => ok(b || file), type, 0.85));
   }).catch(() => file);
 }
 function imgUpload(file, where, ta) {
   if (!IMG_TYPES.test(file.type)) { toast(L('Nur Bilder (JPEG, PNG, GIF oder WebP).', 'Images only (JPEG, PNG, GIF or WebP).')); return Promise.resolve(); }
   toast(L('Bild wird hochgeladen …', 'Uploading image …'));
-  return imgShrink(file).then(blob => imgRead(blob).then(data => call('files.upload', Object.assign({ name: file.name || 'Bild', mime: blob.type || file.type, data: data }, where))))
+  return imgShrink(file).then(blob => {
+    if (blob.size > 3 * 1024 * 1024) throw new Error(L('Das Bild ist zu groß (höchstens 3 MB).', 'The image is too big (at most 3 MB).'));
+    const mime = blob.type || file.type;
+    // the name says what the file is after shrinking
+    const name = String(file.name || 'Bild').replace(/\.(png|jpe?g|gif|webp)$/i, '') + '.' + mime.split('/')[1].replace('jpeg', 'jpg');
+    return imgRead(blob).then(data => call('files.upload', Object.assign({ name: name, mime: mime, data: data }, where)));
+  })
     .then(r => imgInsert(typeof ta === 'function' ? ta() : ta, r.token)).catch(fail);
 }
 /** The marker at the cursor (or at the end); the field's own input handling saves it. */

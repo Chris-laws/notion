@@ -47,6 +47,7 @@ Everything below is done with a **company account** (ideally a dedicated technic
 | `AI_ASSISTANT` | `on` (default) or `off`: the assistant panel for everybody (admins also switch it in *Einstellungen*) |
 | `AI_USER_DAILY` | AI answers per person and day (default `40`); above it the assistant answers with rules |
 | `AI_DAILY_CHARS` | characters sent to the model per day for everybody (default `2000000`); only counts are kept |
+| `FILES_USER_DAILY`, `FILES_USER_DAILY_MB` | images a person may upload per day (default `50`, `100` MB) |
 | `ALLOW_DEMO_DATA` | empty |
 
 Keys are never put into code; the `secrets` check fails if one appears in the repository.
@@ -82,6 +83,7 @@ No access to Gmail, contacts or other Drive files is requested, and nothing is w
 
 - **Storage:** all data lives in the database spreadsheet in the company Workspace.
 - **External calls:** Nager.Date receives only country code and year. Google's public holiday calendars are only read, never written. Vertex AI (optional) receives task texts and names for the AI functions; switch it on only after approval by data protection.
+- **Images:** pictures pasted or dropped into a task description or a line of minutes are made smaller in the browser (at most about 1600 px), checked on the server (only JPEG, PNG, GIF, WebP by their first bytes, at most 3 MB; no SVG) and stored in the deploying account's Drive under `LidlFlow/Projects/<team>/<project>/Bilder` (sheet `Files` keeps id and place). They are not shared in Drive: the app hands an image only to people who may see its task or project. Deleting a task moves its images to the Drive trash. Images need the built-in Drive service (already in `appsscript.json`).
 - **Assistant:** answers from what the asking person may see only (built on the server from the same permission checks as the rest of the app; at most 60 entries per question). It never changes anything itself: proposals open the confirmation form and are created together or not at all, through the normal permission checks. Texts from tasks and minutes reach the model fenced as data, never as instructions; the model's answer is checked (citations must be entries the person sees, proposals pass the quick-add checks) and shown as plain text. Without a key, or when the limit is reached or the call fails, rules answer. Usage is kept as counts per day only, no questions or answers. *Settings → Verbindung testen* (admins) shows model, response time and Google's own error message.
 - **No external scripts:** all code is inline. The Inter font comes from Google Fonts (asynchronous, with the system font as fallback); if the company does not allow Google Fonts, remove the four font lines at the top of `src/Index.html`.
 - **Browser storage:** each browser keeps the last loaded state of the signed-in person (tasks and people they may see) in `localStorage` for at most 7 days to start quickly, plus view settings. It is bound to that person and replaced on the next start.
