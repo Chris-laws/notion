@@ -1,51 +1,60 @@
 <script>
 /* ==========================================================================
-   Jour fixe of a project: meetings in rows, minutes as a form (header, numbered
-   topics, lines I/A/B/N). Series and the list of minutes come with the app start
-   (S.jf); the minutes text is stored in Drive (server: Docs.js, Drive.js).
+   Jour fixe of a team (v62): the meetings in a table, the minutes as a mask with
+   topic cards (type, people, description with images, links, screenshots, files,
+   task). Series and the list of minutes come with the app start (S.jf); the minutes
+   text is stored in Drive (server: Docs.js, Drive.js).
    ========================================================================== */
 
 const RHYTHMS = () => [{ key: 'weekly', label: L('Wöchentlich', 'Weekly') }, { key: 'biweekly', label: L('Alle 2 Wochen', 'Every 2 weeks') }, { key: 'monthly', label: L('Monatlich', 'Monthly') }];
 const WEEKDAYS = () => [1, 2, 3, 4, 5, 6, 0].map(d => ({ key: String(d), label: DOW_LONG[d] }));
 const PROTO_LABELS = () => ({ I: L('Info', 'Info'), A: L('Aufgabe', 'Action'), B: L('Beschluss', 'Decision'), N: L('Nachtrag', 'Note') });
 const END_BTN = '</button></div>';
+const END_ROW = '</td></tr>';
+const ATTR_I = '" data-i="';
 const hintP = t => '<p class="hint">' + esc(t) + '</p>';
 const labelled = t => ' title="' + esc(t) + '" aria-label="' + esc(t) + '"';
 const ariaL = t => ' aria-label="' + esc(t) + '"';
 const whoName = e => (e ? user(e).name : '');
 const draftKey = id => 'draft:doc:' + (id || 'new');
 
-/** Series and minutes of the projects the person sees (from the app start; refreshed after changes). */
+
+const KIND_LABELS = () => ({ I: L('Info', 'Info'), A: L('Aufgabe', 'Task'), B: L('Beschluss', 'Decision') });
+const isTeamPlace = id => String(id || '').indexOf('team:') === 0;
+const placeTeam = id => (isTeamPlace(id) ? team(String(id).slice(5)) : null);
+/** May the person write in this jour fixe? Members of the team and admins (the server checks again). */
+const jfCanWrite = id => { const t = placeTeam(id); return !!t && (S.me.admin || teamMembers(t).indexOf(S.me.email) >= 0); };
+
+/** Series and minutes of the teams the person is in (from the app start; refreshed after changes). */
 function jfData() { return S.jf || { series: [], minutes: [] }; }
 function jfReload() {
   return call('jf.list', {}, { quiet: true }).then(d => { S.jf = d; render({ peek: false }); }).catch(() => {});
 }
-/** Leaving the project closes the open minutes (and releases "wird gerade bearbeitet"); the browser draft stays. */
+/** Leaving the team page closes the open minutes (and releases "wird gerade bearbeitet"); the browser draft stays. */
 function jfLeave(view, id) {
   const pid = S.protoEdit ? S.protoEdit.projectId : S.doc && S.doc.projectId;
-  if (!pid || (view === 'project' && id === pid)) return;
+  if (!pid || (view === 'team' && 'team:' + id === pid)) return;
   if (S.protoEdit) docEndEdit();
   S.protoEdit = null;
   S.doc = null;
 }
-/** "Weekly · Team / Projekt": what a jour fixe entry is called in calendars and the overview. */
-function jfName(seriesTitle, projectId) {
-  const p = project(projectId);
-  const t = p && team(p.teamId);
-  return seriesTitle + (p ? ' · ' + (t ? t.name + ' / ' : '') + p.name : '');
+/** "Weekly · Team": what a jour fixe entry is called in calendars and the overview. */
+function jfName(seriesTitle, placeId) {
+  const t = placeTeam(placeId);
+  return seriesTitle + (t ? ' · ' + t.name : '');
 }
-/** Calendar and overview label of an event (jour fixe with team and project). */
+/** Calendar and overview label of an event (jour fixe with its team). */
 function evLabel(e) { return e.type === 'jf' ? jfName(e.title, e.projectId) : e.title; }
 
-/* ---------------- the tab: active series on top, the archive below ---------------- */
-/** Next meeting of every active series of the project (today counts); a series past its end is left out. */
+/* ---------------- the overview of a team: one table, next meetings on top ---------------- */
+/** Next meeting of every active series of the team (today counts); a series past its end is left out. */
 function jfUpcoming(pid) {
   const today = TODAY();
   return jfData().series.filter(s => s.projectId === pid)
     .map(s => ({ s: s, date: Shared.jfDates(s, today, Shared.addDays(today, 400))[0] })).filter(x => x.date)
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
-/** All minutes of the project except those of the meetings on top, newest first. */
+/** All minutes of the team except those of the meetings on top, newest first. */
 function jfArchiveRows(pid) {
   const next = jfUpcoming(pid);
   return jfData().minutes.filter(m => m.projectId === pid && !next.some(u => u.s.id === m.seriesId && u.date === m.date))
@@ -58,95 +67,95 @@ function jfMissing(pid) {
   return jfData().series.filter(s => s.projectId === pid).map(s => ({ s: s, date: Shared.jfDates(s, Shared.addDays(today, -31), Shared.addDays(today, -1)).pop() }))
     .filter(x => x.date && !minutes.some(m => m.seriesId === x.s.id && m.date === x.date));
 }
-function jfTab(p) {
-  if (S.protoEdit && S.protoEdit.projectId === p.id) return protoEditor();
-  if (S.doc && S.doc.projectId === p.id) return protoViewer();
+const JF_PAGE = 15;
+/** What a meeting is right now: planned, minutes missing, in progress or closed. */
+function jfStatus(minutes, upcoming) {
+  if (!minutes) return upcoming ? { key: 'plan', label: L('Geplant', 'Planned') } : { key: 'miss', label: L('Protokoll fehlt', 'Minutes missing') };
+  return minutes.people && minutes.people.closed ? { key: 'done', label: L('Abgeschlossen', 'Closed') } : { key: 'work', label: L('In Bearbeitung', 'In progress') };
+}
+function jfTeamTab(t) {
+  const pid = 'team:' + t.id;
   const minutes = jfData().minutes;
-  const active = jfUpcoming(p.id).map(u => jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true))
-    .concat(jfMissing(p.id).map(u => jfRow(u.s, u.date, null, false)));
-  const newest = jfData().series.filter(s => s.projectId === p.id).map(s => minutes.filter(m => m.seriesId === s.id)[0]).filter(Boolean);
-  setTimeout(() => jfPrefetch(newest.map(m => m.id)), 400);
+  const seriesOf = {};
+  jfData().series.forEach(s => { seriesOf[s.id] = s; });
+  const rows = jfUpcoming(pid).map(u => ({ s: u.s, date: u.date, m: minutes.find(m => m.seriesId === u.s.id && m.date === u.date), up: true }))
+    .concat(jfMissing(pid).map(u => ({ s: u.s, date: u.date, m: null, up: false })))
+    .concat(jfArchiveRows(pid).map(m => ({ s: seriesOf[m.seriesId] || { id: m.seriesId, title: String(m.title || '').split(' · ')[0], attendees: [] }, date: m.date, m: m, up: false })));
+  const pages = Math.max(1, Math.ceil(rows.length / JF_PAGE));
+  const page = Math.min(S.jfPage || 0, pages - 1);
+  const shown = rows.slice(page * JF_PAGE, (page + 1) * JF_PAGE);
+  setTimeout(() => jfPrefetch(shown.filter(r => r.m).slice(0, 4).map(r => r.m.id)), 400);
   return '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3>' +
-    hintP(L('Regelmäßige Termine mit Protokoll. Offene Aufgaben wandern ins nächste Protokoll.', 'Regular meetings with minutes. Open actions move on to the next minutes.')) + '</div>' +
-    '<button class="btn primary" data-action="jf-new" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button></div>' +
-    (active.length ? '<div class="jf-rows jf-active" role="list">' + active.join('') + '</div>'
-      : '<div class="empty-mini">' + esc(L('Kein laufender Jour Fixe. Lege eine Serie an, z. B. jeden Montag 9:00.', 'No running jour fixe. Create a series, e.g. every Monday 9:00.')) + '</div>') +
-    jfArchive(p);
+    hintP(L('Regelmäßige Termine des Teams mit Protokoll. Offene Punkte und fixierte Themen wandern ins nächste Protokoll.', 'Regular meetings of the team with minutes. Open items and anchored topics move on to the next minutes.')) + '</div>' +
+    (jfCanWrite(pid) ? '<button class="btn primary" data-action="jf-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + L('Neuer Jour Fixe', 'New jour fixe') + '</button>' : '') + '</div>' +
+    (rows.length ? '<div class="jf-tw"><table class="jf-table"><thead><tr><th>' + L('Jour Fixe', 'Jour fixe') + '</th><th>' + L('Termin', 'Date') + '</th><th>Status</th><th>' + L('Aufgaben', 'Tasks') +
+      '</th><th>' + L('Letzte Änderung', 'Last change') + '</th><th>' + L('Teilnehmende', 'People') + '</th><th><span class="sr-only">' + L('Aktionen', 'Actions') + '</span></th></tr></thead><tbody>' +
+      shown.map(r => jfRow(r.s, r.date, r.m, r.up)).join('') + '</tbody></table></div>' + jfPager(page, pages, rows.length)
+      : '<div class="empty-mini">' + esc(L('Noch kein Jour Fixe in diesem Team. Lege eine Serie an, z. B. jeden Montag 9:00.', 'No jour fixe in this team yet. Create a series, e.g. every Monday 9:00.')) + '</div>');
 }
-const ARCHIVE_PAGE = 50;
-/** The archive: collapsed until opened (remembered in the browser); 50 rows, the rest on request. */
-function jfArchive(p) {
-  const rows = jfArchiveRows(p.id);
-  if (!rows.length) return '';
-  const open = store.get('jfArchive', false);
-  const names = {};
-  jfData().series.forEach(s => { names[s.id] = s; });
-  const shown = S.jfArchiveAll ? rows : rows.slice(0, ARCHIVE_PAGE);
-  return '<div class="jf-archive"><button type="button" class="jf-arch-h" data-action="jf-archive" aria-controls="jf-archive-list" aria-expanded="' + open + '">' + icon(open ? 'chevron' : 'right', 'sm') +
-    '<b>' + L('Archiv', 'Archive') + '</b><span class="n">' + rows.length + '</span><span class="faint">' + esc(L('alle Protokolle, neueste zuerst', 'all minutes, newest first')) + '</span></button>' +
-    (open ? '<div class="jf-rows" id="jf-archive-list" role="list">' + shown.map(m => jfRow(names[m.seriesId] || { id: m.seriesId, title: String(m.title || '').split(' · ')[0], attendees: [] }, m.date, m, false)).join('') + '</div>' +
-      (shown.length < rows.length ? '<button type="button" class="btn sm outline" data-action="jf-archive-all">' + esc(L('Alle ' + rows.length + ' anzeigen', 'Show all ' + rows.length)) + '</button>' : '') : '') + '</div>';
+function jfPager(page, pages, n) {
+  if (pages < 2) return '';
+  return '<div class="jf-pager" role="navigation" aria-label="' + esc(L('Seiten', 'Pages')) + '"><span class="faint">' + esc(L(n + ' Einträge', n + ' entries')) + '</span>' +
+    '<button type="button" class="btn sm outline" data-action="jf-page" data-v="' + (page - 1) + '"' + (page ? '' : ' disabled') + labelled(L('Vorherige Seite', 'Previous page')) + '>' + icon('left', 'sm') + '</button>' +
+    '<span aria-live="polite">' + esc(L('Seite ', 'Page ') + (page + 1) + ' / ' + pages) + '</span>' +
+    '<button type="button" class="btn sm outline" data-action="jf-page" data-v="' + (page + 1) + '"' + (page < pages - 1 ? '' : ' disabled') + labelled(L('Nächste Seite', 'Next page')) + '>' + icon('right', 'sm') + '</button></div>';
 }
-A['jf-archive'] = () => { store.set('jfArchive', !store.get('jfArchive', false)); render({ peek: false }); };
-A['jf-archive-all'] = () => { S.jfArchiveAll = true; render({ peek: false }); };
-/**
- * One meeting: series, date ("Nächster: …" for the next one, the plain date in the archive) and people:
- * before the meeting everybody invited, afterwards only who missed it (they should read the minutes).
- */
+A['jf-page'] = el => { S.jfPage = Math.max(0, Number(el.dataset.v) || 0); render({ peek: false }); };
 /** The Meet link of a series, next to the row (opens Meet, not the minutes). */
 function jfMeet(s) {
   return s.meetLink && /^https:\/\/meet\.google\.com\//.test(s.meetLink) ? '<a class="btn sm jf-meet" href="' + esc(s.meetLink) + '" target="_blank" rel="noopener noreferrer"' +
     labelled(L('Google Meet öffnen', 'Open Google Meet')) + '>' + icon('video', 'sm') + 'Meet</a>' : '';
 }
-/** What the row's button says: prepare the next meeting, write minutes later, or open them. */
+/** What the row's name says: prepare the next meeting, write minutes later, or open them. */
 function jfCta(upcoming, minutes) {
   if (minutes) return L('Protokoll öffnen', 'Open minutes');
   return upcoming ? L('Protokoll vorbereiten', 'Prepare minutes') : L('Protokoll nachtragen', 'Write minutes');
 }
-/** The middle of a row: weekday and time, then topics, open actions, anchored topics and who writes the minutes. */
 function jfTime(s, date) {
   if (!/^\d\d:\d\d$/.test(s.time || '')) return '';
   const end = Number(s.time.slice(0, 2)) * 60 + Number(s.time.slice(3)) + (Number(s.duration) || 30);
-  return '<span class="jf-f">' + icon('clock', 'sm') + esc(DOW[Shared.weekday(date)] + ' ' + s.time + '–' + fmtClock(end % 1440)) + '</span>';
+  return DOW[Shared.weekday(date)] + ' ' + s.time + '–' + fmtClock(end % 1440);
 }
-/** Open actions and anchored topics: of the minutes, or (next meeting) carried over from the last ones. */
+/** Open items and anchored topics: of the minutes, or (next meeting) carried over from the last ones. */
 function jfCounts(minutes, carry) {
   if (minutes) return { open: minutes.openCount || 0, pins: minutes.pinnedCount || 0 };
   return carry ? { open: carry.open.length, pins: carry.pinned.length } : { open: 0, pins: 0 };
 }
-function jfFacts(s, date, minutes, upcoming) {
-  const out = [jfTime(s, date)];
-  const ppl = minutes && minutes.people ? minutes.people : {};
-  const carry = !minutes && upcoming && s.carry ? s.carry : null;
-  if (ppl.topics) out.push('<span class="jf-f">' + icon('list', 'sm') + esc(ppl.topics + L(ppl.topics === 1 ? ' Thema' : ' Themen', ppl.topics === 1 ? ' topic' : ' topics')) + '</span>');
-  const n = jfCounts(minutes, carry);
-  if (n.open) out.push('<span class="chip warn">' + esc(n.open + (carry ? L(' offen aus dem letzten JF', ' open from the last one') : L(' offen', ' open'))) + '</span>');
-  const pins = n.pins;
-  if (pins) out.push('<span class="jf-f"' + labelled(L('Verankerte Themen', 'Anchored topics')) + '>' + icon('pin', 'sm') + pins + '</span>');
-  if (ppl.by) out.push('<span class="jf-f jf-by">' + avatar(ppl.by) + esc(L('Protokoll: ', 'Minutes: ') + whoName(ppl.by)) + '</span>');
-  return out.join('');
-}
 /**
- * One meeting. The whole row opens it (one tab stop, its name says what happens); the button look shows how:
- * prepare the next one, write missing minutes, or open saved ones. People: before the meeting everybody invited,
- * afterwards only who missed it (they should read the minutes).
+ * One meeting as a table row. The name is the one button that opens it (stretched over the row, so the whole row
+ * is clickable and has one tab stop); Meet and "edit" sit above it.
  */
 function jfRow(s, date, minutes, upcoming) {
+  const st = jfStatus(minutes, upcoming);
   const planned = upcoming || !minutes;
   const people = planned ? s.attendees || [] : (minutes.people && minutes.people.absent) || [];
-  const label = upcoming ? L('Nächster: ', 'Next: ') + fmtDate(date, { absolute: true }) : fmtDate(date, { absolute: true });
   const cta = jfCta(upcoming, minutes);
-  return '<div class="jf-row' + (upcoming ? ' next' : '') + '" role="listitem"><div class="jf-hit" role="button" tabindex="0" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(date) + '"' +
-    (minutes ? ' data-doc="' + esc(minutes.id) + '"' : '') + ' data-on-keydown="jf-row-key"' + labelled(cta + ': ' + s.title + ', ' + label) + '>' +
-    '<span class="jf-main"><b class="jf-t">' + esc(s.title) + '</b><span class="jf-d' + (upcoming ? ' next' : '') + '">' + esc(label) + '</span></span>' +
-    '<span class="jf-mid">' + jfFacts(s, date, minutes, upcoming) + '</span>' +
-    (people.length ? '<span class="jf-ppl">' + (planned ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 5) + '</span>' : '') +
-    '<span class="btn sm jf-cta' + (minutes ? '' : ' primary') + '" aria-hidden="true">' + esc(cta) + icon('right', 'sm') + '</span></div>' +
-    jfMeet(s) +
-    (upcoming ? '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '"' + labelled(L('Jour Fixe bearbeiten', 'Edit jour fixe')) + '>' + icon('settings', 'sm') + '</button>' : '') +
-    '</div>';
+  const label = fmtDate(date, { absolute: true });
+  return '<tr class="jf-tr' + (upcoming ? ' next' : '') + '"><td class="jf-c-t"><button type="button" class="jf-hit" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(date) + '"' +
+    (minutes ? ' data-doc="' + esc(minutes.id) + '"' : '') + labelled(cta + ': ' + s.title + ', ' + label) + '><b class="jf-t">' + esc(s.title) + '</b></button>' +
+    '<small class="faint">' + esc(jfTime(s, date)) + '</small></td>' +
+    '<td><span class="chip kw">KW ' + Shared.isoWeek(date) + '</span> <span class="jf-d' + (upcoming ? ' next' : '') + '">' + esc(upcoming ? L('Nächster: ', 'Next: ') + label : label) + '</span></td>' +
+    '<td><span class="chip st-' + st.key + '">' + esc(st.label) + '</span></td>' +
+    '<td class="jf-c-n">' + jfRowCounts(s, minutes, upcoming) + '</td><td class="jf-c-c">' + jfRowChange(minutes) + '</td>' +
+    '<td class="jf-c-p">' + (people.length ? (planned ? '' : '<span class="faint jf-miss">' + esc(L('Gefehlt:', 'Missed:')) + '</span>') + avatars(people, 4) : '') + '</td>' +
+    '<td class="jf-c-a">' + jfMeet(s) + jfRowEdit(s, upcoming) + END_ROW;
 }
-ON.keydown['jf-row-key'] = (el, e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); A['jf-open'](el); } };
+/** Tasks made from the topics, open items and anchored topics of a meeting. */
+function jfRowCounts(s, minutes, upcoming) {
+  const ppl = minutes && minutes.people ? minutes.people : {};
+  const n = jfCounts(minutes, !minutes && upcoming && s.carry ? s.carry : null);
+  const carry = !minutes && upcoming && s.carry;
+  const out = (ppl.tasks ? '<span class="chip soft">' + icon('checksq', 'sm') + esc(ppl.tasks + L(ppl.tasks === 1 ? ' Aufgabe' : ' Aufgaben', ppl.tasks === 1 ? ' task' : ' tasks')) + '</span>' : '') +
+    (n.open ? '<span class="chip warn">' + esc(n.open + (carry ? L(' offen aus dem letzten JF', ' open from the last one') : L(' offen', ' open'))) + '</span>' : '') +
+    (n.pins ? '<span class="jf-f"' + labelled(L('Fixierte Themen', 'Anchored topics')) + '>' + icon('pin', 'sm') + n.pins + '</span>' : '');
+  return out || '<span class="faint">–</span>';
+}
+/** Who saved the minutes last, and when. */
+function jfRowChange(minutes) {
+  return minutes && minutes.updatedBy ? '<span class="jf-by">' + avatar(minutes.updatedBy) + '<span>' + esc(whoName(minutes.updatedBy)) + '<small class="faint">' + esc(timeAgo(minutes.updatedAt)) + '</small></span></span>'
+    : '<span class="faint">–</span>';
+}
+const jfRowEdit = (s, upcoming) => (upcoming && jfCanWrite(s.projectId) ? '<button class="icon-btn" data-action="jf-edit" data-id="' + esc(s.id) + '"' + labelled(L('Jour Fixe bearbeiten', 'Edit jour fixe')) + '>' + icon('settings', 'sm') + '</button>' : '');
 A['jf-open'] = el => jfOpen(el.dataset.id, el.dataset.v);
 /**
  * Opens a meeting at once from what the page has: a new meeting is built here (series, carry-over of the last
@@ -162,21 +171,22 @@ function jfOpen(seriesId, date) {
   return jfOpenRemote(seriesId, date);
 }
 function jfShow(m) {
-  S.projTab = 'jf';
-  if (S.route.view !== 'project' || S.route.id !== m.projectId) go('project', m.projectId);
+  const tid = String(m.projectId).slice(5);
+  S.teamTab = 'jf';
+  S.jfView = 'topics';
+  S.tcOpen = {};
+  if (S.route.view !== 'team' || S.route.id !== tid) go('team', tid);
   S.doc = m;
   if (m.draft && m.canWrite) return protoStartEdit(m);
   render({ peek: false });
 }
 function jfOpenDraft(s, date) {
-  const p = project(s.projectId);
   return jfShow({ id: '', draft: true, kind: 'jf', projectId: s.projectId, seriesId: s.id, date: date, version: 0, title: s.title + ' · ' + date,
-    canWrite: !!p && canEditProject(p), content: Shared.jfTemplate(s, date, s.carry, S.me.email) });
+    canWrite: jfCanWrite(s.projectId), content: Shared.jfTemplate(s, date, s.carry, S.me.email) });
 }
 function jfOpenSaved(meta) {
-  const p = project(meta.projectId);
   const hit = DOC_TEXT[meta.id];
-  const d = Object.assign({}, meta, { kind: 'jf', canWrite: !!p && canEditProject(p), content: hit && hit.version === meta.version ? hit.content : undefined });
+  const d = Object.assign({}, meta, { kind: 'jf', canWrite: jfCanWrite(meta.projectId), content: hit && hit.version === meta.version ? hit.content : undefined });
   jfShow(d);
   // the skeleton stands until the text is there (usually loaded ahead already)
   if (d.content === undefined) {
@@ -226,83 +236,247 @@ document.addEventListener('mouseover', e => {
   const h = e.target && e.target.closest ? e.target.closest('.jf-hit[data-doc]') : null;
   if (h) jfPrefetch([h.dataset.doc]);
 });
-/** Team page: the jour fixe of all its projects, next meeting first; a new one for any of the projects. */
-function jfTeamTab(t, projects) {
-  const minutes = jfData().minutes;
-  const rows = [];
-  projects.forEach(p => jfUpcoming(p.id).forEach(u => rows.push({ date: u.date, html: jfRow(u.s, u.date, minutes.find(m => m.seriesId === u.s.id && m.date === u.date), true) })));
-  rows.sort((a, c) => a.date.localeCompare(c.date));
-  return '<div class="docs-head"><div><h3>' + icon('repeat', 'sm') + 'Jour Fixe</h3>' +
-    hintP(L('Alle Jour Fixe der Projekte dieses Teams. Teilnehmende: ganze Projektgruppen oder einzelne Personen.', 'Every jour fixe of the projects of this team. Participants: whole project groups or single people.')) + '</div>' +
-    (projects.length ? '<button class="btn primary" data-action="jf-new" data-id="' + esc(projects[0].id) + '" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Neuer Jour Fixe</button>' : '') + '</div>' +
-    (rows.length ? '<div class="jf-rows jf-active" role="list">' + rows.map(r => r.html).join('') + '</div>'
-      : '<div class="empty-mini">' + esc(L('Noch kein Jour Fixe in den Projekten dieses Teams.', 'No jour fixe in the projects of this team yet.')) + '</div>');
-}
-A['jf-new'] = el => jfModal(null, el.dataset.id, el.dataset.team);
-A['jf-edit'] = el => { const s = jfData().series.find(x => x.id === el.dataset.id); if (s) jfModal(s, s.projectId); };
-/** "+ Projektgruppe": all people of a project join the participants (nobody twice). */
-A['jf-add-group'] = el => {
-  const box = $('.pp-field[data-pp="attendees"]', el.closest('form') || document);
-  const p = project(el.dataset.id);
-  if (box && p) ppSet(box, ppValue(box).concat(projectMembers(p)).filter((x, i, a) => a.indexOf(x) === i));
-};
-function jfGroups(teamId, projectId) {
-  const tid = teamId || (project(projectId) || {}).teamId;
-  const groups = S.projects.filter(p => p.teamId === tid);
-  return groups.length ? '<div class="jf-groups"><span class="faint">' + esc(L('Projektgruppe hinzufügen:', 'Add project group:')) + '</span>' +
-    groups.map(p => '<button type="button" class="nt-add" data-action="jf-add-group" data-id="' + esc(p.id) + '">' + icon('plus', 'sm') + esc(p.name) + '</button>').join('') + '</div>' : '';
-}
-function jfModal(s, projectId, teamId) {
-  const p = project(projectId);
-  const choose = !s && teamId ? S.projects.filter(x => x.teamId === teamId) : [];
-  s = s || { title: 'Jour Fixe', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: TODAY(), attendees: p ? projectMembers(p) : [S.me.email] };
+
+A['jf-new'] = el => jfModal(null, el.dataset.team);
+A['jf-edit'] = el => { const s = jfData().series.find(x => x.id === el.dataset.id); if (s) jfModal(s, String(s.projectId).slice(5)); };
+function jfModal(s, teamId) {
+  const t = team(teamId);
+  s = s || { title: 'Jour Fixe', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: TODAY(), attendees: t ? teamMembers(t) : [S.me.email] };
   openModal({
     title: s.id ? L('Jour Fixe bearbeiten', 'Edit jour fixe') : L('Neuer Jour Fixe', 'New jour fixe'),
     body: field('Titel', '<input class="input" name="title" required maxlength="80" value="' + esc(s.title) + '">') +
-      (choose.length ? field(L('Projekt', 'Project'), selectField('projectId', choose.map(x => ({ key: x.id, label: x.name })), projectId)) : '') +
       '<div class="row">' + field('Rhythmus', selectField('rhythm', RHYTHMS(), s.rhythm)) + field('Wochentag', selectField('weekday', WEEKDAYS(), String(s.weekday))) + '</div>' +
       '<div class="row">' + field('Uhrzeit', '<input class="input" type="time" name="time" value="' + esc(s.time) + '">') +
       field('Dauer (Min.)', '<input class="input" type="number" min="15" max="480" step="5" name="duration" value="' + esc(s.duration) + '">') + '</div>' +
       '<div class="row">' + field('Ab', '<input class="input" type="date" name="startDate" value="' + esc(s.startDate || '') + '">') +
       field('Bis (optional)', '<input class="input" type="date" name="endDate" value="' + esc(s.endDate || '') + '">') + '</div>' +
-      divField('Teilnehmende', peoplePicker('attendees', s.attendees || [], { add: 'Personen hinzufügen', prefer: p ? projectMembers(p) : [] }) + jfGroups(teamId, projectId)) +
+      divField('Teilnehmende', peoplePicker('attendees', s.attendees || [], { add: 'Personen hinzufügen', prefer: t ? teamMembers(t) : [] })) +
       field('Google-Meet-Link (optional)', '<input class="input" name="meetLink" placeholder="https://meet.google.com/…" value="' + esc(s.meetLink || '') + '">'),
     submitLabel: s.id ? 'Speichern' : L('Jour Fixe anlegen', 'Create jour fixe'),
     danger: s.id ? { label: L('Serie beenden', 'End series'), onClick: () => confirmDelete(L('Serie beenden? Alle Protokolle bleiben erhalten.', 'End the series? All minutes are kept.'),
       () => call('jf.removeSeries', { id: s.id }).then(() => { calReload(); return jfReload(); })) } : null,
-    onSubmit: v => call('jf.saveSeries', Object.assign({ id: s.id, projectId: v.projectId || projectId }, v, { weekday: Number(v.weekday), attendees: collectPeople(v, 'attendees') }))
+    onSubmit: v => call('jf.saveSeries', Object.assign({ id: s.id, teamId: teamId }, v, { weekday: Number(v.weekday), attendees: collectPeople(v, 'attendees') }))
       .then(() => { closeModal(); calReload(); toast(L('Jour Fixe gespeichert', 'Jour fixe saved')); return jfReload(); }),
   });
 }
 
-/* ---------------- minutes: view ---------------- */
-/** The minutes table: numbered topics with their lines (Art, Thema, Verantwortlich, Termin). */
-function protoTable(m, o) {
-  const rows = [];
-  m.topics.forEach((t, k) => {
-    const ttask = jfLive(t.taskId) ? ' <button class="md-task" data-action="open-task" data-id="' + esc(t.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
-      : o.actions ? ' <button class="md-mk" data-action="proto-topic-task" data-t="' + k + '">' + icon('plus', 'sm') + L('Thema als Aufgabe', 'Topic as task') + '</button>' : '';
-    rows.push('<tr class="pt-topic"><td>' + (k + 1) + '.</td><td>' + (t.pinned ? '<span class="pt-pin"' + labelled(L('Verankert: kommt ins nächste Protokoll', 'Anchored: carried to the next minutes')) + '>' + icon('pin', 'sm') + '</span>' : '') +
-      '</td><td><b>' + richText(t.title) + '</b>' + ttask + '</td><td>' + esc(whoName(t.owner)) + '</td><td></td></tr>');
-    t.items.forEach((i, n) => {
-      const task = jfLive(i.taskId) ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
-        : o.actions && i.type === 'A' && !lineDone(i) ? ' <button class="md-mk" data-action="proto-task" data-t="' + k + '" data-i="' + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
-      rows.push('<tr class="pt-line' + (lineDone(i) ? ' done' : '') + '"><td></td><td><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span></td>' +
-        '<td>' + richText(i.text) + task + '</td><td>' + esc(whoName(i.owner)) + '</td><td class="nowrap">' + (i.due ? esc(fmtDate(i.due, { absolute: true })) : '') + '</td></tr>');
-    });
-  });
-  return '<div class="md-tw"><table class="pt"><thead><tr><th>' + L('Nr.', 'No.') + '</th><th>' + L('Art', 'Type') + '</th><th>' + L('Thema', 'Topic') + '</th><th>' +
-    L('Verantwortlich', 'Responsible') + '</th><th>' + L('Termin', 'Due') + '</th></tr></thead><tbody>' +
-    (rows.join('') || '<tr><td colspan="5" class="faint">' + L('Noch keine Themen.', 'No topics yet.') + '</td></tr>') + '</tbody></table></div>';
+/* ---------------- minutes: the topics (cards) ---------------- */
+/** The text of a topic's description: links and images shown, line breaks kept. */
+const bodyHtml = s => '<div class="tc-text">' + richText(s) + '</div>';
+const isImageFile = f => /^image\//.test(f.mime || '');
+const fileSize = n => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+/** Who is responsible: icon and name per person. */
+function tcOwners(t) {
+  return (t.owners || []).map(e => '<span class="tc-own" title="' + esc(user(e).name) + '">' + avatar(e) + '<span>' + esc(whoName(e)) + '</span></span>').join('');
 }
-/** Minutes as a table; any other text (older files) as plain text. */
+function tcProjectChip(t) {
+  const p = t.projectId && project(t.projectId);
+  return p ? '<button type="button" class="chip tc-proj" data-action="nav" data-view="project" data-id="' + esc(p.id) + '"' + labelled(L('Projekt öffnen: ', 'Open project: ') + p.name) + '>' + icon('folder', 'sm') + esc(p.name) + '</button>' : '';
+}
+function tcTaskChip(t) {
+  return jfLive(t.taskId) ? '<button type="button" class="chip ok tc-task" data-action="open-task" data-id="' + esc(t.taskId) + '"' + labelled(L('Aufgabe öffnen', 'Open task')) + '>' + icon('checksq', 'sm') + esc(L('In Aufgabe', 'In task')) + '</button>' : '';
+}
+/** The three places for more than text: links, screenshots, other attachments. */
+function tcAttach(t, k, edit) {
+  const imgs = (t.files || []).filter(isImageFile), docs = (t.files || []).filter(f => !isImageFile(f));
+  const rm = (kind, i) => (edit ? '<button type="button" class="lk-x" data-action="tc-rm" data-k="' + kind + '" data-t="' + k + ATTR_I + i + '"' + labelled(L('Entfernen', 'Remove')) + '>' + icon('x', 'sm') + '</button>' : '');
+  const add = (action, label, extra) => (edit ? '<button type="button" class="lk-add" data-action="' + action + '" data-t="' + k + '"' + (extra || '') + '>' + icon('plus', 'sm') + esc(label) + '</button>' : '');
+  const none = '<span class="faint">–</span>';
+  return '<div class="tc-cols">' +
+    '<div class="tc-col"><h4>' + icon('link', 'sm') + L('Links', 'Links') + '</h4>' +
+    ((t.links || []).map((l, i) => '<span class="tc-item">' + linkChip(l) + rm('link', i) + '</span>').join('') || (edit ? '' : none)) + add('tc-link', L('Link', 'Link')) + '</div>' +
+    '<div class="tc-col"><h4>' + icon('image', 'sm') + L('Screenshots', 'Screenshots') + '</h4><div class="tc-shots">' +
+    imgs.map(f => '<span class="tc-item">' + imgThumb(f.id, f.name) + rm('file', (t.files || []).indexOf(f)) + '</span>').join('') + '</div>' +
+    (!imgs.length && !edit ? none : '') + (edit ? '<label class="lk-add">' + icon('plus', 'sm') + esc(L('Screenshot', 'Screenshot')) +
+      '<input type="file" class="sr-only" accept="image/png,image/jpeg,image/gif,image/webp" multiple data-on-change="tc-file" data-t="' + k + '" data-attach="0"' + ariaL(L('Screenshot hinzufügen', 'Add screenshot')) + '></label>' : '') + '</div>' +
+    '<div class="tc-col"><h4>' + icon('layers', 'sm') + L('Anlagen', 'Attachments') + '</h4>' +
+    docs.map(f => '<span class="tc-item"><button type="button" class="lk-a k-file" data-action="tc-get" data-id="' + esc(f.id) + '"' + labelled(f.name) + '>' + icon('text', 'sm') + '<span>' + esc(f.name) + '</span><small>' + esc(fileSize(f.size)) + '</small></button>' + rm('file', (t.files || []).indexOf(f)) + '</span>').join('') +
+    (!docs.length && !edit ? none : '') + (edit ? '<label class="lk-add">' + icon('plus', 'sm') + esc(L('Datei', 'File')) +
+      '<input type="file" class="sr-only" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv,application/pdf,text/plain,text/csv" data-on-change="tc-file" data-t="' + k + '" data-attach="1"' + ariaL(L('Datei anhängen', 'Attach file')) + '></label>' : '') + '</div></div>';
+}
+/** The header of a topic card: number, title, type, anchor, people, project, task, due date. */
+function tcHead(t, k, edit, open) {
+  const kinds = KIND_LABELS();
+  const toggle = '<button type="button" class="tc-toggle" data-action="tc-toggle" data-id="' + esc(t.id) + '" aria-expanded="' + open + '" aria-controls="tc-' + esc(t.id) + '"' +
+    labelled((open ? L('Zuklappen: ', 'Collapse: ') : L('Aufklappen: ', 'Expand: ')) + (t.title || L('Thema', 'Topic'))) + '>' + icon(open ? 'chevron' : 'right', 'sm') + '<span class="tc-no">' + (k + 1) + '.</span></button>';
+  const title = edit ? '<input class="input tc-title" data-on-input="proto-field" data-path="topics.' + k + '.title" value="' + esc(t.title) + '" placeholder="' + esc(L('Thema', 'Topic')) + '"' + ariaL(L('Thema', 'Topic')) + '>'
+    : '<b class="tc-title">' + richText(t.title) + '</b>';
+  const kind = edit ? '<select class="select sm tc-kind k-' + t.kind + '" data-on-change="proto-field" data-path="topics.' + k + '.kind"' + ariaL(L('Art', 'Type')) + '>' +
+    Shared.PROTO_KINDS.map(x => '<option value="' + x + '"' + (x === t.kind ? ' selected' : '') + '>' + esc(kinds[x]) + '</option>').join('') + '</select>'
+    : '<span class="chip kind k-' + t.kind + '">' + esc(kinds[t.kind]) + '</span>';
+  const anchored = esc(L('Fixiert', 'Anchored'));
+  const pin = edit ? '<button type="button" class="chip tc-pin' + (t.pinned ? ' on' : '') + '" data-action="proto-pin" data-t="' + k + '" aria-pressed="' + !!t.pinned + '"' +
+    labelled(t.pinned ? L('Anker lösen', 'Remove anchor') : L('Fixieren: kommt in jedes nächste Protokoll', 'Anchor: carried to every next minutes')) + '>' + icon('pin', 'sm') + (t.pinned ? anchored : esc(L('Fixieren', 'Anchor'))) + '</button>'
+    : (t.pinned ? '<span class="chip pin"' + labelled(L('Fixiert: kommt ins nächste Protokoll', 'Anchored: carried to the next minutes')) + '>' + icon('pin', 'sm') + anchored + '</span>' : '');
+  const due = t.due ? '<span class="chip soft">' + icon('clock', 'sm') + esc(fmtDate(t.due, { absolute: true })) + '</span>' : '';
+  return '<div class="tc-h">' + toggle + title + kind + pin + '<span class="tc-meta">' + tcOwners(t) + tcProjectChip(t) + tcTaskChip(t) + due + '</span></div>';
+}
+/** The action bar of an opened card: make a task, project, people, due date, more. */
+function tcBar(t, k, edit, canTask) {
+  if (!edit) return canTask ? '<div class="tc-bar">' + tcTaskBtn(t, k, false) + '</div>' : '';
+  return '<div class="tc-bar" role="group" aria-label="' + esc(L('Aktionen zum Thema', 'Topic actions')) + '">' + tcTaskBtn(t, k, true) +
+    '<button type="button" class="btn sm outline" data-action="tc-project" data-t="' + k + '">' + icon('folder', 'sm') + esc(t.projectId ? L('Projekt ändern', 'Change project') : L('Projekt zuordnen', 'Assign project')) + '</button>' +
+    '<button type="button" class="btn sm outline" data-action="tc-owners" data-t="' + k + '">' + icon('user', 'sm') + esc(L('Verantwortlich', 'Responsible')) + '</button>' +
+    '<label class="tc-due">' + icon('clock', 'sm') + '<span>' + esc(L('Fälligkeit', 'Due')) + '</span><input class="input sm" type="date" data-on-change="proto-field" data-path="topics.' + k + '.due" value="' + esc(t.due) + '"></label>' +
+    '<button type="button" class="icon-btn" data-action="tc-more" data-t="' + k + '"' + labelled(L('Weitere Aktionen', 'More actions')) + '>' + icon('more', 'sm') + '</button></div>';
+}
+/** The opened card: description (a field that grows with its text), links / screenshots / files, items, actions. */
+function tcBody(t, k, edit, canTask) {
+  const id = esc(t.id);
+  const text = edit ? '<textarea id="tcb-' + id + '" class="textarea tc-body" rows="6" data-on-input="proto-field" data-path="topics.' + k + '.body" placeholder="' +
+    esc(L('Notizen, Ergebnisse, Entscheidungen … Screenshots mit Strg+V einfügen oder hineinziehen.', 'Notes, results, decisions … paste or drop screenshots here.')) + '"></textarea>'
+    : (t.body ? bodyHtml(t.body) : '<p class="faint">' + esc(L('Keine Beschreibung.', 'No description.')) + '</p>');
+  return '<div class="tc-b" id="tc-' + id + '"><label class="tc-lbl" for="tcb-' + id + '">' + esc(L('Beschreibung', 'Description')) + '</label>' + text +
+    tcAttach(t, k, edit) + tcLines(t, k, edit) + tcBar(t, k, edit, canTask) + '</div>';
+}
+/** One topic as a card: header always, details when opened. edit: the form; else read only. */
+function topicCard(t, k, edit, canTask) {
+  const open = !!(S.tcOpen && S.tcOpen[t.id]);
+  // closed: the first characters of the description as a hint
+  const rest = open ? tcBody(t, k, edit, canTask) : t.body ? '<p class="tc-peek">' + esc(noImg(t.body).replace(/\s+/g, ' ').slice(0, 160)) + '</p>' : '';
+  return '<article class="pe-topic tc' + (open ? ' open' : '') + '" data-topic="' + esc(t.id) + '">' + tcHead(t, k, edit, open) + rest + '</article>';
+}
+/** The topic's individual items (older minutes and carried-over actions): type, text, person, date. */
+function tcLines(t, k, edit) {
+  if (!edit && !t.items.length) return '';
+  return '<div class="tc-lines"><h4>' + icon('list', 'sm') + esc(L('Einzelpunkte', 'Items')) + '</h4>' +
+    t.items.map((i, n) => (edit ? protoLine(i, k, n) : lineRow(i, k, n))).join('') +
+    (edit ? '<button type="button" class="btn sm outline" data-action="proto-add-line" data-t="' + k + '">' + icon('plus', 'sm') + esc(L('Einzelpunkt', 'Item')) + '</button>' : '') + '</div>';
+}
+function lineRow(i, k, n) {
+  const task = jfLive(i.taskId) ? ' <button class="md-task" data-action="open-task" data-id="' + esc(i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
+    : S.doc && S.doc.canWrite && S.doc.id && i.type === 'A' && !lineDone(i) ? ' <button class="md-mk" data-action="proto-task" data-t="' + k + ATTR_I + n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '';
+  return '<div class="pt-li' + (lineDone(i) ? ' done' : '') + '"><span class="pt-type t-' + i.type + '" title="' + esc(PROTO_LABELS()[i.type]) + '">' + i.type + '</span><span class="pt-tx">' + richText(i.text) + task + '</span>' +
+    '<span class="faint">' + esc(whoName(i.owner)) + (i.due ? ' · ' + esc(fmtDate(i.due, { absolute: true })) : '') + '</span></div>';
+}
+/** "In Aufgabe übernehmen" (the form opens first, nothing is made before it is confirmed), or the link to the task. */
+function tcTaskBtn(t, k, edit) {
+  if (jfLive(t.taskId)) return '<button type="button" class="btn sm outline" data-action="open-task" data-id="' + esc(t.taskId) + '">' + icon('checksq', 'sm') + esc(L('Aufgabe öffnen', 'Open task')) + '</button>';
+  return '<button type="button" class="btn sm primary" data-action="' + (edit ? 'pe-task' : 'proto-topic-task') + '" data-t="' + k + '">' + icon('plus', 'sm') + esc(L('In Aufgabe übernehmen', 'Make a task')) + '</button>';
+}
+A['tc-toggle'] = el => {
+  S.tcOpen = Object.assign({}, S.tcOpen);
+  S.tcOpen[el.dataset.id] = !S.tcOpen[el.dataset.id];
+  if (S.protoEdit) protoRender(); else render({ peek: false });
+  if (S.tcOpen[el.dataset.id]) tcFill();
+};
+/* the text of a topic is written into its field after drawing (a long text stays out of the attribute); the field grows with it */
+function tcFill() {
+  if (!S.protoEdit) return;
+  $$('.proto-edit textarea.tc-body').forEach(ta => {
+    const t = S.protoEdit.model.topics[Number(ta.dataset.path.split('.')[1])];
+    if (t && ta.value !== t.body) ta.value = t.body;
+    tcGrow(ta);
+  });
+}
+function tcGrow(ta) { ta.style.height = 'auto'; ta.style.height = Math.max(ta.scrollHeight + 2, 140) + 'px'; }
+A['tc-project'] = el => {
+  const k = Number(el.dataset.t);
+  const t = S.protoEdit.model.topics[k];
+  const tm = placeTeam(S.protoEdit.projectId);
+  const mine = S.projects.filter(p => canEditProject(p));
+  const own = mine.filter(p => tm && p.teamId === tm.id), rest = mine.filter(p => !(tm && p.teamId === tm.id));
+  openModal({
+    title: L('Projekt zuordnen', 'Assign project'),
+    body: field(L('Projekt', 'Project'), selectField('projectId', [{ key: '', label: L('– kein Projekt –', '– no project –') }].concat(own.concat(rest).map(p => ({ key: p.id, label: p.name }))), t.projectId || '')) +
+      hintP(L('Nur ein Vermerk am Thema. Eine Aufgabe entsteht erst mit „In Aufgabe übernehmen“.', 'Just a note on the topic. A task is only made with "Make a task".')),
+    submitLabel: L('Übernehmen', 'Apply'),
+    onSubmit: v => { protoSet('topics.' + k + '.projectId', v.projectId || ''); closeModal(); protoRender(); },
+  });
+};
+A['tc-owners'] = el => {
+  const k = Number(el.dataset.t);
+  peopleModal({ title: L('Verantwortlich', 'Responsible'), sub: L('Nur ein Vermerk. Eine Aufgabe bekommt man erst mit „In Aufgabe übernehmen“.', 'Just a note. A task comes only with "Make a task".'),
+    selected: S.protoEdit.model.topics[k].owners.slice(), prefer: protoPeople(), onChange: list => { protoSet('topics.' + k + '.owners', list); protoRender(); } });
+};
+A['tc-more'] = el => {
+  const k = Number(el.dataset.t);
+  openModal({ title: L('Thema', 'Topic'), body: hintP(L('Das Thema „', 'The topic "') + (S.protoEdit.model.topics[k].title || (k + 1) + '.') + L('“ löschen? Eine daraus entstandene Aufgabe bleibt bestehen.', '" will be deleted. A task made from it stays.')),
+    submitLabel: L('Thema löschen', 'Delete topic'), onSubmit: () => { S.protoEdit.model.topics.splice(k, 1); closeModal(); protoRender(); } });
+};
+A['tc-link'] = el => {
+  const k = Number(el.dataset.t);
+  openModal({
+    title: L('Link hinzufügen', 'Add link'),
+    body: field(L('Adresse', 'Address'), '<input class="input" name="url" required placeholder="https://…" autocomplete="off">') +
+      field(L('Titel (optional)', 'Title (optional)'), '<input class="input" name="title" maxlength="120" placeholder="' + esc(L('z. B. Dashboard, Notebook, Mailverlauf', 'e.g. dashboard, notebook, mail thread')) + '">'),
+    submitLabel: L('Hinzufügen', 'Add'),
+    onSubmit: v => {
+      const links = Shared.cleanLinks((S.protoEdit.model.topics[k].links || []).concat([{ url: v.url, title: v.title }]));
+      if (links.length === (S.protoEdit.model.topics[k].links || []).length) { toast(L('Das ist keine gültige Web- oder Mailadresse, oder sie ist schon vorhanden.', 'Not a valid web or mail address, or it is already there.'), { warn: true }); return false; }
+      protoSet('topics.' + k + '.links', links);
+      closeModal();
+      protoRender();
+    },
+  });
+};
+A['tc-rm'] = el => {
+  const k = Number(el.dataset.t), i = Number(el.dataset.i);
+  const t = S.protoEdit.model.topics[k];
+  protoSet('topics.' + k + '.' + (el.dataset.k === 'link' ? 'links' : 'files'), (el.dataset.k === 'link' ? t.links : t.files).filter((x, n) => n !== i));
+  protoRender();
+};
+/** Screenshots and files of a topic: sent to the server one by one, then listed under the topic. */
+ON.change['tc-file'] = el => {
+  const k = Number(el.dataset.t), attach = el.dataset.attach === '1';
+  const files = Array.prototype.slice.call(el.files || []);
+  el.value = '';
+  const e = S.protoEdit;
+  if (!e || !files.length) return;
+  loadChunk('Images').then(() => files.slice(0, 5).reduce((p, f) => p.then(() => fileUpload(f, { kind: 'project', projectId: e.projectId }, attach).then(r => {
+    if (!r || S.protoEdit !== e) return;
+    const t = e.model.topics[k];
+    if (t && !t.files.some(x => x.id === r.id)) t.files = t.files.concat([{ id: r.id, name: r.name, mime: r.mime, size: r.size }]);
+    protoRender();
+    tcFill();
+  })), Promise.resolve())).catch(fail);
+};
+/** Opens an attachment: fetched with the app's sign-in, then saved from the browser. */
+A['tc-get'] = el => call('files.get', { id: el.dataset.id }).then(f => {
+  const bytes = Uint8Array.from(atob(f.data), c => c.charCodeAt(0));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([bytes], { type: f.mime }));
+  a.download = f.name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}).catch(fail);
+
+/* ---------------- minutes: results ---------------- */
+/** Decisions and tasks of the meeting on one page. */
+function protoResults(m, canTask) {
+  const dec = m.topics.map((t, k) => ({ t: t, k: k })).filter(x => x.t.kind === 'B');
+  const act = m.topics.map((t, k) => ({ t: t, k: k })).filter(x => x.t.kind === 'A' || jfLive(x.t.taskId) || x.t.owners.length);
+  const lines = [];
+  m.topics.forEach((t, k) => t.items.forEach((i, n) => { if (i.type === 'A') lines.push({ t: t, k: k, i: i, n: n }); }));
+  const row = x => '<tr><td>' + (x.k + 1) + '.</td><td><b>' + richText(x.t.title || L('(ohne Titel)', '(untitled)')) + '</b></td><td>' + tcOwners(x.t) + '</td><td>' + tcProjectChip(x.t) + '</td><td class="nowrap">' +
+    (x.t.due ? esc(fmtDate(x.t.due, { absolute: true })) : '') + '</td><td>' + (tcTaskChip(x.t) || (canTask ? tcTaskBtn(x.t, x.k, false) : '')) + END_ROW;
+  return '<section class="pr-sec"><h3>' + icon('flag', 'sm') + esc(L('Beschlüsse', 'Decisions')) + '<span class="n">' + dec.length + '</span></h3>' +
+    (dec.length ? dec.map(x => '<div class="pr-dec"><b>' + (x.k + 1) + '. ' + richText(x.t.title) + '</b>' + (x.t.body ? bodyHtml(x.t.body) : '') + '</div>').join('') : '<p class="faint">' + esc(L('Keine Beschlüsse in diesem Protokoll.', 'No decisions in these minutes.')) + '</p>') + '</section>' +
+    '<section class="pr-sec"><h3>' + icon('checksq', 'sm') + esc(L('Aufgaben und Zuständigkeiten', 'Tasks and responsibilities')) + '<span class="n">' + (act.length + lines.length) + '</span></h3>' +
+    (act.length || lines.length ? '<div class="md-tw"><table class="pt"><thead><tr><th>' + L('Nr.', 'No.') + '</th><th>' + L('Thema', 'Topic') + '</th><th>' + L('Verantwortlich', 'Responsible') + '</th><th>' + L('Projekt', 'Project') + '</th><th>' + L('Fällig', 'Due') + '</th><th></th></tr></thead><tbody>' +
+      act.map(row).join('') + lines.map(x => '<tr class="pt-line' + (lineDone(x.i) ? ' done' : '') + '"><td>' + (x.k + 1) + '.</td><td>' + richText(x.i.text) + '</td><td>' + esc(whoName(x.i.owner)) + '</td><td></td><td class="nowrap">' +
+        (x.i.due ? esc(fmtDate(x.i.due, { absolute: true })) : '') + '</td><td>' + (jfLive(x.i.taskId) ? '<button class="md-task" data-action="open-task" data-id="' + esc(x.i.taskId) + '">' + icon('check', 'sm') + L('Aufgabe', 'Task') + '</button>'
+        : canTask && !lineDone(x.i) ? '<button class="md-mk" data-action="proto-task" data-t="' + x.k + ATTR_I + x.n + '">' + icon('plus', 'sm') + L('Als Aufgabe', 'As task') + '</button>' : '') + END_ROW).join('') +
+      '</tbody></table></div>' : '<p class="faint">' + esc(L('Noch keine Aufgaben oder Zuständigkeiten.', 'No tasks or responsibilities yet.')) + '</p>') + '</section>';
+}
+/** Minutes as a table; any other text (older files) as plain text (used by the conflict dialog and versions). */
 function docPreview(text) {
   const m = Shared.protoFromText(text);
-  return m ? protoTable(m, {}) : '<pre class="pt-plain">' + esc(text) + '</pre>';
+  return m ? protoCompact(m) : '<pre class="pt-plain">' + esc(text) + '</pre>';
 }
+/** A short read-only list of topics for dialogs. */
+function protoCompact(m) {
+  return '<div class="md-tw"><table class="pt"><thead><tr><th>' + L('Nr.', 'No.') + '</th><th>' + L('Thema', 'Topic') + '</th><th>' + L('Art', 'Type') + '</th><th>' + L('Verantwortlich', 'Responsible') + '</th></tr></thead><tbody>' +
+    (m.topics.map((t, k) => '<tr class="pt-topic"><td>' + (k + 1) + '.</td><td><b>' + richText(t.title) + '</b>' + (t.body ? '<div class="tc-peek">' + esc(noImg(t.body).slice(0, 200)) + '</div>' : '') +
+      '</td><td>' + esc(KIND_LABELS()[t.kind]) + '</td><td>' + esc(t.owners.map(whoName).join(', ')) + END_ROW).join('') || '<tr><td colspan="4" class="faint">' + L('Noch keine Themen.', 'No topics yet.') + END_ROW) + '</tbody></table></div>';
+}
+const noImg = s => String(s || '').replace(/!\[([^\]]*)\]\(lf:fl_[a-z0-9]+\)/g, '$1').trim();
+
+/* ---------------- minutes: view ---------------- */
 function protoHead(m, version) {
   const people = list => (list.length ? list.map(e => '<span class="pt-p">' + avatar(e) + esc(whoName(e)) + '</span>').join('') : '<span class="faint">–</span>');
-  return '<dl class="pt-head"><dt>' + L('Datum', 'Date') + '</dt><dd>' + esc(fmtDate(m.date, { absolute: true })) + (version ? ' · Rev. ' + version : '') + '</dd>' +
+  return '<dl class="pt-head"><dt>' + L('Datum', 'Date') + '</dt><dd>' + esc(fmtDate(m.date, { absolute: true })) + ' <span class="chip kw">KW ' + Shared.isoWeek(m.date) + '</span>' + (version ? ' · Rev. ' + version : '') + '</dd>' +
     '<dt>' + L('Protokoll', 'Minutes by') + '</dt><dd>' + people(m.minuteTaker ? [m.minuteTaker] : []) + '</dd>' +
     '<dt>' + L('Anwesend', 'Present') + '</dt><dd>' + people(m.present) + '</dd>' +
     '<dt>' + L('Abwesend', 'Absent') + '</dt><dd>' + people(m.absent) + '</dd></dl>';
@@ -314,21 +488,49 @@ function docState(d) {
   const drive = S.driveIssue && d.id ? '<button type="button" class="dv-drive" data-action="drive-issue">' + icon('alert', 'sm') + esc(L('Drive-Ablage ausstehend', 'Drive copy pending')) + '</button>' : '';
   return save + drive;
 }
+/** The tabs of the mask: topics, results. */
+function jfTabs(m) {
+  const view = S.jfView || 'topics';
+  const dec = m.topics.filter(t => t.kind === 'B').length;
+  return '<div class="jf-tabs" role="tablist">' + [['topics', L('Themen', 'Topics'), m.topics.length], ['results', L('Ergebnisse', 'Results'), dec + m.topics.filter(t => t.kind === 'A' || t.taskId).length]]
+    .map(x => '<button type="button" role="tab" class="tab' + (view === x[0] ? ' active' : '') + '" aria-selected="' + (view === x[0]) + '" data-action="jf-view" data-v="' + x[0] + '">' + esc(x[1]) + ' <span class="n">' + x[2] + '</span></button>').join('') + '</div>';
+}
+A['jf-view'] = el => { S.jfView = el.dataset.v; if (S.protoEdit) protoRender(); else render({ peek: false }); tcFill(); };
+function dvStatus(d, m) {
+  const st = d.draft || !d.id ? { key: 'plan', label: L('Entwurf', 'Draft') } : m.closed ? { key: 'done', label: L('Abgeschlossen', 'Closed') } : { key: 'work', label: L('In Bearbeitung', 'In progress') };
+  return '<span class="chip st-' + st.key + '">' + esc(st.label) + '</span>';
+}
+/** The buttons of the viewer's header: versions, close / reopen the meeting, edit. */
+function dvButtons(d, m, loading) {
+  const off = d.saving ? ' disabled' : '';
+  if (!d.canWrite) return '';
+  return (d.id ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' : '') + docState(d) +
+    (!loading && d.id ? '<button class="btn sm" data-action="proto-close"' + off + '>' + icon('check', 'sm') + (m.closed ? L('Wieder öffnen', 'Reopen') : L('Abschließen', 'Close meeting')) + '</button>' : '') +
+    (!loading && !m.closed ? '<button class="btn sm primary" data-action="proto-edit"' + off + '>' + L('Bearbeiten', 'Edit') + '</button>' : '');
+}
 function protoViewer() {
   const d = S.doc;
   const loading = d.content === undefined;
   const m = (!loading && Shared.protoFromText(d.content)) || Shared.protoClean({ title: String(d.title || '').split(' · ')[0], date: d.date });
+  const canTask = d.canWrite && d.id && !m.closed;
+  const cards = m.topics.map((t, k) => topicCard(t, k, false, canTask)).join('') || '<p class="faint">' + esc(L('Noch keine Themen.', 'No topics yet.')) + '</p>';
   return '<div class="doc-view card-w"><div class="dv-head"><button class="icon-btn" data-action="doc-close"' + labelled(L('Zurück', 'Back')) + '>' + icon('back') + '</button>' +
-    '<div class="dv-t"><h2>' + esc(jfName(m.title || d.title, d.projectId)) + '</h2><small>' + esc(L('Jour-Fixe-Protokoll', 'Jour fixe minutes')) +
+    '<div class="dv-t"><h2>' + esc(jfName(m.title || d.title, d.projectId)) + ' ' + dvStatus(d, m) + '</h2><small>' + esc(L('Jour-Fixe-Protokoll', 'Jour fixe minutes')) +
     (d.updatedBy ? esc(' · ' + user(d.updatedBy).name + ' · ' + timeAgo(d.updatedAt)) : '') + '</small></div>' +
-    (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') +
-    (d.canWrite && d.id ? '<button class="btn sm" data-action="doc-versions" data-id="' + esc(d.id) + '">' + icon('clock', 'sm') + 'Versionen</button>' : '') +
-    docState(d) +
-    (d.canWrite && !loading ? '<button class="btn sm primary" data-action="proto-edit"' + (d.saving ? ' disabled' : '') + '>' + L('Bearbeiten', 'Edit') + '</button>' : '') + '</div>' +
-    // the header at once; the table as a skeleton until the text is there
-    (loading ? skLines(6) : protoHead(m, d.version) + protoTable(m, { actions: d.canWrite && d.id, docId: d.id })) + '</div>';
+    (d.lockBy && d.lockBy !== S.me.email ? '<span class="chip warn">' + icon('lock', 'sm') + esc(user(d.lockBy).name) + ' bearbeitet gerade</span>' : '') + dvButtons(d, m, loading) + '</div>' +
+    // the header at once; the cards as a skeleton until the text is there
+    (loading ? skLines(6) : protoHead(m, d.version) + jfTabs(m) + ((S.jfView || 'topics') === 'results' ? protoResults(m, canTask) : '<div class="tc-list">' + cards + '</div>')) + '</div>';
 }
-A['doc-close'] = () => { S.doc = null; S.projTab = 'jf'; render({ peek: false }); };
+A['doc-close'] = () => { S.doc = null; S.teamTab = 'jf'; render({ peek: false }); };
+/** "Abschließen": the minutes are marked closed (a save like any other, so versions and merging apply); "Wieder öffnen" undoes it. */
+A['proto-close'] = () => {
+  const d = S.doc;
+  const model = Shared.protoFromText(d.content);
+  if (!model) return;
+  model.closed = !model.closed;
+  S.protoEdit = { id: d.id, projectId: d.projectId, seriesId: d.seriesId, date: d.date, title: d.title, base: d.version || 0, model: model, saved: d.content, sizes: {} };
+  protoSave();
+};
 /** "+1 Thema · 2 Zeilen neu · 1 geändert": what one save changed (null for older entries). */
 function changeText(c) {
   if (!c) return '';
@@ -373,7 +575,7 @@ A['doc-version-view'] = el => call('docs.version', { id: el.dataset.id, version:
   const m = Shared.protoFromText(v.content);
   openModal({
     title: L('Version ', 'Version ') + v.version,
-    body: '<div class="ver-view">' + (m ? protoHead(m, v.version) + protoTable(m, {}) : docPreview(v.content)) + '</div>',
+    body: '<div class="ver-view">' + (m ? protoHead(m, v.version) + protoCompact(m) : docPreview(v.content)) + '</div>',
     submitLabel: L('Zurück zur Liste', 'Back to the list'),
     onSubmit: () => A['doc-versions'](el),
   });
@@ -384,6 +586,7 @@ function protoReopen(id) {
   return call('docs.get', { id: id }).then(d => { docRemember(d); S.doc = d; render({ peek: false }); return jfReload(); });
 }
 
+/* ---------------- minutes: the form ---------------- */
 /* ---------------- minutes: the form ---------------- */
 let docLockTimer = null;
 /** "Wird gerade bearbeitet": set while the form is open, renewed every 4 minutes (runs out after 5 on its own). */
@@ -412,9 +615,10 @@ function protoStartEdit(d) {
   S.protoEdit = e;
   if (e.id) docLock(e.id);
   render({ peek: false });
+  tcFill();
 }
 const protoDirty = () => !!S.protoEdit && Shared.protoToText(S.protoEdit.model) !== S.protoEdit.saved;
-/** Re-renders the form; text fields someone dragged larger keep their size. */
+/** Re-renders the form; the fields someone dragged larger keep their size. */
 function protoRender() {
   const e = S.protoEdit;
   store.set(protoKey(e), { base: e.base, baseText: e.saved, model: e.model });
@@ -422,12 +626,13 @@ function protoRender() {
   $$('.proto-edit textarea[data-path]').forEach(t => { if (t.style.height) sizes[t.dataset.path] = t.style.height; });
   render({ peek: false });
   $$('.proto-edit textarea[data-path]').forEach(t => { if (sizes[t.dataset.path]) t.style.height = sizes[t.dataset.path]; });
+  tcFill();
 }
-/** People to pick from: attendees, the project's people, then everybody else. */
+/** People to pick from: attendees, the team's people, then everybody else. */
 function protoPeople() {
   const e = S.protoEdit;
-  const p = project(e.projectId);
-  return e.model.present.concat(p ? projectMembers(p) : [], S.users.map(u => u.email)).filter((x, i, a) => x && a.indexOf(x) === i);
+  const t = placeTeam(e.projectId);
+  return e.model.present.concat(t ? teamMembers(t) : [], S.users.map(u => u.email)).filter((x, i, a) => x && a.indexOf(x) === i);
 }
 function personSelect(path, value) {
   return '<select class="select sm" data-on-change="proto-field" data-path="' + path + '" aria-label="' + esc(L('Verantwortlich', 'Responsible')) + '"><option value="">–</option>' +
@@ -444,35 +649,28 @@ function protoLine(i, k, n) {
     (i.type === 'A' ? '<label class="pe-done"' + (jfLive(i.taskId) ? labelled(L('Kommt aus der Aufgabe: dort erledigen', 'Comes from the task: mark it done there')) : '') + '><input type="checkbox" data-on-change="proto-field" data-path="' + at + '.done"' +
       (lineDone(i) ? ' checked' : '') + (jfLive(i.taskId) ? ' disabled' : '') + '> ' + esc(L('erledigt', 'done')) + '</label>' : '<span class="pe-done"></span>') +
     peTaskBtn(i.type === 'A' ? i : null, k, n) +
-    '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '" data-i="' + n + '"' + labelled(L('Zeile löschen', 'Delete line')) + '>' + icon('x', 'sm') + END_BTN;
+    '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + ATTR_I + n + '"' + labelled(L('Zeile löschen', 'Delete line')) + '>' + icon('x', 'sm') + END_BTN;
 }
-/** In the form: "as task" for a topic or an action line, or the link to the task made from it. */
+/** In the form: "as task" for an action line, or the link to the task made from it. */
 function peTaskBtn(x, k, n) {
   if (!x) return '<span></span>';
   if (jfLive(x.taskId)) return '<button type="button" class="icon-btn pe-has" data-action="open-task" data-id="' + esc(x.taskId) + '"' + labelled(L('Aufgabe öffnen', 'Open task')) + '>' + icon('checksq', 'sm') + '</button>';
-  return '<button type="button" class="icon-btn" data-action="pe-task" data-t="' + k + '"' + (n === undefined ? '' : ' data-i="' + n + '"') +
-    labelled(n === undefined ? L('Thema als Aufgabe (mit Unteraufgaben)', 'Topic as task (with sub-tasks)') : L('Als Aufgabe', 'As task')) + '>' + icon('plus', 'sm') + '</button>';
+  return '<button type="button" class="icon-btn" data-action="pe-task" data-t="' + k + ATTR_I + n + '"' + labelled(L('Als Aufgabe', 'As task')) + '>' + icon('plus', 'sm') + '</button>';
 }
 function protoEditor() {
   const e = S.protoEdit;
   const m = e.model;
   const dirty = protoDirty();
+  const view = S.jfView || 'topics';
   const chips = (list, key) => list.map(x => '<span class="nt-chip">' + avatar(x) + '<span>' + esc(user(x).name) + '</span><button type="button" class="nt-x" data-action="proto-unperson" data-k="' + key + '" data-v="' + esc(x) + '"' + labelled(L('Entfernen', 'Remove')) + '>' + icon('x', 'sm') + '</button></span>').join('');
-  const topics = m.topics.map((t, k) =>
-    '<div class="pe-topic card-w"><div class="pe-th"><span class="pe-no">' + (k + 1) + '.</span>' +
-    '<input class="input" data-on-input="proto-field" data-path="topics.' + k + '.title" value="' + esc(t.title) + '" placeholder="' + esc(L('Thema', 'Topic')) + '" aria-label="' + esc(L('Thema', 'Topic')) + '">' +
-    personSelect('topics.' + k + '.owner', t.owner) + peTaskBtn(t, k) +
-    '<button type="button" class="icon-btn pe-pin' + (t.pinned ? ' on' : '') + '" data-action="proto-pin" data-t="' + k + '" aria-pressed="' + !!t.pinned + '"' +
-      labelled(t.pinned ? L('Anker lösen', 'Remove anchor') : L('Verankern: kommt in jedes nächste Protokoll', 'Anchor: carried to every next minutes')) + '>' + icon('pin', 'sm') + '</button>' +
-    '<button type="button" class="icon-btn" data-action="proto-del" data-t="' + k + '"' + labelled(L('Thema löschen', 'Delete topic')) + '>' + icon('trash', 'sm') + END_BTN +
-    t.items.map((i, n) => protoLine(i, k, n)).join('') +
-    '<button type="button" class="btn sm outline" data-action="proto-add-line" data-t="' + k + '">' + icon('plus', 'sm') + L('Zeile', 'Line') + '</button></div>').join('');
-  return '<div class="doc-edit card-w proto-edit"><div class="dv-head"><div class="dv-t"><h2>' + esc(jfName(m.title || e.title, e.projectId)) + '</h2><small>' + esc(fmtDate(e.date, { absolute: true })) + '</small></div></div>' +
+  return '<div class="doc-edit card-w proto-edit"><div class="dv-head"><div class="dv-t"><h2>' + esc(jfName(m.title || e.title, e.projectId)) + ' ' + dvStatus({ id: e.id }, m) + '</h2><small>' + esc(fmtDate(e.date, { absolute: true })) + ' · KW ' + Shared.isoWeek(e.date) + '</small></div></div>' +
     '<div class="pe-head"><label class="field"><span>' + L('Protokoll', 'Minutes by') + '</span>' + personSelect('minuteTaker', m.minuteTaker) + '</label>' +
     '<div class="field"><span>' + L('Anwesend', 'Present') + '</span><div class="nt-people">' + chips(m.present, 'present') + '<button type="button" class="nt-add" data-action="proto-person" data-k="present">' + icon('plus', 'sm') + L('Personen', 'People') + '</button></div></div>' +
     '<div class="field"><span>' + L('Abwesend', 'Absent') + '</span><div class="nt-people">' + chips(m.absent, 'absent') + '<button type="button" class="nt-add" data-action="proto-person" data-k="absent">' + icon('plus', 'sm') + L('Personen', 'People') + '</button></div></div></div>' +
-    hintP(L('Art: I = Info · A = Aufgabe (mit Verantwortlich und Termin, wird zur Projektaufgabe) · B = Beschluss · N = Nachtrag', 'Type: I = info · A = action (with responsible and due date, becomes a project task) · B = decision · N = note')) +
-    topics + '<button type="button" class="btn" data-action="proto-add-topic">' + icon('plus', 'sm') + L('Thema hinzufügen', 'Add topic') + '</button>' +
+    jfTabs(m) +
+    (view === 'results' ? protoResults(m, false)
+      : '<div class="tc-list">' + m.topics.map((t, k) => topicCard(t, k, true, false)).join('') + '</div>' +
+        '<button type="button" class="btn" data-action="proto-add-topic">' + icon('plus', 'sm') + L('Thema hinzufügen', 'Add topic') + '</button>') +
     '<div class="peek-commit doc-commit' + (dirty ? '' : ' clean') + '" role="status">' +
     '<span class="grow">' + (dirty ? L('Ungespeicherte Änderungen (als Entwurf im Browser gesichert)', 'Unsaved changes (kept as a draft in this browser)') : L('Keine Änderungen', 'No changes')) + '</span>' +
     '<button type="button" class="btn sm" data-action="proto-discard">' + (dirty ? L('Verwerfen', 'Discard') : L('Schließen', 'Close')) + '</button>' +
@@ -486,7 +684,7 @@ function protoSet(path, value) {
   o[keys[keys.length - 1]] = value;
   store.set(protoKey(S.protoEdit), { base: S.protoEdit.base, baseText: S.protoEdit.saved, model: S.protoEdit.model });
 }
-ON.input['proto-field'] = el => { protoSet(el.dataset.path, el.value); protoBarSoon(); };
+ON.input['proto-field'] = el => { protoSet(el.dataset.path, el.value); if (el.classList.contains('tc-body')) tcGrow(el); protoBarSoon(); };
 ON.change['proto-field'] = el => { protoSet(el.dataset.path, el.type === 'checkbox' ? el.checked : el.value); protoRender(); };
 const protoBarSoon = debounce(() => {
   const bar = $('.proto-edit .doc-commit');
@@ -499,7 +697,14 @@ const protoBarSoon = debounce(() => {
 // every topic and line gets an id, so two people's changes can be merged on saving
 const newId = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7);
 const newLine = () => ({ id: newId(), type: 'I', text: '', owner: '', due: '', done: false, taskId: '' });
-A['proto-add-topic'] = () => { S.protoEdit.model.topics.push({ id: newId(), title: '', owner: S.me.email, items: [newLine()] }); protoRender(); };
+A['proto-add-topic'] = () => {
+  const t = { id: newId(), title: '', kind: 'I', owners: [], pinned: false, taskId: '', body: '', projectId: '', due: '', links: [], files: [], items: [] };
+  S.protoEdit.model.topics.push(t);
+  S.tcOpen = Object.assign({}, S.tcOpen, { [t.id]: true });
+  protoRender();
+  const ti = $$('.proto-edit .tc-title').pop();
+  if (ti && ti.focus) ti.focus();
+};
 A['proto-pin'] = el => { const t = S.protoEdit.model.topics[Number(el.dataset.t)]; protoSet('topics.' + el.dataset.t + '.pinned', !t.pinned); protoRender(); };
 A['proto-add-line'] = el => { S.protoEdit.model.topics[Number(el.dataset.t)].items.push(newLine()); protoRender(); };
 A['proto-del'] = el => {

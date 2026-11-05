@@ -8,12 +8,12 @@ const { freshApp, ME, ANNA, LEA } = require('./helpers');
 
 const OUT = 'fremd.person@firma.de';
 const plain = v => JSON.parse(JSON.stringify(v));
-/** I lead a team with Anna; Lea is only in the project; an outsider sees nothing. */
+/** I lead a team with Anna and Lea (jour fixe belongs to the team); an outsider sees nothing. */
 function world() {
   const app = freshApp();
   [ME, ANNA, LEA, OUT].forEach(e => app.as(e).call('bootstrap'));
   app.as(ME);
-  const team = app.call('teams.save', { name: 'Kern', members: [ME, ANNA] });
+  const team = app.call('teams.save', { name: 'Kern', members: [ME, ANNA, LEA] });
   const project = app.call('projects.save', { teamId: team.id, name: 'Portal', members: [ME, ANNA, LEA] });
   const s = app.call('jf.saveSeries', { projectId: project.id, title: 'Weekly', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: '2030-01-07', attendees: [ME, ANNA, LEA] });
   const S = app.x.Shared;
@@ -185,7 +185,7 @@ describe('simulation: versions, rights, size, Drive', () => {
     app.ctx.__DRIVE_DENIED__ = false;
     assert.equal(app.call('docs.flush', { id: d.id }).pending, 0);
     const doc = app.x.Db.get('Docs', d.id);
-    assert.match(app.ctx.DriveApp.getFileById(doc.fileId).getBlob().getDataAsString(), /\*\*B\*\*/);
+    assert.match(app.ctx.DriveApp.getFileById(doc.fileId).getBlob().getDataAsString(), /## 1\. B/);
     assert.deepEqual(plain(app.call('docs.versions', { id: d.id }).map(v => v.version)), [2, 1]);
   });
   test('a series without minutes: empty carry-over, an empty draft, nothing in the archive', () => {

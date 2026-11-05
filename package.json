@@ -8,14 +8,14 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node dev/test.js && node --test --test-concurrency=2 test/ && node dev/i18n-audit.js",
+    "test": "node dev/test.js && node --test --test-concurrency=2 test/*.test.js && node dev/i18n-audit.js",
     "check": "node dev/check-gas.js",
     "preview": "node dev/build-preview.js",
     "push": "clasp push",
     "deploy": "clasp push && clasp deploy",
     "i18n": "node dev/i18n-audit.js",
-    "unit": "node --test test/",
-    "coverage": "c8 --reporter=text --reporter=html --include \"src/**/*.js\" node --test test/ dev/test.js",
+    "unit": "node --test test/*.test.js",
+    "coverage": "c8 --reporter=text --reporter=html --include \"src/**/*.js\" node --test test/*.test.js dev/test.js",
     "lint": "eslint . --max-warnings 78",
     "secrets": "node dev/secret-scan.js",
     "load": "node dev/load-sim.js",

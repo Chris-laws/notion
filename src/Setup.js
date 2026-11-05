@@ -34,6 +34,8 @@ function setup() {
   });
   // the Drive folder for documents and minutes; asks for the Drive permission while setup runs
   try { Logger.log('Drive-Ordner bereit: https://drive.google.com/drive/folders/' + Store.root()); } catch (e) { Logger.log('Drive: ' + e.message); }
+  // v62: jour fixe only per team; the one from projects is removed once (backup file and Drive trash)
+  try { Logger.log('Jour Fixe aus Projekten entfernt: ' + Jf.migrateToTeams()); } catch (e) { Logger.log('Migration Jour Fixe: ' + e.message); }
   Logger.log('Datenbank bereit: ' + ss.getUrl());
   return ss.getUrl();
 }

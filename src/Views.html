@@ -1533,7 +1533,7 @@ function teamPage(t) {
   if (tab === 'tasks') body = database(tasks, { people: members, teamId: t.id });
   if (tab === 'projects') body = '<div class="grid">' + projects.map(projectCard).join('') +
     '<button class="pcard new" data-action="project-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Neues Projekt</button></div>';
-  if (tab === 'jf') body = jfTeamTab(t, projects);
+  if (tab === 'jf') body = S.protoEdit && S.protoEdit.projectId === 'team:' + t.id ? protoEditor() : S.doc && S.doc.projectId === 'team:' + t.id ? protoViewer() : jfTeamTab(t);
   if (tab === 'members') body = '<div class="members-list">' + members.map(e => {
     const u = user(e);
     const open = S.tasks.filter(x => !isDone(x) && x.assignees.indexOf(e) >= 0).length;
@@ -1552,12 +1552,21 @@ function teamPage(t) {
     '<span>Lead: ' + esc(teamLeads(t).map(e => user(e).name).join(', ')) + '</span><span class="sep"></span><span>' + projects.length + ' Projekte</span></div>' +
     '<div class="db-bar"><div class="tabs">' +
     [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length],
-      ['jf', 'Jour Fixe', 'repeat', jfData().series.filter(s => projects.some(p => p.id === s.projectId)).length], ['members', 'Mitglieder', 'users', members.length]]
+      ['jf', 'Jour Fixe', 'repeat', jfData().series.filter(s => s.projectId === 'team:' + t.id).length], ['members', 'Mitglieder', 'users', members.length]]
       .map(x => '<button class="tab' + (tab === x[0] ? ' active' : '') + '" data-action="team-tab" data-v="' + x[0] + '">' + icon(x[2]) + x[1] + ' <span class="n">' + x[3] + '</span></button>').join('') +
     '</div>' + (tab === 'members' ? '<button class="btn primary" data-action="team-members" data-id="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Mitglieder hinzufügen</button>' : '') +
     '</div><div class="fit-body" data-keep-scroll="fit">' + body + '</div></div>';
 }
-A['team-tab'] = el => { S.teamTab = el.dataset.v; render(); };
+A['team-tab'] = el => {
+  // leaving the minutes with unsaved text: the draft stays in the browser and comes back next time
+  if (S.teamTab === 'jf' && el.dataset.v !== 'jf') {
+    if (S.protoEdit) docEndEdit();
+    S.protoEdit = null;
+    S.doc = null;
+  }
+  S.teamTab = el.dataset.v;
+  render();
+};
 A['team-capacity'] = el => { S.cap.teamId = el.dataset.id; S.cap.data = null; go('capacity'); };
 A['team-calendar'] = el => { S.cal.teamId = el.dataset.id; go('calendar'); };
 
@@ -1585,7 +1594,7 @@ function projectPage(p) {
   const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
   const members = projectMembers(p);
   const today = TODAY();
-  const tab = S.projTab || 'overview';
+  const tab = ['overview', 'tasks', 'members'].indexOf(S.projTab) >= 0 ? S.projTab : 'overview';
   const pc = projectColor(p);
   const over = top.filter(x => !isDone(x) && x.dueDate && x.dueDate < today).length;
   const hoursAll = top.reduce((s2, x) => s2 + (x.estimate || 0), 0);
@@ -1611,8 +1620,6 @@ function projectPage(p) {
       rows.map(r => '<div class="brow"><div class="bt"><b>' + r.l + '</b><small>' + r.d + '</small></div><div class="bb"><span class="track"><i style="width:' + r.v + '%"></i></span></div><div class="bv"><b>' + r.v + ' %</b><small>' + r.c + '</small></div></div>').join('') + '</div>';
   } else if (tab === 'tasks') {
     body = database(tasks, { hideProject: true, people: members });
-  } else if (tab === 'jf' || tab === 'docs') {
-    body = jfTab(p);
   } else {
     const whole = !p.members.length;
     // who belongs to the project: the whole team (default) or a picked list of people
@@ -1641,18 +1648,11 @@ function projectPage(p) {
     '<div class="pj-acts"><button class="icon-btn sq" data-action="new-task" title="Neue Aufgabe">' + icon('plus') + '</button>' +
     '<button class="icon-btn sq" data-action="nav" data-view="calendar" title="Kalender">' + icon('calendar') + '</button>' +
     '<button class="icon-btn sq" data-action="project-edit" data-id="' + esc(p.id) + '" title="Projekt bearbeiten">' + icon('settings') + '</button></div></div>' +
-    '<div class="pj-tabs">' + [['overview', 'Übersicht', ''], ['tasks', 'Aufgaben', top.length], ['jf', 'Jour Fixe', ''], ['members', 'Mitglieder', members.length]].map(x =>
+    '<div class="pj-tabs">' + [['overview', 'Übersicht', ''], ['tasks', 'Aufgaben', top.length], ['members', 'Mitglieder', members.length]].map(x =>
       '<button class="' + (tab === x[0] ? 'on' : '') + '" data-action="proj-tab" data-v="' + x[0] + '">' + x[1] + (x[2] !== '' ? ' <span class="n">' + x[2] + '</span>' : '') + '</button>').join('') + '</div>' +
     '<div class="fit-body" data-keep-scroll="fit">' + body + '</div></div>';
 }
-A['proj-tab'] = el => {
-  // leaving the editor with unsaved text: the draft stays in the browser and comes back next time
-  if (S.protoEdit) docEndEdit();
-  S.protoEdit = null;
-  S.doc = null;
-  S.projTab = el.dataset.v;
-  render();
-};
+A['proj-tab'] = el => { S.projTab = el.dataset.v; render(); };
 
 /* ---------------- team calendar ---------------- */
 function scopeButton(action, teamId, personal) {

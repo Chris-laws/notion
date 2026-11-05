@@ -60,7 +60,7 @@ const Assistant = {
     jf.series.forEach(s => {
       const next = Shared.jfDates(s, today, Shared.addDays(today, 60))[0];
       if (next) {
-        add('jf:' + s.id + ':' + next, 'jf', 'Jour Fixe ' + s.title + ' | nächster ' + next + ' ' + (s.time || '') + (projects[s.projectId] ? ' | Projekt ' + projects[s.projectId].name : '') +
+        add('jf:' + s.id + ':' + next, 'jf', 'Jour Fixe ' + s.title + ' | nächster ' + next + ' ' + (s.time || '') + (Docs.isTeam_(s.projectId) ? ' | Team ' + ((Db.get('Teams', String(s.projectId).slice(5)) || {}).name || '') : projects[s.projectId] ? ' | Projekt ' + projects[s.projectId].name : '') +
           (s.carry.open.length ? ' | offen: ' + s.carry.open.map(i => i.text).slice(0, 8).join('; ') : '') + (s.carry.pinned.length ? ' | verankert: ' + s.carry.pinned.map(t => t.title).join('; ') : ''),
         next <= soon ? 2 : 1, { label: s.title + ' ' + next, date: next, seriesId: s.id, open: s.carry.open.length });
       }

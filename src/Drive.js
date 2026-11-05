@@ -162,6 +162,8 @@ const Store = {
   },
   project(project) {
     const team = Db.get('Teams', project.teamId) || { id: 'none', name: 'Ohne Team' };
+    // the place of a team's jour fixe is the team folder itself
+    if (project.isTeam) return Store.team_(team);
     return Store.folder_('project:' + project.id, () => Store.team_(team), Shared.safeName(project.name));
   },
   documents(project) {

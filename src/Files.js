@@ -9,16 +9,20 @@ const Files = {
   MAX: 3 * 1024 * 1024,
   // no SVG: it can carry script
   TYPES: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+  // attachments of a jour fixe topic (v62): documents next to the images; the first bytes must fit, never HTML or script
+  DOC_TYPES: {
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'zip',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'zip',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'zip',
+    'text/plain': 'text', 'text/csv': 'text',
+  },
 
   upload(p) {
     const ctx = Access.context(Auth.currentUser());
     const mime = String((p && p.mime) || '');
-    if (Files.TYPES.indexOf(mime) < 0) throw new Error('Nur Bilder (JPEG, PNG, GIF oder WebP).');
-    // too long is refused before decoding (no work for oversized sends)
-    if (String(p.data || '').length > Math.ceil(Files.MAX * 4 / 3) + 4) throw new Error('Das Bild ist zu groß (höchstens 3 MB).');
-    const bytes = Utilities.base64Decode(String(p.data || ''));
-    if (!bytes.length || bytes.length > Files.MAX) throw new Error('Das Bild ist zu groß (höchstens 3 MB).');
-    if (!Files.looksLike_(bytes, mime)) throw new Error('Das ist kein gültiges Bild.');
+    const doc = !!p && p.attach === true && Object.prototype.hasOwnProperty.call(Files.DOC_TYPES, mime);
+    const bytes = Files.decode_(p, mime, doc);
     const name = Shared.safeName(String(p.name || 'Bild').slice(0, 80)) || 'Bild';
     const place = Db.tx(() => Files.place_(p, ctx));
     Files.quota_(ctx.email, bytes.length);
@@ -27,11 +31,21 @@ const Files = {
     try {
       const row = Db.insert('Files', { id: Util.uid('fl_'), driveId: driveId, kind: place.kind, taskId: place.taskId, projectId: place.projectId,
         name: name, mime: mime, size: bytes.length, createdBy: ctx.email, createdAt: new Date().toISOString() });
-      return { id: row.id, name: name, token: '![' + name.replace(/[[\]()]/g, '') + '](lf:' + row.id + ')' };
+      return { id: row.id, name: name, mime: mime, size: bytes.length, token: '![' + name.replace(/[[\]()]/g, '') + '](lf:' + row.id + ')' };
     } catch (e) {
       try { Store.trash(driveId); } catch (x) { /* best effort */ }
       throw e;
     }
+  },
+
+  /** The bytes of an upload, after checking type, size and content (too long is refused before decoding). */
+  decode_(p, mime, doc) {
+    if (Files.TYPES.indexOf(mime) < 0 && !doc) throw new Error(p.attach === true ? 'Dieser Dateityp ist nicht erlaubt (Bilder, PDF, Word, Excel, PowerPoint, Text).' : 'Nur Bilder (JPEG, PNG, GIF oder WebP).');
+    if (String(p.data || '').length > Math.ceil(Files.MAX * 4 / 3) + 4) throw new Error('Die Datei ist zu groß (höchstens 3 MB).');
+    const bytes = Utilities.base64Decode(String(p.data || ''));
+    if (!bytes.length || bytes.length > Files.MAX) throw new Error('Die Datei ist zu groß (höchstens 3 MB).');
+    if (!Files.looksLike_(bytes, mime)) throw new Error(doc ? 'Der Inhalt passt nicht zum Dateityp.' : 'Das ist kein gültiges Bild.');
+    return bytes;
   },
 
   /** Per person and day at most FILES_USER_DAILY images (default 50) and FILES_USER_DAILY_MB megabytes (default 100). */
@@ -71,11 +85,13 @@ const Files = {
   looksLike_(bytes, mime) {
     const b = i => (bytes[i] + 256) % 256;
     const text = (from, s) => s.split('').every((c, i) => b(from + i) === c.charCodeAt(0));
-    if (mime === 'image/jpeg') return b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff;
-    if (mime === 'image/png') return b(0) === 0x89 && text(1, 'PNG');
-    if (mime === 'image/gif') return text(0, 'GIF8');
-    return text(0, 'RIFF') && text(8, 'WEBP');
+    const kind = Files.DOC_TYPES[mime];
+    if (kind === 'text') return !Array.prototype.slice.call(bytes, 0, 4000).some(x => x === 0);
+    const heads = { 'image/jpeg': () => b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff, 'image/png': () => b(0) === 0x89 && text(1, 'PNG'), 'image/gif': () => text(0, 'GIF8'),
+      pdf: () => text(0, '%PDF'), zip: () => b(0) === 0x50 && b(1) === 0x4b && b(2) === 3 && b(3) === 4 };
+    return heads[kind || mime] ? heads[kind || mime]() : text(0, 'RIFF') && text(8, 'WEBP');
   },
+
 
   /** The image, for people who see its task (or, the task gone, its project). */
   get(p) {
@@ -88,6 +104,6 @@ const Files = {
     if (ctx.admin) return true;
     const task = row.taskId ? Db.get('Tasks', row.taskId) : null;
     if (task) return Access.canSeeTask(task, ctx);
-    return !!row.projectId && !!ctx.projectIds[row.projectId];
+    return !!row.projectId && Docs.sees_(row.projectId, ctx);
   },
 };

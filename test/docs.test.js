@@ -200,7 +200,7 @@ describe('jour fixe', () => {
     const { app, project } = world();
     const s = series(app, project);
     const saved = saveMeeting(app, s, '2026-11-02', m => m.topics.push({ title: 'Budget', items: [{ type: 'I', text: 'Plan steht' }] }));
-    assert.equal(pathOf(app, saved.fileId), 'LidlFlow/Projects/Forecast/Exception Handling/Jour Fixe/Weekly/2026-11-02 Weekly.md');
+    assert.equal(pathOf(app, saved.fileId), 'LidlFlow/Projects/Forecast/Jour Fixe/Weekly/2026-11-02 Weekly.md');
     const again = app.call('jf.meeting', { seriesId: s.id, date: '2026-11-02' });
     assert.equal(again.id, saved.id);
     assert.equal(S(app).protoFromText(again.content).topics[0].title, 'Budget');
@@ -295,7 +295,7 @@ describe('jour fixe: fast and complete (v48)', () => {
     const b = app.call('bootstrap');
     assert.equal(b.jf.series.length, 1);
     assert.equal(b.jf.minutes.length, 1);
-    assert.deepEqual(plain(b.jf.minutes[0].people), { present: [ME], absent: [ANNA], by: ME, topics: 0 }, 'who was there and who missed it, without opening the file');
+    assert.deepEqual(plain(b.jf.minutes[0].people), { present: [ME], absent: [ANNA], by: ME, topics: 0, tasks: 0, closed: false }, 'who was there and who missed it, without opening the file');
     assert.equal(app.as(OUT).call('bootstrap').jf.series.length, 0, 'only series of visible projects');
   });
   test('a new meeting opens without reading any file: open items of the last meeting come from the table', () => {

@@ -13,8 +13,29 @@ const Docs = {
   KEEP: 50,
   LOCK_MIN: 5,
 
+  /**
+   * The place of a document: a project, or (jour fixe, since v62) a team with the id "team:<teamId>".
+   * A team place looks like a project to the rest of the code: its people are the team's people.
+   */
+  isTeam_(id) { return String(id || '').indexOf('team:') === 0; },
+  teamPlace_(id, ctx) {
+    const team = Db.get('Teams', String(id).slice(5));
+    if (!team || !(ctx.admin || ctx.teamIds[team.id])) throw new Error('Team nicht gefunden.');
+    return { id: id, teamId: team.id, name: team.name, createdBy: team.createdBy, members: [], isTeam: true };
+  },
+  /** The place of a team's documents for the Drive code (no person involved). */
+  teamFolder_(id) {
+    const team = Db.get('Teams', String(id).slice(5));
+    return { id: id, teamId: team ? team.id : 'none', name: team ? team.name : '', isTeam: true };
+  },
+  /** May the person see what belongs to this place (a project or a team)? */
+  sees_(id, ctx) {
+    if (ctx.admin) return true;
+    return Docs.isTeam_(id) ? !!ctx.teamIds[String(id).slice(5)] : !!ctx.projectIds[id];
+  },
   /** The project of a document or list, checked for the signed-in person. */
   project_(projectId, ctx, write) {
+    if (Docs.isTeam_(projectId)) return Docs.teamPlace_(projectId, ctx);
     const project = Db.get('Projects', projectId);
     if (!project || !(ctx.admin || ctx.projectIds[project.id])) throw new Error('Projekt nicht gefunden.');
     if (write && !Access.canManageProject(project, ctx)) throw new Error('Keine Berechtigung für dieses Projekt.');
@@ -42,7 +63,8 @@ const Docs = {
     if (!m) return {};
     const carry = Shared.protoCarry(m);
     // by and topics: shown in the jour fixe rows without reading the file
-    return { people: JSON.stringify({ present: m.present, absent: m.absent, by: m.minuteTaker, topics: m.topics.length }), openItems: carry.open, pinnedTopics: carry.pinned };
+    return { people: JSON.stringify({ present: m.present, absent: m.absent, by: m.minuteTaker, topics: m.topics.length,
+      tasks: m.topics.reduce((n, t) => n + (t.taskId ? 1 : 0) + t.items.filter(i => i.taskId).length, 0), closed: !!m.closed }), openItems: carry.open, pinnedTopics: carry.pinned };
   },
   /** File text: from the script cache, a save Drive does not have yet, or the file. */
   read_(doc) {
@@ -212,7 +234,7 @@ const Docs = {
     const row = rows[0];
     if (row.claim && Date.now() - new Date(row.claim).getTime() < Docs.CLAIM_MS) return { busy: rows.length };
     Db.update('DocPending', row.id, { claim: new Date().toISOString() });
-    const project = Db.get('Projects', doc.projectId);
+    const project = Docs.isTeam_(doc.projectId) ? Docs.teamFolder_(doc.projectId) : Db.get('Projects', doc.projectId);
     const series = doc.seriesId ? Db.get('JfSeries', doc.seriesId) : null;
     const m = row.meta || {};
     // the file still holds the version before this save: that text becomes the snapshot (once)
@@ -425,14 +447,21 @@ const Jf = {
   },
   active_(s) { return s.active === true || String(s.active).toLowerCase() === 'true'; },
 
-  /** Series and minutes (metadata only, no Drive call) of one project or of all projects the person sees. */
+  /** The team a request means: teamId, or (older callers) the team of the project given. */
+  teamOf_(p) {
+    if (p && p.teamId) return String(p.teamId);
+    const project = p && p.projectId ? Db.get('Projects', p.projectId) : null;
+    return project ? project.teamId : '';
+  },
+  /** Series and minutes (metadata only, no Drive call) of one team or of all teams the person is in. */
   list(p) {
     const ctx = Docs.ctx_();
-    const one = p && p.projectId ? Docs.project_(p.projectId, ctx, false).id : '';
+    const teamId = Jf.teamOf_(p);
+    const one = teamId ? Docs.project_('team:' + teamId, ctx, false).id : '';
     return Jf.overview_(ctx, one);
   },
   overview_(ctx, projectId) {
-    const sees = pid => (projectId ? pid === projectId : ctx.admin || ctx.projectIds[pid]);
+    const sees = pid => (projectId ? pid === projectId : Docs.sees_(pid, ctx));
     const docs = Db.all('Docs').filter(d => d.kind === 'jf' && sees(d.projectId));
     // the carry-over of the last minutes: the page builds the next meeting's draft itself (no call when opening)
     const last = {};
@@ -472,12 +501,45 @@ const Jf = {
         const x = Jf.series_(p.id, ctx, true);
         return Db.update('JfSeries', x.series.id, data);
       }
-      const project = Docs.project_(p.projectId, ctx, true);
+      // since v62 a jour fixe belongs to a team, never to a project
+      const teamId = Jf.teamOf_(p);
+      if (!teamId) throw new Error('Einen Jour Fixe gibt es nur im Team.');
+      const project = Docs.project_('team:' + teamId, ctx, true);
       Users.ensure(data.attendees);
       return Db.insert('JfSeries', Object.assign(data, {
         id: Util.uid('jf_'), projectId: project.id, active: true, createdBy: ctx.email, createdAt: new Date().toISOString(),
       }));
     });
+  },
+
+  /**
+   * v62: jour fixe exists only per team. What projects had before (series, minutes, versions, images of the minutes) is
+   * removed once (run by setup, safe to run again): the rows are kept as a JSON file in Drive first, the Drive files go
+   * to the trash (restorable there for 30 days). Returns how many series were removed.
+   */
+  migrateToTeams() {
+    const old = x => !Docs.isTeam_(x.projectId);
+    const series = Db.all('JfSeries').filter(old);
+    const docs = Db.all('Docs').filter(d => d.kind === 'jf' && old(d));
+    const images = Db.all('Files').filter(f => f.kind === 'project' && old(f));
+    if (!series.length && !docs.length && !images.length) return 0;
+    const docIds = docs.map(d => d.id);
+    const versions = Db.all('DocVersions').filter(v => docIds.indexOf(v.docId) >= 0);
+    const pending = Db.all('DocPending').filter(v => docIds.indexOf(v.docId) >= 0);
+    try {
+      const name = 'JF-Sicherung-v62-' + Util.today() + '.json';
+      const json = JSON.stringify({ series: series, docs: docs, images: images });
+      Gdrive.createBlob(Store.root(), name, Utilities.newBlob(json, 'application/json', name));
+    } catch (e) { console.error('backup of the project jour fixe: ' + e.message); }
+    Db.tx(() => {
+      Db.removeMany('DocVersions', versions.map(v => v.id));
+      Db.removeMany('DocPending', pending.map(v => v.id));
+      Db.removeMany('Docs', docIds);
+      Db.removeMany('JfSeries', series.map(x => x.id));
+      Db.removeMany('Files', images.map(f => f.id));
+    });
+    Docs.trashAll_([].concat(docs.map(d => d.fileId), versions.map(v => v.fileId), images.map(f => f.driveId)).filter(Boolean));
+    return series.length;
   },
 
   /** Ends a series: no more meetings in the calendar; all minutes stay. */
@@ -489,10 +551,10 @@ const Jf = {
   /** Meetings in a date range of the series the person can see (for the calendar). */
   events(from, to, ctx) {
     const out = [];
-    Db.all('JfSeries').filter(s => Jf.active_(s) && (ctx.admin || ctx.projectIds[s.projectId])).forEach(s => {
+    Db.all('JfSeries').filter(s => Jf.active_(s) && Docs.sees_(s.projectId, ctx)).forEach(s => {
       Shared.jfDates(s, from, to).forEach(d => out.push({
         id: 'jf_' + s.id + '_' + d, type: 'jf', title: s.title, startDate: d, endDate: d, time: s.time, duration: s.duration,
-        seriesId: s.id, projectId: s.projectId, attendees: s.attendees || [], teamId: '', note: '',
+        seriesId: s.id, projectId: s.projectId, attendees: s.attendees || [], teamId: Docs.isTeam_(s.projectId) ? String(s.projectId).slice(5) : '', note: '',
       }));
     });
     return out;
@@ -578,22 +640,31 @@ const Jf = {
     if (p.draft) return { x: null, model: null, topic: null };
     throw new Error('Thema nicht gefunden.');
   },
+  /** The topic links its task; whoever gets the task is responsible for the topic too, and the project stays noted on it. */
+  noteTask_(topic, task, projectId) {
+    topic.taskId = task.id;
+    topic.owners = (topic.owners || []).concat(task.assignees || []).filter((e, k, a) => e && a.indexOf(e) === k).slice(0, 20);
+    if (projectId) topic.projectId = projectId;
+  },
   makeTasksTx_(p, ctx) {
-    const target = Docs.project_(p.projectId, ctx, true);
     const src = Jf.taskSource_(p, ctx);
     const x = src.x, model = src.model, topic = src.topic;
+    // a project, or (jour fixe of a team) straight to the people of the team: then the task belongs to the team
+    const teamId = p.projectId ? '' : (x && Docs.isTeam_(x.doc.projectId) ? String(x.doc.projectId).slice(5) : String(p.teamId || ''));
+    const target = p.projectId ? Docs.project_(p.projectId, ctx, true) : Docs.teamPlace_('team:' + teamId, ctx);
+    const place = p.projectId ? { projectId: target.id } : { teams: [target.teamId] };
     const items = (Array.isArray(p.items) ? p.items : []).slice(0, 50);
     const line = id => (topic && id ? topic.items.find(i => i.id === id) : null);
     Jf.notTwice_(topic, p, items.map(i => line(i.itemId)));
     const fallback = (topic && topic.title) || 'Aus dem Jour Fixe';
-    const one = (o, extra) => Tasks.save(Object.assign(Jf.taskFields_(o, fallback, ctx), { projectId: target.id }, extra))[0];
+    const one = (o, extra) => Tasks.save(Object.assign(Jf.taskFields_(o, fallback, ctx), place, extra))[0];
     const tasks = [];
     let parentId = '';
     if (!p.item) {
       const parent = one(p.task || {}, {});
       tasks.push(parent);
       parentId = parent.id;
-      if (topic) topic.taskId = parent.id;
+      if (topic) Jf.noteTask_(topic, parent, p.projectId);
     }
     items.forEach(i => {
       const t = one(i, { parentId: parentId });

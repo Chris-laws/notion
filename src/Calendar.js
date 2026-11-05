@@ -17,7 +17,7 @@ const Calendar = {
     const holidays = Holidays.inRange(people.map(u => u.country), from, to).map(h =>
       Object.assign({}, h, { affects: people.filter(u => Holidays.appliesTo(h, u)).map(u => u.email) }));
     const teamIds = p.teamId ? [p.teamId] : null;
-    const jf = p.teamId ? [] : Jf.events(from, to, Access.context(me));
+    const jf = Jf.events(from, to, Access.context(me)).filter(e => !p.teamId || e.teamId === p.teamId);
     return {
       from: from, to: to, events: events.concat(jf), absences: absences, holidays: holidays,
       warnings: Availability.warnings(from, to, teamIds, { email: me.email, admin: admin }), threshold: Availability.threshold(),

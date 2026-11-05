@@ -83,9 +83,9 @@ describe('Übernehmen is fast: the database first, Drive afterwards', () => {
     app.call('docs.save', { id: r1.id, title: r1.title, content: S(app).protoToText(model), baseVersion: r2.version });
     app.call('docs.flush', { id: r1.id });
     const doc = app.x.Db.get('Docs', r1.id);
-    assert.match(app.ctx.DriveApp.getFileById(doc.fileId).getBlob().getDataAsString(), /\*\*C\*\*/);
+    assert.match(app.ctx.DriveApp.getFileById(doc.fileId).getBlob().getDataAsString(), /## 1\. C/);
     assert.deepEqual(plain(app.call('docs.versions', { id: r1.id }).map(x => x.version)), [3, 2, 1]);
-    assert.match(app.call('docs.version', { id: r1.id, version: 2 }).content, /\*\*B\*\*/);
+    assert.match(app.call('docs.version', { id: r1.id, version: 2 }).content, /## 1\. B/);
   });
   test('people outside the project cannot flush', () => {
     const { app, s } = world();

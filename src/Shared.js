@@ -373,7 +373,7 @@ function SharedFactory() {
     const pinned = carry ? carry.pinned || [] : [];
     return protoToText({
       title: s.title, date: date, minuteTaker: me, present: s.attendees || [], absent: [],
-      topics: (open.length ? [{ id: 'carry', title: 'Offene Punkte aus dem letzten Jour Fixe', owner: '', items: open }] : []).concat(pinned),
+      topics: (open.length ? [{ id: 'carry', title: 'Offene Punkte aus dem letzten Jour Fixe', kind: 'A', items: open }] : []).concat(pinned),
     });
   }
 
@@ -489,6 +489,7 @@ function SharedFactory() {
 
   /* ---- jour fixe minutes: a structured form, stored as a Markdown table plus a data block ---- */
   const PROTO_TYPES = ['I', 'A', 'B', 'N']; // information, action, decision, note
+  const PROTO_KINDS = ['I', 'A', 'B']; // what a topic is: information, task, decision
   const PROTO_MARK = '<!-- lidlflow:protocol ';
   const cut = (s, n) => String(s === undefined || s === null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, n);
   const mail = s => cut(s, 120).toLowerCase();
@@ -508,37 +509,63 @@ function SharedFactory() {
       done: yes(i && i.done), taskId: /^t_\w+$/.test(i && i.taskId) ? i.taskId : '',
     });
     // pinned: the topic comes back in every next meeting until the anchor is removed; taskId: made into a task
-    const topic = (t, k) => ({ id: id(t, 't' + k), title: cut(t && t.title, 200), owner: mail(t && t.owner),
-      pinned: yes(t && t.pinned), taskId: /^t_\w+$/.test(t && t.taskId) ? t.taskId : '',
-      items: (t && Array.isArray(t.items) ? t.items : []).slice(0, 100).map((i, n) => item(i, k, n)) });
+    // owners: the people noted as responsible (with or without a task); older minutes had one "owner"
+    const owners = t => {
+      const list = mails(Array.isArray(t && t.owners) ? t.owners : []).concat(mail(t && t.owner) ? [mail(t.owner)] : []);
+      return list.filter((x, i, a) => a.indexOf(x) === i).slice(0, 20);
+    };
+    // body: free text (markdown-like, image markers inside) that may be long; line breaks stay
+    const body = s => String(s === undefined || s === null ? '' : s).replace(/\r\n?/g, '\n').slice(0, 20000);
+    const files = list => {
+      const out = [];
+      (Array.isArray(list) ? list : []).forEach(f => {
+        if (f && /^fl_[a-z0-9]+$/.test(f.id) && !out.some(o => o.id === f.id)) out.push({ id: f.id, name: cut(f.name, 120), mime: cut(f.mime, 100), size: Math.max(0, Math.round(Number(f.size) || 0)) });
+      });
+      return out.slice(0, 30);
+    };
+    const ref = (v, re) => (re.test(v) ? v : '');
+    const topic = (t, k) => {
+      t = t || {};
+      return { id: id(t, 't' + k), title: cut(t.title, 200), kind: PROTO_KINDS.indexOf(t.kind) >= 0 ? t.kind : 'I', owners: owners(t),
+        pinned: yes(t.pinned), taskId: ref(t.taskId, /^t_\w+$/), body: body(t.body), projectId: ref(t.projectId, /^pr_\w+$/), due: isDate(t.due) ? t.due : '',
+        links: cleanLinks(t.links), files: files(t.files), items: (Array.isArray(t.items) ? t.items : []).slice(0, 100).map((i, n) => item(i, k, n)) };
+    };
     return {
-      title: cut(m.title, 120), date: isDate(m.date) ? m.date : '', minuteTaker: mail(m.minuteTaker),
+      title: cut(m.title, 120), date: isDate(m.date) ? m.date : '', minuteTaker: mail(m.minuteTaker), closed: yes(m.closed),
       present: mails(m.present), absent: mails(m.absent),
       topics: (Array.isArray(m.topics) ? m.topics : []).slice(0, 100).map(topic),
     };
   }
 
-  /** The minutes as a Markdown table (readable in Drive) with the model as a data block at the end. */
+  /** The minutes as readable Markdown (topics as headings, then notes and lines) with the model as a data block at the end. */
   function protoToText(m) {
     m = protoClean(m);
     const cell = s => String(s).replace(/\|/g, '\\|');
     const who = e => (e ? '@' + e : '');
+    const KIND = { I: 'Info', A: 'Aufgabe', B: 'Beschluss' };
     const lines = [
-      '# ' + cell(m.title) + ' – ' + m.date,
+      '# ' + cell(m.title) + ' – ' + m.date + (m.closed ? ' (abgeschlossen)' : ''),
       '',
       '**Protokoll:** ' + who(m.minuteTaker),
       '**Anwesend:** ' + m.present.map(who).join(', '),
       '**Abwesend:** ' + m.absent.map(who).join(', '),
       '',
-      '| Nr. | Art | Thema | Verantwortlich | Termin |',
-      '|---|---|---|---|---|',
     ];
     m.topics.forEach((t, k) => {
-      lines.push('| ' + (k + 1) + '. | | **' + cell(t.title) + '** | ' + who(t.owner) + ' | |');
-      t.items.forEach(i => lines.push('| | ' + i.type + ' | ' + cell(i.text) + (i.done ? ' ✓' : '') + ' | ' + who(i.owner) + ' | ' + i.due + ' |'));
+      lines.push('## ' + (k + 1) + '. ' + cell(t.title) + ' [' + KIND[t.kind] + ']' + (t.pinned ? ' (fixiert)' : ''));
+      const meta = [t.owners.length ? 'Verantwortlich: ' + t.owners.map(who).join(', ') : '', t.due ? 'Termin: ' + t.due : ''].filter(Boolean);
+      if (meta.length) lines.push('*' + meta.join(' · ') + '*');
+      if (t.body) lines.push('', t.body);
+      if (t.links.length) lines.push('', 'Links:', ...t.links.map(l => '- ' + (l.title ? l.title + ': ' : '') + l.url));
+      if (t.files.length) lines.push('', 'Anlagen:', ...t.files.map(f => '- ' + f.name));
+      if (t.items.length) {
+        lines.push('', '| Art | Punkt | Verantwortlich | Termin |', '|---|---|---|---|');
+        t.items.forEach(i => lines.push('| ' + i.type + ' | ' + cell(i.text) + (i.done ? ' ✓' : '') + ' | ' + who(i.owner) + ' | ' + i.due + ' |'));
+      }
+      lines.push('');
     });
     // "--" would end the HTML comment: written as a JSON escape, read back unchanged
-    lines.push('', PROTO_MARK + JSON.stringify(m).replace(/--/g, '-\\u002d') + ' -->');
+    lines.push(PROTO_MARK + JSON.stringify(m).replace(/--/g, '-\\u002d') + ' -->');
     return lines.join('\n');
   }
 
@@ -591,6 +618,13 @@ function SharedFactory() {
     };
     // people lists: what either side added stays, what either side removed goes
     const people = (bl, ml, tl) => tl.filter(x => ml.indexOf(x) >= 0 || bl.indexOf(x) < 0).concat(ml.filter(x => bl.indexOf(x) < 0 && tl.indexOf(x) < 0));
+    // lists of objects: as people(), matched by a key
+    const byKey = (bl, ml, tl, key) => {
+      const keys = l => l.map(key);
+      const kept = people(keys(bl), keys(ml), keys(tl));
+      const all = tl.concat(ml.filter(x => keys(tl).indexOf(key(x)) < 0));
+      return kept.map(k => all.find(x => key(x) === k)).filter(Boolean);
+    };
     const fields = (bx, mx, tx, keys, path) => {
       const out = { id: mx.id || tx.id };
       keys.forEach(k => { out[k] = pick(bx[k], mx[k], tx[k], path + '.' + k); });
@@ -617,7 +651,12 @@ function SharedFactory() {
       return out;
     };
     const line = (bx, mx, tx, path) => fields(bx, mx, tx, ['type', 'text', 'owner', 'due', 'done', 'taskId'], path);
-    const topic = (bx, mx, tx, path) => Object.assign(fields(bx, mx, tx, ['title', 'owner', 'pinned', 'taskId'], path), { items: list(bx.items, mx.items, tx.items, line, path + '.items') });
+    const topic = (bx, mx, tx, path) => Object.assign(fields(bx, mx, tx, ['title', 'kind', 'body', 'pinned', 'taskId', 'projectId', 'due'], path), {
+      // people, links and files: what either side added stays, what either side removed goes
+      owners: people(bx.owners, mx.owners, tx.owners),
+      links: byKey(bx.links, mx.links, tx.links, l => l.url),
+      files: byKey(bx.files, mx.files, tx.files, f => f.id),
+      items: list(bx.items, mx.items, tx.items, line, path + '.items') });
     // somebody both present and absent (one side each): my side decides
     let present = people(b.present, m.present, t.present);
     let absent = people(b.absent, m.absent, t.absent);
@@ -628,6 +667,7 @@ function SharedFactory() {
     const model = protoClean({
       title: pick(b.title, m.title, t.title, 'title'), date: pick(b.date, m.date, t.date, 'date'),
       minuteTaker: pick(b.minuteTaker, m.minuteTaker, t.minuteTaker, 'minuteTaker'),
+      closed: pick(b.closed, m.closed, t.closed, 'closed'),
       present: present, absent: absent,
       topics: list(b.topics, m.topics, t.topics, topic, 'topics'),
     });
@@ -644,11 +684,12 @@ function SharedFactory() {
     const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
     const byId = list => { const o = {}; list.forEach((x, i) => { o[x.id || '#' + i] = x; }); return o; };
     const lines = m => { const o = {}; m.topics.forEach((t, k) => t.items.forEach((x, i) => { o[x.id || '#' + k + '.' + i] = x; })); return o; };
+    const topicHead = t => [t.title, t.kind, t.owners, t.body, t.pinned, t.projectId, t.due, t.links, t.files];
     const ta = byId(a.topics), tb = byId(b.topics), la = lines(a), lb = lines(b);
     const count = (o, p) => Object.keys(o).filter(k => !(k in p)).length;
-    const changedTopics = Object.keys(tb).filter(k => k in ta && (ta[k].title !== tb[k].title || ta[k].owner !== tb[k].owner)).length;
+    const changedTopics = Object.keys(tb).filter(k => k in ta && !same(topicHead(ta[k]), topicHead(tb[k]))).length;
     const changedLines = Object.keys(lb).filter(k => k in la && !same(la[k], lb[k])).length;
-    const head = m => [m.title, m.date, m.minuteTaker, m.present, m.absent];
+    const head = m => [m.title, m.date, m.minuteTaker, m.present, m.absent, m.closed];
     return {
       topics: count(tb, ta) - count(ta, tb), lines: count(lb, la), changed: changedLines + changedTopics,
       removed: count(la, lb), header: !same(head(a), head(b)),
@@ -656,7 +697,7 @@ function SharedFactory() {
   }
 
   return {
-    jfDates, parseActionItem, safeName, PROTO_TYPES, protoClean, protoToText, protoFromText, protoOpenActions, protoCarry, protoMerge, protoDiff,
+    jfDates, parseActionItem, safeName, PROTO_TYPES, PROTO_KINDS, protoClean, protoToText, protoFromText, protoOpenActions, protoCarry, protoMerge, protoDiff,
     jfTemplate, linkKind, cleanLinks, findLinks, teamLeads, projectLeads, QUICK_TABS, taskQuery, focusOrder, retryDelay, pollDelay, PROJECT_COLORS, PROJECT_PALETTE, takenProjectColors, freeProjectColor, addTime,
     STATUSES, PRIORITIES, RECURRENCES, ABSENCE_TYPES, EVENT_TYPES, PROJECT_STATUSES, TEAM_COLORS, MAX_TEAMS,
     isDate, parseDate, fmt, addDays, addMonths, weekday, mondayOf, diffDays, isoWeek,

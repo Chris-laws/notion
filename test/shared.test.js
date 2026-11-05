@@ -338,8 +338,9 @@ describe('jour fixe minutes (structured)', () => {
   });
   test('round trip: text for people (table) plus the data block the form loads again', () => {
     const text = S.protoToText(model());
-    assert.match(text, /\| 1\. \| \| \*\*Reinigung \\| Geldspeicher\*\* \| @a@firma\.de \| \|/);
-    assert.match(text, /\| \| A \| Bericht im nächsten JF \| @b@firma\.de \| 2026-11-09 \|/);
+    assert.match(text, /## 1\. Reinigung \\\| Geldspeicher \[Info\]/);
+    assert.match(text, /Verantwortlich: @a@firma\.de/);
+    assert.match(text, /\| A \| Bericht im nächsten JF \| @b@firma\.de \| 2026-11-09 \|/);
     assert.match(text, /Schwieriger als gedacht zweite Zeile/, 'one table row per line');
     assert.deepEqual(plain(S.protoFromText(text)), plain(S.protoClean(model())));
   });
@@ -443,8 +444,8 @@ describe('jour fixe minutes: edge cases', () => {
     assert.equal(c.topics[0].title, 'Eins');
     assert.equal(c.topics[0].items.length, 1);
     const text = S.protoToText(c);
-    assert.match(text, /\| 1\. \| \| \*\*Eins\*\*/);
-    assert.match(text, /\| 2\. \| \| \*\*Zwei\*\*/);
+    assert.match(text, /## 1\. Eins/);
+    assert.match(text, /## 2\. Zwei/);
   });
   test('a data block at the very start of a text is found as well', () => {
     const full = S.protoToText({ title: 'X', topics: [] });
@@ -480,5 +481,70 @@ describe('jour fixe minutes: anchored topics and topic tasks', () => {
     ] });
     assert.deepEqual(plain(c.pinned.map(t => [t.title, t.pinned, t.items.map(i => i.text)])), [['Dauerthema', true, ['offen']]]);
     assert.deepEqual(plain(c.open.map(i => i.text)), ['auch offen']);
+  });
+});
+
+describe('team jour fixe topics: description, people, notes, links, files', () => {
+  const topic = extra => Object.assign({ id: 'a1', title: 'Forecast', items: [] }, extra || {});
+  const model = t => ({ title: 'JF', date: '2026-11-05', topics: [t] });
+  const first = m => S.protoClean(m).topics[0];
+  test('clean: owners list (the old single owner joins it), kind, project note, due date, long body with line breaks', () => {
+    const t = first(model(topic({ owner: 'A@x.de', owners: ['b@x.de', 'a@x.de', 'b@x.de'], kind: 'B', projectId: 'pr_x1', due: '2026-12-01', body: 'Zeile 1\r\nZeile 2\n'.repeat(3000) })));
+    assert.deepEqual(plain(t.owners), ['b@x.de', 'a@x.de']);
+    assert.equal(t.kind, 'B');
+    assert.equal(t.projectId, 'pr_x1');
+    assert.equal(t.due, '2026-12-01');
+    assert.equal(t.body.length, 20000);
+    assert.ok(t.body.indexOf('\r') < 0 && t.body.indexOf('\n') > 0);
+  });
+  test('clean: unknown kind and a bad project id or date are dropped, links only http(s)/mailto, files need an image id', () => {
+    const t = first(model(topic({ kind: 'Z', projectId: '<x>', due: 'morgen', links: [{ url: 'javascript:alert(1)' }, { title: 'Doc', url: 'https://x.de/a' }, 'https://x.de/a'],
+      files: [{ id: 'fl_ok1', name: 'a.png', mime: 'image/png', size: 12 }, { id: '../x' }, { id: 'fl_ok1' }] })));
+    assert.equal(t.kind, 'I');
+    assert.equal(t.projectId, '');
+    assert.equal(t.due, '');
+    assert.deepEqual(plain(t.links), [{ title: 'Doc', url: 'https://x.de/a' }]);
+    assert.deepEqual(plain(t.files), [{ id: 'fl_ok1', name: 'a.png', mime: 'image/png', size: 12 }]);
+  });
+  test('the minutes can be closed (header)', () => {
+    assert.equal(S.protoClean({ closed: true }).closed, true);
+    assert.equal(S.protoClean({}).closed, false);
+    assert.match(S.protoToText({ title: 'JF', date: '2026-11-05', closed: true }), /\(abgeschlossen\)/);
+  });
+  test('round trip through the text keeps every new field', () => {
+    const m = model(topic({ kind: 'A', owners: ['a@x.de'], body: 'Text ![s](lf:fl_ab12)', links: [{ title: 'L', url: 'https://x.de' }], files: [{ id: 'fl_cd34', name: 'f.pdf', mime: 'application/pdf', size: 5 }], pinned: true }));
+    assert.deepEqual(plain(S.protoFromText(S.protoToText(m))), plain(S.protoClean(m)));
+  });
+  test('merge: owners, links and files added by both sides stay; one that either side removed goes', () => {
+    const base = model(topic({ owners: ['a@x.de'], links: [{ title: '', url: 'https://x.de/1' }] }));
+    const mine = model(topic({ owners: ['a@x.de', 'b@x.de'], links: [{ title: '', url: 'https://x.de/1' }, { title: '', url: 'https://x.de/2' }], body: 'meins' }));
+    const theirs = model(topic({ owners: ['a@x.de', 'c@x.de'], links: [], files: [{ id: 'fl_n1', name: 'n', mime: 'image/png', size: 1 }] }));
+    const r = S.protoMerge(base, mine, theirs);
+    const t = r.model.topics[0];
+    assert.deepEqual(plain(t.owners.sort()), ['a@x.de', 'b@x.de', 'c@x.de']);
+    assert.deepEqual(plain(t.links.map(l => l.url)), ['https://x.de/2'], 'theirs removed the first link, mine added the second');
+    assert.deepEqual(plain(t.files.map(f => f.id)), ['fl_n1']);
+    assert.equal(t.body, 'meins');
+    assert.deepEqual(plain(r.conflicts), []);
+  });
+  test('merge: both change the description differently is a conflict; the same change is not', () => {
+    const base = model(topic({ body: 'alt' }));
+    const r = S.protoMerge(base, model(topic({ body: 'meins' })), model(topic({ body: 'seins' })));
+    assert.deepEqual(plain(r.conflicts), ['topics.a1.body']);
+    assert.deepEqual(plain(S.protoMerge(base, model(topic({ body: 'gleich' })), model(topic({ body: 'gleich' }))).conflicts), []);
+  });
+  test('diff: a changed description, person, link or file counts as a changed topic', () => {
+    const a = model(topic({ body: 'a' }));
+    assert.equal(S.protoDiff(a, model(topic({ body: 'b' }))).changed, 1);
+    assert.equal(S.protoDiff(a, model(topic({ body: 'a', owners: ['x@x.de'] }))).changed, 1);
+    assert.equal(S.protoDiff(a, a).changed, 0);
+  });
+  test('carry-over: an anchored topic comes again with description, people, links and files, without its task', () => {
+    const m = model(topic({ pinned: true, taskId: 't_9', body: 'bleibt', owners: ['a@x.de'], projectId: 'pr_p1' }));
+    const c = S.protoCarry(m).pinned[0];
+    assert.equal(c.body, 'bleibt');
+    assert.deepEqual(plain(c.owners), ['a@x.de']);
+    assert.equal(c.projectId, 'pr_p1');
+    assert.equal(c.taskId, '');
   });
 });

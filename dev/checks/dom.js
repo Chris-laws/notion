@@ -68,11 +68,11 @@ function tour(w) {
     ['ai suggest', "closePeek(); openPeek('" + task.id + "'); A['ai-suggest'] && A['ai-suggest']()", 500],
     ['ai breakdown', "A['ai-breakdown'] && A['ai-breakdown']()", 500],
     // jour fixe: the tab with a series, the minutes form, the task form, the series form, the team tab
-    ['jour fixe tab', "closePeek(); call('jf.saveSeries', { projectId: '" + proj.id + "', title: 'Tour-JF', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: TODAY(), attendees: [S.me.email], meetLink: 'https://meet.google.com/abc-defg-hij' })" +
-      ".then(() => call('jf.list', {})).then(j => { S.jf = j; S.doc = null; S.projTab = 'jf'; go('project', '" + proj.id + "'); })", 600],
+    ['jour fixe tab', "closePeek(); call('jf.saveSeries', { teamId: '" + proj.teamId + "', title: 'Tour-JF', rhythm: 'weekly', weekday: 1, time: '09:00', duration: 30, startDate: TODAY(), attendees: [S.me.email], meetLink: 'https://meet.google.com/abc-defg-hij' })" +
+      ".then(() => call('jf.list', {})).then(j => { S.jf = j; S.doc = null; S.teamTab = 'jf'; go('team', '" + proj.teamId + "'); })", 600],
     ['jour fixe minutes form', "jfOpen(jfData().series[0].id, Shared.jfDates(jfData().series[0], TODAY(), Shared.addDays(TODAY(), 30))[0])", 400],
     ['jour fixe task form', "A['proto-add-topic'](); jfTasks(() => jfTaskMask(true, S.protoEdit.model.topics.length - 1))", 500],
-    ['jour fixe series form', "closeModal(); jfModal(jfData().series[0], '" + proj.id + "', '" + proj.teamId + "')", 300],
+    ['jour fixe series form', "closeModal(); jfModal(jfData().series[0], '" + proj.teamId + "')", 300],
     ['team/jour fixe', "closeModal(); A['proto-discard'](); S.teamTab = 'jf'; go('team', '" + proj.teamId + "')", 300],
     // the assistant (loaded on first use): panel, an answer, proposals in the confirmation form
     ['assistant', 'A.asst()', 700],
