@@ -27,7 +27,11 @@ const Availability = {
         cells: grid.cells[u.email],
         awayDays: grid.days.filter(d => grid.cells[u.email][d].away).length,
       })),
-      team: grid.team,
+      // "All people" is no team: a share of everybody is meaningless, so there is no team line warning,
+      // the warnings of the real teams come as a list instead.
+      all: !p.teamId,
+      team: p.teamId ? grid.team : grid.team.map(d => Object.assign({}, d, { warn: false })),
+      teamWarnings: p.teamId ? [] : Availability.warnings(from, to, null, viewer),
     };
   },
 

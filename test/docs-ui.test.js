@@ -59,7 +59,7 @@ describe('jour fixe of a team: the overview', () => {
     assert.equal($$('.pj-tabs [data-v="jf"]').length, 0, 'no tab in the project');
     assert.ok($('.pj-tabsin [data-action="team-tab"][data-v="jf"]'), 'the tab is in the team');
     assert.match($('.jfo-head h2').textContent, /Jour Fixe – Übersicht/);
-    assert.match($('.jfo-head p').textContent, /Single Source of Truth/);
+    assert.doesNotMatch($('.jfo-head p').textContent, /Single Source/i, 'no slogan in the header');
     assert.ok($('.jfo-filters select[data-on-change="jf-year"]'), 'year');
     assert.ok($('.jfo-filters input[type="search"]'), 'search');
     assert.ok($('.jfo-filters select[data-on-change="jf-filter"]'), 'filter');

@@ -2,20 +2,21 @@
 /* Tokens: see DESIGN.md. Light canvas, white rounded cards; Lidl blue is the accent, yellow a small highlight, red means act now. */
 :root {
   --font: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --canvas: #e9eef6;
+  --canvas: #dde6f2;
   --bg: #ffffff;
-  --bg-subtle: #f6f8fc;
-  --bg-hover: #eef2f9;
-  --bg-active: #e3ebf8;
+  --bg-subtle: #eef3fa;
+  --bg-hover: #e4ebf7;
+  --bg-active: #d7e2f5;
+  --side-bg: #f1f6fd;
   --bg-elevated: #ffffff;
-  --border: #d5dce8;
-  --border-strong: #b9c4d6;
+  --border: #c5d0e2;
+  --border-strong: #9fb0cb;
   --text: #16223b;
   --text-2: #3f4a63;
   --text-3: #606b81;
   --accent: #012e90;
   --accent-hover: #00236e;
-  --accent-soft: #e8eefb;
+  --accent-soft: #dce7fb;
   --accent-text: #012e90;
   --yellow: #fcc702;
   --yellow-soft: #fff8c4;
@@ -28,7 +29,7 @@
   --success-soft: #e2f5ec;
   /* text on light surfaces: the brand tones a shade darker for 4.5:1, everything else keeps the brand tone */
   --danger-text: #d3191d; --warning-text: #946600; --success-text: #0f7b4c;
-  --shadow-card: 0 1px 2px rgba(18, 40, 90, .05), 0 6px 18px -6px rgba(18, 40, 90, .08);
+  --shadow-card: 0 0 0 1px rgba(18, 40, 90, .07), 0 1px 2px rgba(18, 40, 90, .06), 0 10px 22px -10px rgba(18, 40, 90, .18);
   --shadow-pop: 0 0 0 1px rgba(18, 40, 90, .06), 0 14px 36px -8px rgba(18, 40, 90, .25), 0 3px 8px rgba(18, 40, 90, .08);
   --shadow-drag: 0 14px 30px -8px rgba(18, 40, 90, .3);
   --r-sm: 10px; --r-md: 14px; --r-lg: 18px;
@@ -39,8 +40,8 @@
   --c-blue: #1747c2; --c-purple: #7a4fd0; --c-pink: #d6409f; --c-red: #e8262a; --c-default: #7d8aa3;
   --c-indigo: #4338ca; --c-lime: #84b51c; --c-cyan: #0b84a5;
   /* soft light in the page background: Lidl blue from the left, a hint of yellow top right */
-  --glow-blue: rgba(0, 80, 170, .07);
-  --glow-yellow: transparent;
+  --glow-blue: rgba(0, 80, 170, .13);
+  --glow-yellow: rgba(252, 199, 2, .16);
   /* jour fixe: rows, chips and bars (the navy look is in the dark theme) */
   --jf-panel: var(--bg-subtle); --jf-row: var(--bg); --jf-line: var(--border); --jf-hi: var(--accent-soft); --jf-hi-line: var(--accent);
   --jf-kw: var(--accent-soft); --jf-kw-line: #9fb3e0; --jf-btn: var(--accent);
@@ -68,6 +69,7 @@
   --k-i-bg: #11307f; --k-i-fg: #b4cdff; --k-a-bg: #3b3585; --k-a-fg: #d6d1ff; --k-b-bg: #0e4f3f; --k-b-fg: #a4ecd2; --k-pin-bg: #4f3f0a; --k-pin-fg: #ffd97a;
   --k-ok-bg: #0e4d3f; --k-ok-fg: #8af0cb; --bar-i: #2a74ff; --bar-a: #9370f7; --bar-b: #2cbf94;
   color-scheme: dark;
+  --side-bg: var(--bg);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -88,6 +90,7 @@
     --k-i-bg: #11307f; --k-i-fg: #b4cdff; --k-a-bg: #3b3585; --k-a-fg: #d6d1ff; --k-b-bg: #0e4f3f; --k-b-fg: #a4ecd2; --k-pin-bg: #4f3f0a; --k-pin-fg: #ffd97a;
     --k-ok-bg: #0e4d3f; --k-ok-fg: #8af0cb; --bar-i: #2a74ff; --bar-a: #9370f7; --bar-b: #2cbf94;
     color-scheme: dark;
+    --side-bg: var(--bg);
   }
 }
 
@@ -128,27 +131,25 @@ svg.i.lg { width: 18px; height: 18px; }
 .scrim { display: none; }
 
 /* ---------- sidebar ---------- */
-.sidebar { width: var(--side-w); flex: none; background: var(--bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.sidebar { width: var(--side-w); flex: none; background: var(--side-bg, var(--bg)); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
 .side-head { display: flex; align-items: center; gap: 8px; height: 72px; padding: 0 14px 0 16px; border-bottom: 1px solid var(--border); }
 /* brand: own logo mark + word mark */
 .brand { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; padding: 6px 4px; border-radius: 12px; }
 .brand:hover { background: var(--bg-hover); }
 /* logo: full image on light, round mark + light lettering on dark, only the mark in the icon rail */
-.brand .logo { width: 40px; height: 40px; flex: none; object-fit: contain; }
+.brand > .brand-mark .logo { width: 40px; height: 40px; flex: none; object-fit: contain; }
 .brand-full { display: flex; align-items: center; min-width: 0; }
 .brand-mark { display: none; }
 .sidebar.rail .brand-full { display: none; }
 .sidebar.rail .brand-mark { display: flex; }
-.logo-full { height: 40px; width: auto; max-width: 100%; display: block; }
-.logo-dark { display: none; align-items: center; gap: 9px; }
-.logo-dark .wm { font-size: 22px; font-weight: 900; letter-spacing: -0.03em; color: #c9d8ff; line-height: 1; }
-.logo-dark .wm b { color: #fcc702; font-weight: 900; }
-:root[data-theme="dark"] .on-light { display: none; }
-:root[data-theme="dark"] .logo-dark.on-dark { display: flex; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .on-light { display: none; }
-  :root:not([data-theme="light"]) .logo-dark.on-dark { display: flex; }
-}
+/* word mark: the same markup in both themes, sized in em; Lidl blue (light bluish on dark) and Lidl yellow */
+.logo-lock { display: inline-flex; align-items: center; gap: .4em; font-size: 28px; min-width: 0; }
+.logo-lock .logo { width: 1.9em; height: 1.9em; flex: none; }
+.logo-lock .wm { font-size: 1em; font-weight: 900; letter-spacing: -0.03em; line-height: 1; color: var(--wm-lidl); white-space: nowrap; }
+.logo-lock .wm b { color: var(--wm-flow); font-weight: 900; -webkit-text-stroke: .045em var(--wm-line); paint-order: stroke fill; }
+:root { --wm-lidl: #0b3d9c; --wm-flow: #fcc702; --wm-line: #0b3d9c; }
+:root[data-theme="dark"] { --wm-lidl: #c9d8ff; --wm-line: transparent; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --wm-lidl: #c9d8ff; --wm-line: transparent; } }
 .sync-dot { width: 7px; height: 7px; border-radius: 50%; visibility: hidden; }
 .sync-dot.busy { visibility: visible; background: var(--accent); animation: pulse 1s infinite; }
 @keyframes pulse { 50% { opacity: .25; } }
@@ -381,7 +382,7 @@ input.ai-title { height: 32px; }
 .field-err { display: block; color: var(--danger-text); font-size: 12px; margin-top: 4px; }
 .field-err[hidden] { display: none; }
 /* AI colour: a lighter, friendly blue wherever the AI is involved (report, assistant, hints) */
-:root { --ai: #3b7bea; --ai-soft: #eaf2ff; --ai-border: #cfe0ff; --ai-text: #1d4fbf; }
+:root { --ai: #2a63d8; --ai-soft: #d6e4ff; --ai-border: #8fb0ee; --ai-text: #12399a; }
 :root[data-theme="dark"] { --ai: #6fa2ff; --ai-soft: #13274d; --ai-border: #24407a; --ai-text: #b3ceff; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ai: #6fa2ff; --ai-soft: #13274d; --ai-border: #24407a; --ai-text: #b3ceff; } }
 /* quick report: one slim card in the AI colour */
@@ -1711,8 +1712,6 @@ img[data-lf]:not([src]) { background: linear-gradient(100deg, var(--bg-hover) 30
 .tc-bar .btn { height: 36px; border: 1px solid var(--jf-line); background: var(--jf-row); }
 .tc-bar .btn:hover { border-color: var(--jf-hi-line); }
 .tc-bar .btn.icon { width: 36px; padding: 0; justify-content: center; }
-.tc-dw { position: relative; display: inline-flex; }
-.tc-dw input { position: absolute; left: 0; bottom: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
 .tc-lines { display: grid; gap: 6px; }
 .tc-lines .pe-line { padding-left: 0; }
 /* the masks: where a task goes, and the list of teams with their projects */
@@ -1788,8 +1787,7 @@ img[data-lf]:not([src]) { background: linear-gradient(100deg, var(--bg-hover) 30
 .sidebar .mark.md { width: 30px; height: 30px; font-size: 14px; }
 .sidebar .avatar { width: 30px; height: 30px; font-size: 12px; }
 .me-row { font-size: 14.5px; }
-.brand .logo, .logo-full { height: 46px; }
-.brand .logo { width: 46px; }
+.brand-mark .logo { width: 46px; height: 46px; }
 @media (min-width: 861px) {
   :root { --side-w: 264px; }
   .sidebar.rail { width: 84px; }
@@ -1888,6 +1886,65 @@ button.jfs-chip:hover { border-color: var(--jf-hi-line); }
 .tm-banner.calm .pj-acts .btn > span { display: none; }
 .tm-banner.calm .pj-acts .btn:not(.icon-btn) { width: 42px; padding: 0; justify-content: center; }
 .tm-banner.calm::after { opacity: .22; width: 120px; height: 120px; top: -60px; right: -20px; }
+/* ---------- v62.4: sidebar and header another 15 % larger, one word mark, warmer light theme ---------- */
+.side-head { height: 84px; padding: 0 16px 0 18px; }
+.brand-mark .logo { width: 53px; height: 53px; }
+.brand { gap: 12px; padding: 6px 6px; }
+.nav-item { height: 51px; gap: 15px; padding: 0 16px; font-size: 17.5px; }
+.nav-item svg.i { width: 25px; height: 25px; }
+.nav-item .count { font-size: 14px; line-height: 23px; padding: 0 8px; }
+.nav-sub .nav-item { height: 46px; font-size: 16.5px; }
+.side-search { height: 48px; font-size: 16.5px; padding: 0 14px; }
+.side-search .kbd { font-size: 12.5px; }
+.side-section { font-size: 15px; height: 25px; }
+.sidebar .mark { width: 30px; height: 30px; border-radius: 9px; font-size: 15px; }
+.sidebar .mark.md { width: 34px; height: 34px; font-size: 16px; }
+.sidebar .avatar { width: 34px; height: 34px; font-size: 14px; }
+.me-row { font-size: 16.5px; }
+@media (min-width: 861px) {
+  :root { --side-w: 304px; }
+  .sidebar.rail { width: 97px; }
+  .sidebar.rail .nav-item { height: 60px; }
+  .sidebar.rail .nav-item svg.i { width: 30px; height: 30px; }
+  .sidebar.rail .mark { width: 37px; height: 37px; font-size: 17px; }
+  .sidebar.rail .nav-item .mark { width: 39px; height: 39px; font-size: 18px; }
+  .sidebar.rail .avatar { width: 41px; height: 41px; font-size: 15px; }
+}
+/* header: search, Ask AI, switches */
+.topbar { height: 69px; padding: 0 28px; gap: 10px; }
+.crumbs { font-size: 16px; }
+.crumbs button { height: 35px; padding: 0 10px; gap: 7px; border-radius: 10px; }
+.top-search { height: 42px; padding: 0 16px; gap: 10px; font-size: 15px; border-radius: 14px; }
+.topbar .btn, .topbar .btn.sm { height: 40px; padding: 0 18px; font-size: 15.5px; border-radius: 12px; }
+.topbar .ask-ai { padding: 0 18px; }
+.topbar svg.i, .prefs svg.i { width: 19px; height: 19px; }
+.topbar .btn svg.i.sm { width: 17px; height: 17px; }
+.prefs { gap: 7px; padding-left: 12px; }
+.prefs .icon-btn, .theme-btn { width: 36px; height: 36px; border-radius: 10px; }
+.lang-sw { border-radius: 10px; padding: 3px; }
+.lang-sw button { font-size: 13px; padding: 6px 10px; border-radius: 8px; }
+/* banner of the jour fixe stays one row even with the wider sidebar: tighter tabs, buttons never wrap below */
+.tm-banner.calm { flex-wrap: nowrap; gap: 6px 16px; }
+.tm-banner.calm .pj-tabsin { min-width: 0; gap: 2px; }
+.tm-banner.calm .pj-tabsin button { padding: 0 11px; gap: 6px; font-size: 15px; }
+.tm-banner.calm .pj-tabsin svg.i { width: 18px; height: 18px; }
+.tm-banner.calm .pj-acts { flex: none; display: flex; gap: 6px; flex-wrap: nowrap; }
+.tm-banner.calm .pj-acts .btn { height: 40px; }
+.wk-chip, .wk-more { flex: none; }
+/* calendar: short entries stay readable (the title on one line, title and time in full on hover) */
+.blk-p.short { display: flex; align-items: center; gap: 8px; padding: 3px 8px; }
+.blk-p.short .bt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.blk-p.short .bm { display: none; }
+.blk-p.short:hover { height: auto !important; min-height: 30px; z-index: 6; overflow: visible; flex-wrap: wrap; box-shadow: var(--shadow-pop); }
+.blk-p.short:hover .bt { white-space: normal; flex-basis: 100%; }
+.blk-p.short:hover .bm { display: block; flex-basis: 100%; }
+.ev:hover, .wk-chip:hover { overflow: visible; }
+/* pictures of a description show under the field */
+.tc-prev { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.tc-prev:empty { display: none; }
+.tc-prev .lf-thumb { margin: 0; }
+.tc-prev .lf-thumb img { max-width: 220px; max-height: 150px; }
+/* light theme: less clinical white (tinted sidebar and page, clearer card edges, stronger accents) */
 @media (max-width: 720px) { .ask-ai span { display: none; } .ask-ai { padding: 0 9px; } }
 .msg-full { white-space: pre-wrap; word-break: break-word; font-size: 12.5px; max-height: 50vh; overflow: auto; margin: 0; }
 .toast span { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

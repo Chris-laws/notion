@@ -128,7 +128,7 @@ function jfTeamTab(t) {
   setTimeout(() => jfPrefetch(v.shown.filter(r => r.m).slice(0, 4).map(r => r.m.id)), 400);
   const opt = (key, label, cur) => OPT_OPEN + esc(key) + '"' + (key === cur ? ' selected' : '') + '>' + esc(label) + '</option>';
   return '<section class="jfo"><div class="jfo-head"><span class="jfo-ico">' + icon('calendar') + '</span><div><h2>' + esc(L('Jour Fixe – Übersicht', 'Jour fixe – overview')) + '</h2>' +
-    '<p>' + esc(L('Team-Meetings, Protokolle und zentrale Informationen – Single Source of Truth.', 'Team meetings, minutes and key information – single source of truth.')) + '</p></div>' +
+    '<p>' + esc(L('Team-Meetings und ihre Protokolle auf einen Blick.', 'Team meetings and their minutes at a glance.')) + '</p></div>' +
     (jfCanWrite('team:' + t.id) ? '<button class="btn jf-primary" data-action="jf-new" data-team="' + esc(t.id) + '">' + icon('plus', 'sm') + esc(L('Neuer Jour Fixe', 'New jour fixe')) + '</button>' : '') + '</div>' +
     '<div class="jfo-filters"><select class="select" data-on-change="jf-year"' + ariaL(L('Jahr', 'Year')) + '>' + v.years.map(y => opt(y, y, v.year)).join('') + '</select>' +
     '<label class="jfo-search">' + icon('search', 'sm') + '<input class="input" type="search" data-on-input="jf-q" value="' + esc(S.jfQuery || '') + '" placeholder="' + esc(L('Jour Fixe durchsuchen …', 'Search jour fixe …')) + '"' + ariaL(L('Jour Fixe durchsuchen', 'Search jour fixe')) + '></label>' +
@@ -362,15 +362,14 @@ function tcBar(t, k, edit, canTask) {
   return '<div class="tc-bar" role="group" aria-label="' + esc(L('Aktionen zum Thema', 'Topic actions')) + '">' + tcTaskBtn(t, k, edit) +
     '<button type="button" class="btn" data-action="tc-project" data-t="' + k + '">' + icon('layers', 'sm') + esc(t.projectId ? L('Projekt ändern', 'Change project') : L('Projekt zuordnen', 'Assign project')) + '</button><span class="grow"></span>' +
     '<button type="button" class="btn" data-action="tc-owners" data-t="' + k + '">' + icon('users', 'sm') + esc(L('Verantwortlich', 'Responsible')) + '</button>' +
-    '<span class="tc-dw"><button type="button" class="btn" data-action="tc-due" data-t="' + k + '">' + icon('calendar', 'sm') + esc(t.due ? fmtDate(t.due, { absolute: true }) : L('Fälligkeit', 'Due')) + '</button>' +
-    '<input type="date" tabindex="-1" aria-hidden="true"' + ariaL(L('Fälligkeit', 'Due date')) + ' data-on-change="proto-field" data-path="topics.' + k + '.due" value="' + esc(t.due) + '"></span>' +
+    '<button type="button" class="btn" data-action="tc-due" data-t="' + k + '">' + icon('calendar', 'sm') + esc(t.due ? fmtDate(t.due, { absolute: true }) : L('Fälligkeit', 'Due')) + '</button>' +
     '<button type="button" class="btn icon" data-action="tc-more" data-t="' + k + '"' + labelled(L('Weitere Aktionen', 'More actions')) + '>' + icon('more', 'sm') + '</button></div>';
 }
 /** The opened card: description (a field that grows with its text), links / screenshots / files, items, actions. */
 function tcBody(t, k, edit, canTask) {
   const id = esc(t.id);
   const text = edit ? '<textarea id="tcb-' + id + '" class="textarea tc-body" rows="6" data-on-input="proto-field" data-path="topics.' + k + '.body" placeholder="' +
-    esc(L('Notizen, Ergebnisse, Entscheidungen … Screenshots mit Strg+V einfügen oder hineinziehen.', 'Notes, results, decisions … paste or drop screenshots here.')) + '"></textarea>'
+    esc(L('Notizen, Ergebnisse, Entscheidungen … Screenshots mit Strg+V einfügen oder hineinziehen.', 'Notes, results, decisions … paste or drop screenshots here.')) + '"></textarea><div class="tc-prev" data-prev="' + id + '"></div>'
     : (t.body ? bodyHtml(t.body) : '<p class="faint">' + esc(L('Keine Beschreibung.', 'No description.')) + '</p>');
   const lbl = icon('file', 'sm') + esc(L('Beschreibung', 'Description'));
   return '<div class="tc-b" id="tc-' + id + '"><section class="tc-desc' + (!edit && canTask ? ' tc-click' : '') + '"' + (!edit && canTask ? ' data-action="tc-edit" data-id="' + id + '"' : '') + '>' + (edit ? '<label class="tc-lbl" for="tcb-' + id + '">' + lbl + '</label>' : '<h4 class="tc-lbl">' + lbl + '</h4>') + text + SEC_END +
@@ -419,7 +418,17 @@ function tcFill() {
     const t = S.protoEdit.model.topics[Number(ta.dataset.path.split('.')[1])];
     if (t && ta.value !== t.body) ta.value = t.body;
     tcGrow(ta);
+    tcPrev(ta);
   });
+}
+/** The pictures of a description show under the field (the field itself holds only the marker "![name](lf:…)"); redrawn only when the set of pictures changes. */
+function tcPrev(ta) {
+  const box = ta.parentNode && $('.tc-prev', ta.parentNode);
+  if (!box) return;
+  const ids = (ta.value.match(/\(lf:fl_[a-z0-9]+\)/g) || []).join('');
+  if (box.dataset.ids === ids) return;
+  box.dataset.ids = ids;
+  box.innerHTML = ids ? textImages(ta.value) : '';
 }
 function tcGrow(ta) { ta.style.height = 'auto'; ta.style.height = Math.max(ta.scrollHeight + 2, 140) + 'px'; }
 A['tc-owners'] = el => {
@@ -494,14 +503,17 @@ ON.change['tc-file'] = el => {
     if (t && !t.files.some(x => x.id === r.id)) t.files = t.files.concat([{ id: r.id, name: r.name, mime: r.mime, size: r.size }]);
   }).catch(fail).then(() => done(n))), Promise.resolve())).catch(err => { list.forEach((f, n) => done(n)); fail(err); });
 };
-/** The date field behind the "Fälligkeit" button opens its calendar. */
+/** "Fälligkeit": a small dialog with a date field (a hidden date input behind a button is not reliable in every browser). */
 A['tc-due'] = el => {
   const k = Number(el.dataset.t);
   if (!ensureEdit()) return;
-  const card = $$('.tc').find(c => c.dataset.topic === S.protoEdit.model.topics[k].id);
-  const i = card && $('.tc-dw input', card);
-  if (!i) return;
-  try { i.showPicker(); } catch (e) { i.focus(); }
+  const t = S.protoEdit.model.topics[k];
+  if (!t) return;
+  const set = v => { protoSet('topics.' + k + '.due', v); closeModal(); protoRender(); };
+  openModal({ title: L('Fälligkeit', 'Due date'), submitLabel: L('Übernehmen', 'Apply'),
+    body: '<label class="field"><span>' + L('Fällig am', 'Due on') + '</span><input class="input" type="date" name="due" value="' + esc(t.due) + '"></label>',
+    danger: t.due ? { label: L('Entfernen', 'Remove'), onClick: () => set('') } : null,
+    onSubmit: v => set(v.due || '') });
 };
 /** A click into the description of the read-only sheet starts the form and puts the cursor into the field. */
 A['tc-edit'] = (el, ev) => {
@@ -842,7 +854,7 @@ function protoSet(path, value) {
   o[keys[keys.length - 1]] = value;
   store.set(protoKey(S.protoEdit), { base: S.protoEdit.base, baseText: S.protoEdit.saved, model: S.protoEdit.model });
 }
-ON.input['proto-field'] = el => { protoSet(el.dataset.path, el.value); if (el.classList.contains('tc-body')) tcGrow(el); protoBarSoon(); };
+ON.input['proto-field'] = el => { protoSet(el.dataset.path, el.value); if (el.classList.contains('tc-body')) { tcGrow(el); tcPrev(el); } protoBarSoon(); };
 ON.change['proto-field'] = el => { protoSet(el.dataset.path, el.type === 'checkbox' ? el.checked : el.value); protoRender(); };
 const protoBarSoon = debounce(() => {
   const bar = $('.proto-edit .doc-commit');

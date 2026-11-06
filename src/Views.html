@@ -1323,9 +1323,9 @@ function evStart(e) {
   const m = /^(\d\d):(\d\d)$/.exec(e.time || '');
   return m && (!e.endDate || e.endDate === e.startDate) ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
-function evBlockHtml(ev, style) {
+function evBlockHtml(ev, style, short) {
   const e = ev.ev;
-  return '<div class="blk-p blk-ev" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e)) + '" style="' + style + '">' +
+  return '<div class="blk-p blk-ev' + (short ? ' short' : '') + '" data-action="event-edit" data-id="' + esc(e.id) + '" title="' + esc(evLabel(e) + ' · ' + fmtClock(ev.s) + ' – ' + fmtClock(ev.e)) + '" style="' + style + '">' +
     '<div class="bt">' + esc(evLabel(e)) + '</div><div class="bm">' + fmtClock(ev.s) + ' – ' + fmtClock(ev.e) + '</div></div>';
 }
 /** Time blocks of one day (tasks and meetings sorted by start), overlapping blocks share the width. */
@@ -1344,10 +1344,12 @@ function blocksHtml(planned, events) {
   });
   flush();
   return evs.map(ev => {
-    const t = ev.t, top = plPx(Math.max(ev.s, PL.from)), height = Math.max(plPx(Math.min(ev.e, PL.to)) - top, 26);
+    const t = ev.t, top = plPx(Math.max(ev.s, PL.from)), height = Math.max(plPx(Math.min(ev.e, PL.to)) - top, 30);
+    // short entries: one line "time title", the full text shows on hover (never a cut-off second line)
+    const short = height < 48;
     const style = 'top:' + top + 'px;height:' + height + 'px;left:calc(6px + (100% - 12px) * ' + ev.lane + ' / ' + ev.n + ');width:calc((100% - 12px) / ' + ev.n + ' - 4px)';
-    if (ev.ev) return evBlockHtml(ev, style);
-    return '<div class="blk-p p-' + esc(t.priority || 'none') + (isDone(t) ? ' done' : '') + '" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" style="' + style + '">' +
+    if (ev.ev) return evBlockHtml(ev, style, short);
+    return '<div class="blk-p p-' + esc(t.priority || 'none') + (isDone(t) ? ' done' : '') + (short ? ' short' : '') + '" title="' + esc(t.title) + '" draggable="true" data-plan-drag="' + esc(t.id) + '" data-action="open-task" data-id="' + esc(t.id) + '" style="' + style + '">' +
       '<div class="bt">' + esc(t.title) + '</div>' + (height > 40 ? '<div class="bm">' + fmtClock(ev.s) + ' – ' + fmtClock(ev.e) + '</div>' : '') +
       '<div class="bx"><button data-action="blk-len" data-id="' + esc(t.id) + '" data-d="-15" title="15 Min. kürzer">−</button><button data-action="blk-len" data-id="' + esc(t.id) + '" data-d="15" title="15 Min. länger">+</button>' +
       '<button data-action="blk-unplan" data-id="' + esc(t.id) + '" title="Aus dem Plan nehmen">×</button></div></div>';
@@ -1818,7 +1820,17 @@ function capacityPage() {
 
   const work = d.days.filter(x => { const wd = Shared.weekday(x); return wd !== 0 && wd !== 6; });
   const warnDays = d.team.filter(x => x.warn);
-  const banner = warnDays.length
+  const tw = d.teamWarnings || [];
+  const banner = d.all
+    // all people: only the real teams can be thin, never "everybody"
+    ? (tw.length
+      ? '<div class="banner danger">' + icon('alert') + '<div><b>' + L('Ein Team wird eng: ', 'A team gets thin: ') + tw.length + (tw.length === 1 ? L(' Tag', ' day') : L(' Tage', ' days')) + ' mit ≥ ' + d.threshold + ' % ' + L('Abwesenheit', 'absence') + '.</b> ' +
+        L('Bitte Urlaube abstimmen oder Vertretung klären.', 'Please coordinate leave or arrange cover.') +
+        '<div class="days-list">' + tw.slice(0, 14).map(w => '<span class="chip danger" title="' + esc(w.people.map(x => user(x.email).name).join('\n')) + '">' +
+          esc(w.teamName + ' · ' + DOW[Shared.weekday(w.date)] + ' ' + fmtDate(w.date, { absolute: true }) + ' · ' + w.absent + '/' + w.total) + '</span>').join('') + '</div></div></div>'
+      : '<div class="banner ok">' + icon('check') + '<div><b>' + L('Alle Teams gut besetzt.', 'All teams well staffed.') + '</b> ' +
+        L('In keinem Team ist im Zeitraum die Hälfte gleichzeitig weg. Für eine Teamsicht oben ein Team wählen.', 'In no team is half away at once in this period. Pick a team above for a team view.') + '</div></div>')
+    : warnDays.length
     ? '<div class="banner danger">' + icon('alert') + '<div><b>' + warnDays.length + (warnDays.length === 1 ? ' Tag' : ' Tage') + ' mit ≥ ' + d.threshold + ' % Abwesenheit' +
       (teamId ? ' in ' + esc(team(teamId).name) : '') + '.</b> Bitte Urlaube abstimmen oder Vertretung klären.' +
       '<div class="days-list">' + warnDays.slice(0, 14).map(w => '<span class="chip danger" title="' + esc(w.people.map(x => user(x.email).name + ' – ' + (x.kind === 'holiday' ? holName(x) : absenceType(x.kind).label)).join('\n')) + '">' +
@@ -1838,8 +1850,9 @@ function capacityPage() {
     }).join('') + '</tr>').join('');
   const foot = '<tr><td class="who">Abwesend</td>' + work.map(x => {
     const tday = d.team.find(y => y.date === x);
-    const cls = tday.warn ? 'warn' : tday.ratio >= 25 ? 'mid' : '';
-    return '<td class="c' + (Shared.weekday(x) === 1 ? ' wkb' : '') + '"><span class="pct ' + cls + '" title="' + tday.absent + ' von ' + tday.total + '">' + (tday.absent ? tday.ratio + '%' : '–') + '</span></td>';
+    const cls = tday.warn ? 'warn' : !d.all && tday.ratio >= 25 ? 'mid' : '';
+    // team: share of the team; all people: just the head count (a share of everybody says nothing)
+    return '<td class="c' + (Shared.weekday(x) === 1 ? ' wkb' : '') + '"><span class="pct ' + cls + '" title="' + tday.absent + ' von ' + tday.total + '">' + (tday.absent ? (d.all ? tday.absent : tday.ratio + '%') : '–') + '</span></td>';
   }).join('') + '</tr>';
   const legend = '<div class="legend">' + Shared.ABSENCE_TYPES.map(a => '<span><span class="sw" style="background:var(--' + a.key + ')"></span>' + esc(a.label) + '</span>').join('') +
     '<span><span class="sw" style="background:var(--holiday)"></span>Feiertag</span><span><span class="sw blk off" style="display:inline-block;width:10px;height:10px;margin:0 6px 0 0"></span>kein Arbeitstag (Teilzeit)</span></div>';

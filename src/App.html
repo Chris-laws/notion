@@ -325,10 +325,10 @@ function logoMark() {
 }
 // start screen shows the logo while the data loads
 (function () { const b = document.querySelector('.boot'); if (b) b.insertAdjacentHTML('afterbegin', logoMark()); })();
-/** Mark + word mark: the original image on light backgrounds, mark + light lettering on dark ones. */
+/** Mark + word mark: one markup for both themes (only the colours change), sized in em so it scales the same everywhere. */
 function logoFull() {
-  return '<img class="logo-full on-light" src="' + LOGO_FULL_SRC + '" alt="' + esc(S.appName) + '">' +
-    '<span class="logo-dark on-dark">' + logoMark() + '<span class="wm">' + (S.appName === 'LidlFlow' ? 'Lidl<b>Flow</b>' : esc(S.appName)) + '</span></span>';
+  return '<span class="logo-lock" role="img" aria-label="' + esc(S.appName) + '">' + logoMark() +
+    '<span class="wm" aria-hidden="true">' + (S.appName === 'LidlFlow' ? 'Lidl<b>Flow</b>' : esc(S.appName)) + '</span></span>';
 }
 /** Solid coloured label for a project (table, board): in the project colour, the name only. */
 function projectPill(p) {
