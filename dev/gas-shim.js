@@ -114,7 +114,7 @@
   root.PropertiesService = { getScriptProperties: () => propStore, getUserProperties: () => propStore };
   root.Session = {
     getActiveUser: () => ({ getEmail: () => root.__GAS_USER__ || '' }),
-    getEffectiveUser: () => ({ getEmail: () => root.__GAS_USER__ || '' }),
+    getEffectiveUser: () => ({ getEmail: () => root.__GAS_OWNER__ || root.__GAS_USER__ || '' }),
     getScriptTimeZone: () => 'Europe/Berlin',
   };
   root.LockService = { getScriptLock: () => ({ waitLock() { meter('lock'); }, tryLock: () => { meter('lock'); return true; }, releaseLock() {} }) };

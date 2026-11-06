@@ -45,7 +45,7 @@ const SCHEMA = {
   },
   // Google Calendar link per person (read-only): the refresh token stays in this protected sheet, never goes to the browser
   GoogleLinks: {
-    cols: ['email', 'refreshToken', 'scope', 'connectedAt', 'lastSync', 'lastError'],
+    cols: ['email', 'refreshToken', 'scope', 'connectedAt', 'lastSync', 'lastError', 'mode'],
   },
   CompanyHolidays: {
     cols: ['id', 'date', 'name', 'countries'],

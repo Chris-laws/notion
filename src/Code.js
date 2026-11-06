@@ -100,6 +100,7 @@ const ROUTES = {
   'gcal.status': () => Gcal.status(),
   'gcal.setup': p => Gcal.setup(p),
   'gcal.connect': () => Gcal.connect(),
+  'gcal.connectDirect': () => Gcal.connectDirect(),
   'gcal.sync': () => Gcal.sync(),
   'gcal.disconnect': () => Gcal.disconnect(),
   'storage.links': () => Store.adminLinks(),

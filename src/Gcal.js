@@ -29,7 +29,33 @@ const Gcal = {
       lastSync: row ? row.lastSync || '' : '',
       lastError: row ? row.lastError || '' : '',
       redirectUri: Auth.isAdmin(me) ? Gcal.redirectUri_() : '',
+      owner: Gcal.owner_(),
+      mode: row ? row.mode || 'oauth' : '',
     };
+  },
+
+  /** Who the app reads calendars as: the person who deployed it. */
+  owner_() { return String(Session.getEffectiveUser().getEmail() || '').toLowerCase(); },
+
+  shareHint_() {
+    return 'Dein Kalender ist für LidlFlow nicht freigegeben. Öffne Google Kalender → Einstellungen → dein Kalender → „Für bestimmte Personen oder Gruppen freigeben“ → ' +
+      Gcal.owner_() + ' hinzufügen mit „Alle Termindetails anzeigen“, dann hier noch einmal verbinden.';
+  },
+
+  /**
+   * Connect without a Google sign-in of their own: the app reads the calendar as its owner, which works once the person
+   * shared the calendar with the owner (read only) in Google Calendar. No cloud settings are needed.
+   */
+  connectDirect() {
+    const me = Auth.currentUser();
+    const probe = Gcal.http_('get', Gcal.API + '/calendars/' + encodeURIComponent(me.email) + '/events?maxResults=1&singleEvents=true&timeMin=' +
+      encodeURIComponent(Util.today() + 'T00:00:00Z'), { token: ScriptApp.getOAuthToken() });
+    if (probe.code === 404 || probe.code === 403) throw new Error(Gcal.shareHint_());
+    if (probe.code !== 200) throw new Error('Google antwortet gerade nicht (' + probe.code + '). Bitte später noch einmal versuchen.');
+    const row = { email: me.email, refreshToken: '', scope: Gcal.SCOPE, connectedAt: new Date().toISOString(), lastSync: '', lastError: '', mode: 'direct' };
+    Db.tx(() => { if (Db.get('GoogleLinks', me.email)) Db.update('GoogleLinks', me.email, row); else Db.insert('GoogleLinks', row); });
+    try { Gcal.sync_(me.email); } catch (e) { /* the settings show the error */ }
+    return Gcal.status();
   },
 
   /** Admin: client id and secret of the OAuth client (the secret is never sent back). */
@@ -109,6 +135,7 @@ const Gcal = {
     if (hit) return hit;
     const row = Db.get('GoogleLinks', email);
     if (!row) throw new Error('Google Kalender ist nicht verbunden.');
+    if (row.mode === 'direct') return ScriptApp.getOAuthToken();
     const r = Gcal.http_('post', Gcal.TOKEN_URL, {
       payload: { client_id: Config.get('GOOGLE_CLIENT_ID'), client_secret: Config.get('GOOGLE_CLIENT_SECRET'), refresh_token: row.refreshToken, grant_type: 'refresh_token' },
     });
@@ -129,13 +156,20 @@ const Gcal = {
   /** The entries of the primary calendar between two days, as LidlFlow calendar items. */
   fetch_(email, from, to) {
     const token = Gcal.token_(email);
+    const link = Db.get('GoogleLinks', email);
+    const cal = link && link.mode === 'direct' ? encodeURIComponent(email) : 'primary';
     const out = [];
     let page = '';
     for (let i = 0; i < 6; i++) {
       const q = 'singleEvents=true&orderBy=startTime&maxResults=250&timeMin=' + encodeURIComponent(Shared.addDays(from, -1) + 'T00:00:00Z') +
         '&timeMax=' + encodeURIComponent(Shared.addDays(to, 1) + 'T00:00:00Z') + (page ? '&pageToken=' + encodeURIComponent(page) : '');
-      const r = Gcal.http_('get', Gcal.API + '/calendars/primary/events?' + q, { token: token });
+      const r = Gcal.http_('get', Gcal.API + '/calendars/' + cal + '/events?' + q, { token: token });
       if (r.code === 401) Gcal.cache_().remove('gcal_at_' + email);
+      if (r.code === 404 && cal !== 'primary') {
+        const msg = Gcal.shareHint_();
+        Gcal.note_(email, msg);
+        throw new Error(msg);
+      }
       if (r.code !== 200) {
         const msg = 'Google Kalender nicht lesbar (' + ((r.json.error && (r.json.error.message || r.json.error)) || r.code) + ').';
         Gcal.note_(email, msg);
@@ -231,7 +265,7 @@ const Gcal = {
     const me = Auth.currentUser();
     const row = Db.get('GoogleLinks', me.email);
     if (!row) return Gcal.status();
-    try { Gcal.http_('post', Gcal.REVOKE_URL, { payload: { token: row.refreshToken } }); } catch (e) { /* the link is removed here anyway */ }
+    try { if (row.refreshToken) Gcal.http_('post', Gcal.REVOKE_URL, { payload: { token: row.refreshToken } }); } catch (e) { /* the link is removed here anyway */ }
     Db.tx(() => {
       Db.all('Absences').filter(a => a.email === me.email && a.source === 'google').forEach(a => Db.remove('Absences', a.id));
       Db.remove('GoogleLinks', me.email);

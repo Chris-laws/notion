@@ -169,3 +169,43 @@ describe('disconnect', () => {
     assert.equal(w.app.ctx.gcalSyncAll(), 0);
   });
 });
+
+describe('direct link: the app reads the shared calendar as its owner (no cloud settings)', () => {
+  function direct(shared, events) {
+    const app = freshApp();
+    app.ctx.__GAS_OWNER__ = 'chris@firma.de';
+    app.as(ANNA).call('bootstrap');
+    const state = { shared: shared, events: events || [] };
+    const calls = app.fakeFetch((url, opts) => {
+      const m = /calendars\/([^/]+)\/events/.exec(url);
+      if (!m) throw new Error('unexpected ' + url);
+      assert.equal(opts.headers.Authorization, 'Bearer test-token', 'the app\'s own token');
+      return state.shared ? { code: 200, body: { items: state.events } } : { code: 404, body: { error: { message: 'Not Found' } } };
+    });
+    return { app, state, calls };
+  }
+  test('not shared: a clear hint with the owner, nothing is saved; shared: connected and entries appear', () => {
+    const w = direct(false);
+    assert.match(w.app.error('gcal.connectDirect'), /chris@firma\.de/);
+    assert.equal(w.app.call('gcal.status').connected, false);
+    w.state.shared = true;
+    w.state.events = [ev('a'), ev('o', { eventType: 'outOfOffice', start: { date: day(5) }, end: { date: day(6) } })];
+    const st = w.app.call('gcal.connectDirect');
+    assert.deepEqual([st.connected, st.mode, st.owner], [true, 'direct', 'chris@firma.de']);
+    const r = w.app.call('calendar.range', { from: day(0), to: day(10) });
+    assert.equal(r.events.filter(e => e.type === 'google').length, 2);
+    assert.ok(r.absences.some(a => a.email === ANNA && a.startDate === day(5)));
+    assert.ok(w.calls.filter(c => /googleapis/.test(c.url)).every(c => c.url.indexOf(encodeURIComponent(ANNA)) >= 0), 'only the person\'s own calendar is read');
+  });
+  test('sharing taken back later: the error is noted, the calendar stays usable; disconnect asks Google for nothing', () => {
+    const w = direct(true, [ev('a')]);
+    w.app.call('gcal.connectDirect');
+    w.state.shared = false;
+    assert.match(w.app.error('gcal.sync'), /nicht freigegeben/);
+    assert.match(w.app.call('gcal.status').lastError, /nicht freigegeben/);
+    w.app.call('calendar.range', { from: day(30), to: day(40) });
+    const n = w.calls.length;
+    w.app.call('gcal.disconnect');
+    assert.equal(w.calls.length, n, 'no token to revoke');
+  });
+});

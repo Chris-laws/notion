@@ -1949,19 +1949,19 @@ function gcalBox() {
   const g = S.gcal || {};
   const b = (act, label, cls) => '<button class="btn sm' + (cls ? ' ' + cls : '') + '" data-action="' + act + '"' + (S.gcalBusy ? ' disabled' : '') + '>' + esc(label) + '</button>';
   let main;
-  if (!g.configured) {
-    main = '<div class="notice">' + esc(L('Noch nicht eingerichtet. Eine Admin-Person trägt die Google-Zugangsdaten unten ein.', 'Not set up yet. An admin enters the Google credentials below.')) + '</div>';
-  } else if (g.connected) {
+  if (g.connected) {
     main = '<div class="list-plain"><div class="li"><span class="grow">' + esc(L('Google Kalender ist verbunden. ', 'Google Calendar is connected. ')) + '<span class="faint">' +
       esc(g.lastSync ? L('Zuletzt abgeglichen: ', 'Last sync: ') + jfStamp(g.lastSync) : L('Noch nicht abgeglichen.', 'Not synced yet.')) + '</span>' +
       (g.lastError ? '<br><span class="ai-test bad">' + esc(g.lastError) + '</span>' : '') + '</span>' +
       b('gcal-sync', S.gcalBusy ? L('Gleicht ab …', 'Syncing …') : L('Jetzt abgleichen', 'Sync now'), 'primary') + b('gcal-off', L('Trennen', 'Disconnect')) + '</div></div>';
   } else {
     main = '<div class="list-plain"><div class="li"><span class="grow">' + esc(L('Deine Termine erscheinen in deinem Kalender (nur für dich sichtbar), „Abwesend“-Einträge aus Google zählen als Abwesenheit im Team.', 'Your entries show in your calendar (only you see them); "Out of office" entries from Google count as absences in the team.')) + '</span>' +
-      b('gcal-connect', L('Mit Google verbinden', 'Connect to Google'), 'primary') + '</div></div>' +
+      b('gcal-direct', L('Kalender verbinden', 'Connect calendar'), 'primary') + (g.configured ? b('gcal-connect', L('Mit Google-Anmeldung', 'With Google sign-in')) : '') + '</div></div>' +
+      '<p class="faint">' + esc(L('Gib dafür in Google Kalender (Einstellungen → dein Kalender → Für bestimmte Personen freigeben) dem Konto ', 'First share your calendar in Google Calendar (Settings → your calendar → Share with specific people) with the account ')) + '' + esc(g.owner || '') +
+      esc(L(' die Berechtigung „Alle Termindetails anzeigen“. Die App liest nur lesend.', ' with "See all event details". The app only reads.')) + '</p>' +
       (S.gcalUrl ? '<div class="notice"><a href="' + esc(S.gcalUrl) + '" target="_blank" rel="noopener">' + esc(L('Hier bei Google freigeben →', 'Allow it at Google →')) + '</a></div>' : '');
   }
-  const admin = S.me.admin ? '<details class="gc-setup"><summary>' + esc(L('Einrichtung (Admin)', 'Setup (admin)')) + '</summary>' +
+  const admin = S.me.admin ? '<details class="gc-setup"><summary>' + esc(L('Optional: eigene Google-Anmeldung (Admin, Cloud-Projekt)', 'Optional: own Google sign-in (admin, cloud project)')) + '</summary>' +
     '<p class="faint">' + L('Einmalig in der Google Cloud Console: Calendar API aktivieren, OAuth-Zustimmungsbildschirm <i>Intern</i>, OAuth-Client vom Typ <i>Webanwendung</i> mit dieser Weiterleitungs-URI: <code>', 'Once in the Google Cloud Console: enable the Calendar API, OAuth consent screen <i>Internal</i>, an OAuth client of type <i>Web application</i> with this redirect URI: <code>') +
     esc(g.redirectUri || '') + '</code></p><form data-on-submit="gcal-setup" class="settings-grid">' +
     field(L('Client-ID', 'Client ID'), '<input class="input" name="clientId" autocomplete="off" placeholder="…apps.googleusercontent.com">') +
@@ -1977,6 +1977,11 @@ A['gcal-connect'] = () => {
     if (!window.open(r.url, '_blank', 'noopener')) S.gcalUrl = r.url;
     render();
   }).catch(err => { S.gcalBusy = false; render(); fail(err); });
+};
+A['gcal-direct'] = () => {
+  S.gcalBusy = true; render();
+  call('gcal.connectDirect').then(g => { S.gcalBusy = false; S.gcal = g; calReload(); toast(L('Google Kalender verbunden', 'Google Calendar connected')); })
+    .catch(err => { S.gcalBusy = false; render(); msgDetails(err.message, L('Kalender verbinden', 'Connect calendar')); });
 };
 A['gcal-sync'] = () => {
   S.gcalBusy = true; render();
