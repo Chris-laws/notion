@@ -55,14 +55,36 @@ describe('project colour contrast', () => {
     colouredProject('blue');
     assert.doesNotMatch(w.eval(`mark(project(${JSON.stringify(p.id)}))`), /ink-dark/);
   });
-  test('the project page banner shows the project colour with readable text', async () => {
+  test('the project page banner wears the colour of its team (readable text), the project keeps its own colour on its mark', async () => {
     const p = colouredProject('yellow');
+    const team = w.eval(`team(project(${JSON.stringify(p.id)}).teamId).color`);
     w.eval(`go('project', ${JSON.stringify(p.id)})`);
     await wait(200);
     const b = w.document.querySelector('.pj-banner');
     assert.ok(b, 'project banner');
-    assert.match(b.getAttribute('style'), /--c-yellow/);
-    assert.ok(b.classList.contains('ink-dark'));
+    assert.match(b.getAttribute('style'), new RegExp('--pc:var\\(--c-' + team + '\\)'));
+    assert.equal(b.classList.contains('ink-dark'), /^(yellow|orange|teal|gray|lime)$/.test(team));
+    assert.match(b.querySelector('.mark').getAttribute('style'), /--mc:var\(--c-yellow\)|--c-yellow/);
+  });
+  test('the team page: banner in the team colour with the tabs inside, calmer in the jour fixe', async () => {
+    const tid = w.eval('S.teams[0].id');
+    const col = w.eval('S.teams[0].color');
+    w.eval(`S.teamTab = 'tasks'; go('team', ${JSON.stringify(tid)})`);
+    await wait(200);
+    const b = w.document.querySelector('.tm-banner');
+    assert.ok(b, 'team banner');
+    assert.match(b.getAttribute('style'), new RegExp('--pc:var\\(--c-' + col + '\\)'));
+    assert.equal(w.document.querySelector('.db-bar .tabs'), null, 'no separate tab bar any more');
+    assert.equal(b.querySelectorAll('.pj-tabsin [data-action="team-tab"]').length, 4);
+    assert.equal(b.classList.contains('calm'), false);
+    w.eval(`S.teamTab = 'jf'; render()`);
+    await wait(200);
+    assert.ok(w.document.querySelector('.tm-banner.calm'), 'flatter and calmer in the jour fixe');
+    assert.equal(w.document.querySelector('.tm-banner.calm .pj-tabsin .on').dataset.v, 'jf');
+    w.eval(`S.teamTab = 'projects'; render()`);
+    await wait(100);
+    assert.match(w.document.querySelector('.pcard[data-id]').getAttribute('style'), new RegExp('--tc:var\\(--c-' + col + '\\)'), 'project cards carry the team colour');
+    w.eval(`S.teamTab = 'tasks'`);
   });
 });
 

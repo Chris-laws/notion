@@ -55,7 +55,7 @@ describe('jour fixe of a team: the overview', () => {
   test('the overview: header, filters, KW chip, date, topics, tasks, last change; no jour fixe tab in the project any more', async () => {
     await tab();
     assert.equal($$('.pj-tabs [data-v="jf"]').length, 0, 'no tab in the project');
-    assert.ok($('.tabs [data-action="team-tab"][data-v="jf"]'), 'the tab is in the team');
+    assert.ok($('.pj-tabsin [data-action="team-tab"][data-v="jf"]'), 'the tab is in the team');
     assert.match($('.jfo-head h2').textContent, /Jour Fixe – Übersicht/);
     assert.match($('.jfo-head p').textContent, /Single Source of Truth/);
     assert.ok($('.jfo-filters select[data-on-change="jf-year"]'), 'year');
@@ -429,6 +429,39 @@ describe('files of a topic: open, upload quietly', () => {
     assert.deepEqual(calls.filter(c => c[0] === 'files.upload'), [['files.upload', true]]);
     assert.equal($('#toasts').textContent, '', 'no "uploading" message');
     assert.equal(w.eval('S.busyLoud || 0'), 0, 'no loading bar');
+  });
+  test('a file on its way shows a placeholder in its own box: the screenshot as the picture itself, the document as a row', async () => {
+    await openEditor();
+    await w.eval("loadChunk('Images')");
+    const k = w.eval('S.protoEdit.model.topics.length - 1');
+    w.eval(`S.tcOpen = Object.assign({}, S.tcOpen, { [S.protoEdit.model.topics[${k}].id]: true }); protoRender()`);
+    await until(() => $('.tc.open .tc-cols'));
+    w.window.URL.createObjectURL = () => 'blob:preview';
+    // the upload waits until the test lets it go
+    let release;
+    const realUpload = w.window.fileUpload;
+    w.window.fileUpload = () => new w.Promise(ok => { release = ok; });
+    const send = (input, file) => { Object.defineProperty(input, 'files', { value: [file], configurable: true }); input.dispatchEvent(new w.Event('change', { bubbles: true })); };
+    const shot = new w.File([new Uint8Array([1])], 'screen.png', { type: 'image/png' });
+    send($('.tc.open input[data-attach="0"]'), shot);
+    await until(() => $('.tc.open .tc-shots .tc-ph'));
+    assert.equal($('.tc.open .tc-shots .tc-ph img').getAttribute('src'), 'blob:preview', 'the picture is there at once');
+    assert.equal($$('.tc.open .tc-cols section')[2].querySelector('.tc-ph'), null, 'nothing in the attachments box');
+    await until(() => release);
+    release({ id: 'fl_fake00000001', name: 'screen.png', mime: 'image/png', size: 1 });
+    await until(() => !$('.tc.open .tc-ph'));
+    assert.equal($$('.tc.open .tc-shots .lf-thumb').length >= 1, true, 'the real entry replaces the placeholder');
+    assert.equal(w.eval("typeof IMG_CACHE['fl_fake00000001']"), 'object', 'the preview stays, nothing is fetched again');
+    const doc = new w.File([new Uint8Array([2])], 'plan.pdf', { type: 'application/pdf' });
+    send($('.tc.open input[data-attach="1"]'), doc);
+    await until(() => $('.tc.open .tc-cols section:nth-child(3) .tc-ph'));
+    assert.equal($('.tc.open .tc-shots .tc-ph'), null, 'not in the screenshot box');
+    assert.match($('.tc.open .tc-cols section:nth-child(3) .tc-ph').textContent, /plan\.pdf/);
+    release = null;
+    await until(() => release);
+    release(null);
+    await until(() => !$('.tc.open .tc-ph'));
+    w.window.fileUpload = realUpload;
   });
   test('the sheet can start the form with "Thema hinzufügen" and the topic search narrows the cards', async () => {
     click($('[data-action="proto-discard"]'));

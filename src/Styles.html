@@ -1266,8 +1266,29 @@ table.db .title-cell .tt.done { color: var(--text-3); text-decoration: line-thro
 .pj-banner::after { content: ''; position: absolute; right: -40px; bottom: -60px; width: 200px; height: 200px; border-radius: 50%; background: var(--yellow); opacity: .9; pointer-events: none; }
 .pj-l { display: flex; gap: 16px; flex: 1; min-width: 0; position: relative; z-index: 1; }
 .pj-l .mark.lg { background: rgba(255, 255, 255, .2) !important; color: inherit; }
+/* team page: the banner in the team colour holds the tabs; in the jour fixe it is calmer and flatter */
+.tm-banner { flex-direction: column; align-items: stretch; gap: 0; min-height: 0; padding: 20px 24px 0; }
+.tm-banner .pj-top { display: flex; align-items: flex-start; gap: 16px; position: relative; z-index: 1; }
+.tm-banner .pj-acts { flex-wrap: wrap; justify-content: flex-end; }
+.tm-banner .pj-acts .btn.outline { background: var(--bg); }
+.tm-banner .pj-l p { margin: 6px 0 10px; }
+.tm-banner .pj-m > span { color: inherit; }
+.pj-tabsin { display: flex; gap: 4px; margin: 16px -8px 0; position: relative; z-index: 1; overflow-x: auto; scrollbar-width: none; }
+.pj-tabsin button { display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 14px; border-radius: 10px 10px 0 0; font-size: 13.5px; font-weight: 600; white-space: nowrap; color: inherit; opacity: .82; }
+.pj-tabsin button:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
+.pj-tabsin button.on { opacity: 1; background: var(--bg); color: var(--text); box-shadow: 0 -1px 0 rgba(255, 255, 255, .2); }
+.pj-tabsin .n { font-size: 11.5px; opacity: .8; }
+.tm-banner.calm { padding-top: 14px; }
+.tm-banner.calm .pj-t h1 { font-size: 22px; }
+.tm-banner.calm .pj-tabsin { margin-top: 10px; }
+.tm-banner.calm::after { opacity: .3; width: 150px; height: 150px; top: -70px; bottom: auto; right: -30px; }
+.pj-banner.calm:not(.ink-dark) { background: repeating-linear-gradient(135deg, rgba(255, 255, 255, .03) 0 14px, transparent 14px 28px), linear-gradient(115deg, color-mix(in srgb, var(--pc) 72%, #0a1a3a), color-mix(in srgb, var(--pc) 38%, #001a44)); }
+.tm-warn { margin: 0 0 8px; }
+.pcard[style*="--tc"] { box-shadow: var(--shadow-card), inset 0 3px 0 var(--tc); }
+.pcard[style*="--tc"]:hover { box-shadow: 0 12px 24px -10px rgba(18, 40, 90, .25), inset 0 3px 0 var(--tc); }
 /* light project colours: dark text on the banner */
 .pbanner.ink-dark, .pj-banner.ink-dark, .pj-banner.ink-dark .pj-m > button, .pj-banner.ink-dark .pj-m > span { color: #1d2433; }
+.pj-banner.ink-dark .pj-tabsin button.on { color: var(--text); }
 .pj-t { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .pj-t h1 { margin: 0; font-size: 28px; letter-spacing: -0.03em; }
 .pj-l p { margin: 6px 0 12px; max-width: 70ch; opacity: .92; }
@@ -1679,9 +1700,18 @@ b.tc-title { font-weight: 700; }
 .tc-fbtn b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-fbtn small { color: var(--text-2); font-size: 12px; }
 .tc-fbtn > svg { color: var(--text-2); flex: none; }
-.tc-pend { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px; border: 1px dashed var(--jf-line); color: var(--text-2); font-size: 12.5px; }
-.tc-pend::before { content: ''; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--jf-line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .tc-pend::before { animation: none; } }
+/* a file on its way: placeholder in its own box with a small spinner (the screenshot shows its picture right away) */
+.tc-ph { position: relative; }
+.tc-shots .tc-ph { display: block; height: 96px; border-radius: 9px; overflow: hidden; background: var(--bg-hover); border: 1px solid var(--border); }
+.tc-shots .tc-ph img { display: block; width: 100%; height: 96px; object-fit: cover; opacity: .55; }
+.tc-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--jf-line); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; }
+.tc-shots .tc-ph .tc-spin { position: absolute; right: 8px; bottom: 8px; background: var(--bg); }
+.tc-fbtn.tc-ph { opacity: .85; cursor: default; }
+.tc-fbtn.tc-ph .tc-spin { margin-left: auto; }
+/* pictures still on their way: a soft placeholder instead of an empty box */
+img[data-lf]:not([src]) { background: linear-gradient(100deg, var(--bg-hover) 30%, var(--bg-soft, var(--bg)) 50%, var(--bg-hover) 70%) 0 0 / 200% 100%; animation: lf-shimmer 1.4s linear infinite; }
+@keyframes lf-shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .tc-spin, img[data-lf]:not([src]) { animation: none; } }
 .tc-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .tc-bar .grow { flex: 1; }
 .tc-bar .btn { height: 36px; border: 1px solid var(--jf-line); background: var(--jf-row); }

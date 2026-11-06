@@ -467,11 +467,21 @@ const imgThumb = (id, name) => '<button type="button" class="lf-thumb" data-acti
 // images seen in this page: at most 30 kept in memory; one that cannot be had is not asked for again
 const IMG_CACHE = {};
 const IMG_KEEP = 30;
+// at most 3 pictures are fetched at once, so a page with many of them does not take all the server's executions
+let imgBusy = 0;
+const imgWait = [];
+function imgNext() {
+  while (imgBusy < 3 && imgWait.length) {
+    const job = imgWait.shift();
+    imgBusy++;
+    call('files.get', { id: job.id }, { quiet: true }).then(f => job.ok('data:' + f.mime + ';base64,' + f.data), job.ko).then(() => { imgBusy--; imgNext(); });
+  }
+}
 function imgLoad(id) {
   if (!IMG_CACHE[id]) {
     const ids = Object.keys(IMG_CACHE);
     if (ids.length >= IMG_KEEP) delete IMG_CACHE[ids[0]];
-    IMG_CACHE[id] = call('files.get', { id: id }, { quiet: true }).then(f => 'data:' + f.mime + ';base64,' + f.data);
+    IMG_CACHE[id] = new Promise((ok, ko) => { imgWait.push({ id: id, ok: ok, ko: ko }); imgNext(); });
   }
   return IMG_CACHE[id];
 }

@@ -15,7 +15,9 @@ const BUDGET = {
   // jour fixe overview, sheet, topic cards and task mask in one file (v62.1): about 10 KB more
   pageKB: 600, pageGzipKB: 170,
   bootstrapKB: 250,
-  ms: { bootstrap: 900, poll: 600, pollSame: 450, calendar: 800, report: 600, update: 1000, create: 1000, comment: 1000 },
+  ms: { bootstrap: 900, poll: 600, pollSame: 450, calendar: 800, report: 600, update: 1000, create: 1000, comment: 1000,
+    // pictures and files of the jour fixe (v62.2): read from the file cache, upload of a 250 KB file
+    fileGet: 700, fileUpload: 2000 },
 };
 
 function pageSize() {

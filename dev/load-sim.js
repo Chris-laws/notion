@@ -29,6 +29,9 @@ const COST = {
   props: 15,              // script properties (once per request)
   perKB: 0.25,            // JSON out of the server and over the wire
   zipPerKB: 0.05,         // gzip/gunzip plus JSON stringify/parse of a cached table, per KB of JSON
+  driveRead: 350,         // one Drive REST call (UrlFetch) to read a file
+  driveKB: 1.2,           // per KB downloaded from Drive (transfer, base64)
+  driveWrite: 700,        // creating a file in Drive
 };
 const LIMITS = { concurrent: 30, lockWait: 20000, cacheTableMax: 80 * 30000 };
 
@@ -58,7 +61,8 @@ function costOf(m, bytes) {
   return COST.overhead + COST.props +
     (m.sheetRead || 0) * COST.sheetRead + (m.rowsRead || 0) * 24 * COST.perCell +
     (m.sheetWrite || 0) * COST.sheetWrite + (m.flush || 0) * COST.flush +
-    (m.cacheCall || 0) * COST.cacheCall + (m.lock || 0) * COST.lock + bytes / 1024 * COST.perKB + (m.zipKB || 0) * COST.zipPerKB;
+    (m.cacheCall || 0) * COST.cacheCall + (m.lock || 0) * COST.lock + bytes / 1024 * COST.perKB + (m.zipKB || 0) * COST.zipPerKB +
+    (m.driveRead || 0) * COST.driveRead + (m.driveKB || 0) * COST.driveKB + (m.driveWrite || 0) * COST.driveWrite;
 }
 
 /** Profiles every request type warm (table copy in the cache) and cold (cache empty: whole sheet read, like the old code under writes). */
@@ -68,6 +72,14 @@ function profile(users, tasks) {
   app.as('u1@firma.de');
   const someTask = app.call('tasks.list', { ver: '' }).tasks[0];
   let ver = '';
+  // a screenshot of about 250 KB in a team's jour fixe (cold = Drive, warm = script cache)
+  app.ctx.Drive = app.ctx.__driveAdvanced();
+  app.as('demo.user@firma.de');
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(250 * 1024, 7)]).toString('base64');
+  const placeProject = app.call('bootstrap').projects[0].id;
+  const upl = () => app.raw('files.upload', { kind: 'project', projectId: placeProject, name: 'shot.png', mime: 'image/png', data: png, attach: true });
+  const fileId = JSON.parse(JSON.stringify(upl())).data.id;
+  app.as('u1@firma.de');
   const kinds = {
     bootstrap: () => app.raw('bootstrap'),
     poll: () => app.raw('tasks.list', { ver: 'old', full: true }),
@@ -77,10 +89,20 @@ function profile(users, tasks) {
     update: () => app.raw('tasks.save', { id: someTask.id, title: 'x' + Math.random() }),
     create: () => app.raw('tasks.save', { title: 'neu', assignees: ['u1@firma.de'] }),
     comment: () => app.raw('comments.add', { taskId: someTask.id, body: 'ok' }),
+    fileGet: () => app.as('demo.user@firma.de').raw('files.get', { id: fileId }),
+    fileUpload: () => app.as('demo.user@firma.de').raw('files.upload', { kind: 'project', projectId: placeProject, name: 'shot.png', mime: 'image/png', data: png, attach: true }),
   };
   const out = {};
   Object.keys(kinds).forEach(k => {
     const run = () => { let bytes = 0; const m = app.measure(() => { bytes = JSON.stringify(kinds[k]()).length; }); return { m, ms: costOf(m, bytes), bytes }; };
+    if (k === 'fileGet') {
+      // cold: the file is not in the cache yet; warm: the next read
+      app.ctx.CacheService.getScriptCache().removeAll(['flc:' + fileId + ':0', 'flc:' + fileId + ':1', 'flc:' + fileId + ':2', 'flc:' + fileId + ':3']);
+      const cold = run();
+      const warm = run();
+      out[k] = { warm: warm.ms, cold: cold.ms, bytes: warm.bytes, lockWarm: 0, lockCold: 0, meter: cold.m, meterWarm: warm.m };
+      return;
+    }
     kinds[k](); // warm: tables cached
     ver = app.call('tasks.list', { ver: '' }).ver;
     const warm = run();
@@ -121,6 +143,9 @@ function simulate(prof, cfg) {
   const queue = new Heap((a, b) => a.t - b.t);
   events.forEach(e => queue.push(e));
   let running = 0, lockFreeAt = 0;
+  // jour fixe pictures: a view fetches 3 files at once; a file stays in the script cache for 6 hours (cfg.fileCache)
+  const pool = Math.max(5, Math.round(cfg.users / 4));
+  const fileSeen = {};
   let cacheValid = true; // table cache of Tasks
   let lastWrite = -1;
   const lastPoll = {};
@@ -142,6 +167,22 @@ function simulate(prof, cfg) {
       continue;
     }
     running++;
+    if (ev.kind === 'file') {
+      const id = Math.floor(r() * pool);
+      const cached = cfg.fileCache && fileSeen[id] !== undefined && ev.t - fileSeen[id] < 6 * 3600000;
+      fileSeen[id] = ev.t;
+      const p = prof.kinds.fileGet;
+      const dur = cached ? p.warm : p.cold;
+      if (!ev.n && !ev.burst) { queue.push({ u: ev.u, kind: 'file', n: 1, burst: 1, t: ev.t + 30 }); queue.push({ u: ev.u, kind: 'file', n: 2, burst: 1, t: ev.t + 60 }); }
+      queue.push({ t: ev.t + dur, done: true });
+      const total = ev.t + dur - (ev.start || ev.t);
+      lat.push(total);
+      (res.byKind.file = res.byKind.file || []).push(total);
+      res.ok++;
+      if (cached) res.fileHits = (res.fileHits || 0) + 1; else res.fileMiss = (res.fileMiss || 0) + 1;
+      scheduleNext(ev);
+      continue;
+    }
     // a poll without any write since this person's last poll only gets "same"
     const kind = ev.kind === 'poll' && lastPoll[ev.u] !== undefined && lastWrite < lastPoll[ev.u] ? 'pollSame' : ev.kind;
     if (ev.kind === 'poll') lastPoll[ev.u] = ev.t;
@@ -177,11 +218,16 @@ function simulate(prof, cfg) {
   }
   function scheduleNext(ev) {
     const u = ev.u;
+    if (ev.kind === 'file') {
+      if (!ev.burst) queue.push({ u, kind: 'file', t: ev.t + expo(r, cfg.fileEveryMin * 60000) });
+      return;
+    }
     if (ev.first) {
       queue.push({ u, kind: 'calendar', t: ev.t + 300 });
       queue.push({ u, kind: 'report', t: ev.t + 600 });
       queue.push({ u, kind: 'poll', t: ev.t + nextPoll() });
       queue.push({ u, kind: pickWrite(), t: ev.t + expo(r, cfg.writeEveryMin * 60000) });
+      if (cfg.fileEveryMin) queue.push({ u, kind: 'file', t: ev.t + expo(r, cfg.fileEveryMin * 60000) });
       return;
     }
     if (ev.kind === 'poll') queue.push({ u, kind: 'poll', t: ev.t + nextPoll() });
@@ -200,9 +246,16 @@ function simulate(prof, cfg) {
     lockWaitP95: lw.length ? Math.round(lw[Math.floor(0.95 * (lw.length - 1))]) : 0,
     cacheHitPct: round(100 * res.cacheHits / Math.max(1, res.cacheHits + res.cacheMiss)),
     rps: round(attempts / (cfg.minutes * 60)),
+    fileP50: pctOf(res.byKind.file, 0.5), fileP95: pctOf(res.byKind.file, 0.95),
+    fileHitPct: round(100 * (res.fileHits || 0) / Math.max(1, (res.fileHits || 0) + (res.fileMiss || 0))),
   };
 }
 const round = x => Math.round(x * 10) / 10;
+function pctOf(list, q) {
+  if (!list || !list.length) return 0;
+  const a = list.slice().sort((x, y) => x - y);
+  return Math.round(a[Math.min(a.length - 1, Math.floor(q * a.length))]);
+}
 
 /** Min-heap for the event queue. */
 function Heap(cmp) {
@@ -322,11 +375,22 @@ function main() {
       ' ms, refused ' + w.refusedPct + ' %, Lock-Timeout ' + w.lockTimeoutPct + ' %, lock wait p95 ' + w.lockWaitP95 + ' ms');
     console.log('Write capacity of the global lock at ' + nt + ' tasks: about ' + round(1000 / profBig.kinds.update.lockWarm) + ' writes/s');
   }
+  // jour fixe pictures: every person opens a sheet with 3 pictures about every 6 minutes; without and with the file cache
+  console.log('\nJour fixe pictures (a view = 3 files of ~250 KB at once, one view per person every 6 min), 15 min peak, each cell without → with file cache:');
+  const fileRows = scenarioUsers.map(n => {
+    const nt = Math.min(n * tasksPerUser, 30000);
+    const kindsN = n === sizeUsers ? kinds : profile(Math.min(n, 10000), nt);
+    const profN = { kinds: kindsN, tasksBytes: tasksBytes, tasksZipBytes: tasksZipBytes, shared: prof.shared };
+    const x = simulate(profN, Object.assign({ users: n, minutes: 15, fileEveryMin: 6, fileCache: false }, after));
+    const y = simulate(profN, Object.assign({ users: n, minutes: 15, fileEveryMin: 6, fileCache: true }, after));
+    console.log('  ' + String(n).padStart(6) + ' people: picture p50 ' + x.fileP50 + ' → ' + y.fileP50 + ' ms, p95 ' + x.fileP95 + ' → ' + y.fileP95 + ' ms, refused ' + x.refusedPct + ' → ' + y.refusedPct + ' %, file cache hits ' + y.fileHitPct + ' %');
+    return { n, x, y };
+  });
   const c = consistencyCheck(quick ? 300 : 1500);
   console.log('\nConsistency (real code, ' + c.writes + ' writes, rows shuffled by hand in between): lost updates ' +
     c.lostUpdates + ', duplicate ids ' + c.duplicateIds + ', ' + c.created + ' created');
   console.log('Duration ' + Math.round((Date.now() - t0) / 1000) + ' s');
-  return { rows, consistency: c, prof };
+  return { rows, fileRows, consistency: c, prof };
 }
 
 if (require.main === module && process.argv.includes('--consistency')) {
@@ -337,7 +401,8 @@ if (require.main === module && process.argv.includes('--consistency')) {
   const out = main();
   const worst = out.rows[0];
   // guard budget for the short profile: small team load must stay healthy
-  const fail = out.consistency.lostUpdates || out.consistency.duplicateIds || worst.a.refusedPct > 1 || worst.a.p95 > 3000;
+  const pics = out.fileRows[0].y;
+  const fail = out.consistency.lostUpdates || out.consistency.duplicateIds || worst.a.refusedPct > 1 || worst.a.p95 > 3000 || pics.fileP95 > 1500 || pics.refusedPct > 1;
   if (process.argv.includes('--quick') && fail) { console.error('load budget violated'); process.exit(1); }
 }
 module.exports = { simulate, profile, erlangB, consistencyCheck, COST, LIMITS };

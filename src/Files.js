@@ -7,6 +7,9 @@
  */
 const Files = {
   MAX: 3 * 1024 * 1024,
+  // cache pieces of 90,000 characters (one entry may hold 100 KB); files up to 4 pieces (about 270 KB) are kept
+  CHUNK: 90000,
+  CACHE_PARTS: 4,
   // no SVG: it can carry script
   TYPES: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
   // attachments of a jour fixe topic (v62): documents next to the images; the first bytes must fit, never HTML or script
@@ -98,7 +101,30 @@ const Files = {
     const ctx = Access.context(Auth.currentUser());
     const row = Db.get('Files', p && p.id);
     if (!row || !Files.mayRead_(row, ctx)) throw new Error('Bild nicht gefunden.');
-    return { id: row.id, name: row.name, mime: row.mime, data: Utilities.base64Encode(Gdrive.readBytes(row.driveId)) };
+    return { id: row.id, name: row.name, mime: row.mime, data: Files.data_(row) };
+  },
+  /**
+   * The content as base64. Small files (up to FILE_CACHE_MAX) stay in the script cache for six hours, cut in pieces below
+   * the 100 KB limit of one entry, so the next person (or the next view) does not wait for Drive again.
+   * The right to read is checked before this, the cache holds no access decision.
+   */
+  data_(row) {
+    const parts = Math.ceil(Math.ceil((Number(row.size) || 0) / 3) * 4 / Files.CHUNK);
+    const keep = parts > 0 && parts <= Files.CACHE_PARTS;
+    const keys = [];
+    for (let i = 0; keep && i < parts; i++) keys.push('flc:' + row.id + ':' + i);
+    const cache = CacheService.getScriptCache();
+    if (keep) {
+      const hit = cache.getAll(keys);
+      if (keys.every(k => typeof hit[k] === 'string')) return keys.map(k => hit[k]).join('');
+    }
+    const data = Utilities.base64Encode(Gdrive.readBytes(row.driveId));
+    if (keep && data.length <= parts * Files.CHUNK) {
+      const put = {};
+      keys.forEach((k, i) => { put[k] = data.slice(i * Files.CHUNK, (i + 1) * Files.CHUNK); });
+      try { cache.putAll(put, 21600); } catch (e) { console.error('file cache: ' + e.message); }
+    }
+    return data;
   },
   mayRead_(row, ctx) {
     if (ctx.admin) return true;

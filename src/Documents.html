@@ -316,18 +316,20 @@ function tcAttach(t, k, edit) {
   const rm = (kind, i) => (edit ? '<button type="button" class="lk-x" data-action="tc-rm" data-k="' + kind + '" data-t="' + k + ATTR_I + i + '"' + labelled(L('Entfernen', 'Remove')) + '>' + icon('x', 'sm') + '</button>' : '');
   const add = (action, label, extra) => (edit ? '<button type="button" class="lk-add" data-action="' + action + '" data-t="' + k + '"' + (extra || '') + '>' + icon('plus', 'sm') + esc(label) + '</button>' : '');
   const none = '<span class="faint">–</span>';
-  const pend = n => (n ? '<span class="tc-pend" role="status">' + esc(L('Wird gespeichert …', 'Saving …')) + '</span>' : '');
-  const busy = (S.tcBusy || {})[t.id] || 0;
+  // files on their way: a placeholder in the box they belong to (screenshots: the picture itself, right away)
+  const waiting = (S.tcPend || {})[t.id] || [];
+  const phShot = w => '<span class="tc-item tc-ph" role="status"' + labelled(L('Wird hochgeladen: ', 'Uploading: ') + w.name) + '>' + (w.url ? '<img src="' + esc(w.url) + '" alt="">' : '') + '<i class="tc-spin"></i></span>';
+  const phDoc = w => '<span class="tc-item"><span class="tc-fbtn tc-ph" role="status"><span class="tc-fi">' + icon('file') + '</span><span><b>' + esc(w.name) + '</b><small>' + esc(L('Wird hochgeladen …', 'Uploading …')) + '</small></span><i class="tc-spin"></i></span></span>';
   const picker = (label, accept, attach, aria) => (edit ? '<label class="lk-add">' + icon('plus', 'sm') + esc(label) + '<input type="file" class="sr-only" ' + accept + ' data-on-change="tc-file" data-t="' + k + '" data-attach="' + attach + '"' + ariaL(aria) + '></label>' : '');
   return '<div class="tc-cols">' +
     '<section class="tc-col"><h4>' + icon('link', 'sm') + L('Links', 'Links') + ' (' + (t.links || []).length + ')</h4>' +
     ((t.links || []).map((l, i) => '<span class="tc-item">' + tcLinkRow(l) + rm('link', i) + '</span>').join('') || (edit ? '' : none)) + add('tc-link', L('Link', 'Link')) + SEC_END +
     '<section class="tc-col"><h4>' + icon('image', 'sm') + L('Screenshots', 'Screenshots') + ' (' + imgs.length + ')</h4><div class="tc-shots">' +
-    imgs.map(f => '<span class="tc-item">' + imgThumb(f.id, f.name) + rm('file', (t.files || []).indexOf(f)) + '</span>').join('') + '</div>' +
-    (!imgs.length && !edit ? none : '') + (edit ? pend(busy) : '') +
+    imgs.map(f => '<span class="tc-item">' + imgThumb(f.id, f.name) + rm('file', (t.files || []).indexOf(f)) + '</span>').join('') + waiting.filter(w => !w.doc).map(phShot).join('') + '</div>' +
+    (!imgs.length && !edit ? none : '') +
     picker(L('Screenshot', 'Screenshot'), 'accept="image/png,image/jpeg,image/gif,image/webp" multiple', 0, L('Screenshot hinzufügen', 'Add screenshot')) + SEC_END +
     '<section class="tc-col"><h4>' + icon('layers', 'sm') + L('Anlagen', 'Attachments') + ' (' + docs.length + ')</h4>' +
-    docs.map(f => '<span class="tc-item">' + tcFileRow(f) + rm('file', (t.files || []).indexOf(f)) + '</span>').join('') + (!docs.length && !edit ? none : '') +
+    docs.map(f => '<span class="tc-item">' + tcFileRow(f) + rm('file', (t.files || []).indexOf(f)) + '</span>').join('') + waiting.filter(w => w.doc).map(phDoc).join('') + (!docs.length && !edit ? none : '') +
     picker(L('Datei', 'File'), 'accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv,application/pdf,text/plain,text/csv"', 1, L('Datei anhängen', 'Attach file')) + '</section></div>';
 }
 /** The header of a topic card: number, title, type, then (right) anchor, people, project, task, due date and the opener. */
@@ -445,7 +447,10 @@ A['tc-rm'] = el => {
   protoSet('topics.' + k + '.' + (el.dataset.k === 'link' ? 'links' : 'files'), (el.dataset.k === 'link' ? t.links : t.files).filter((x, n) => n !== i));
   protoRender();
 };
-/** Screenshots and files of a topic: sent to the server one by one (quietly; a "saving" row shows in the topic), then listed under it. */
+/**
+ * Screenshots and files of a topic: a placeholder shows at once in their own box (a screenshot with the picture itself, taken
+ * from the chosen file), the upload runs quietly behind it, one file after the other; the picture stays, nothing is fetched again.
+ */
 ON.change['tc-file'] = el => {
   const k = Number(el.dataset.t), attach = el.dataset.attach === '1';
   const list = Array.prototype.slice.call(el.files || []).slice(0, 5);
@@ -454,12 +459,15 @@ ON.change['tc-file'] = el => {
   const first = e && e.model.topics[k];
   if (!first || !list.length) return;
   const id = first.id;
-  const busy = d => { S.tcBusy = Object.assign({}, S.tcBusy, { [id]: Math.max(0, ((S.tcBusy || {})[id] || 0) + d) }); if (S.protoEdit === e) { protoRender(); } };
-  busy(list.length);
-  loadChunk('Images').then(() => list.reduce((p, f) => p.then(() => fileUpload(f, { kind: 'project', projectId: e.projectId }, attach).then(r => {
+  const waits = list.map(f => ({ doc: attach, name: f.name, url: !attach && /^image\//.test(f.type) ? URL.createObjectURL(f) : '' }));
+  const setWait = fn => { S.tcPend = Object.assign({}, S.tcPend, { [id]: fn((S.tcPend || {})[id] || []) }); if (S.protoEdit === e) { protoRender(); } };
+  setWait(l => l.concat(waits));
+  const done = n => setWait(l => l.filter(x => x !== waits[n]));
+  loadChunk('Images').then(() => list.reduce((p, f, n) => p.then(() => fileUpload(f, { kind: 'project', projectId: e.projectId }, attach).then(r => {
     const t = r && S.protoEdit === e ? e.model.topics.find(x => x.id === id) : null;
+    if (r && waits[n].url) IMG_CACHE[r.id] = Promise.resolve(waits[n].url);
     if (t && !t.files.some(x => x.id === r.id)) t.files = t.files.concat([{ id: r.id, name: r.name, mime: r.mime, size: r.size }]);
-  }).catch(fail).then(() => busy(-1))), Promise.resolve())).catch(err => { busy(-list.length); fail(err); });
+  }).catch(fail).then(() => done(n))), Promise.resolve())).catch(err => { list.forEach((f, n) => done(n)); fail(err); });
 };
 /** The date field behind the "Fälligkeit" button opens its calendar. */
 A['tc-due'] = el => {

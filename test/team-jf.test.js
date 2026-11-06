@@ -155,8 +155,33 @@ describe('team jour fixe: files', () => {
     app.ctx.__DRIVE_DENIED__ = 'network down';
     assert.equal(app.as(ME).call('files.get', { id: r.id }).data, b64('a;b\n'));
     app.ctx.__DRIVE_DENIED__ = false;
-    app.x.Db.update('Files', r.id, { driveId: 'f_nope' });
-    assert.match(app.as(ME).error('files.get', { id: r.id }), /nicht gefunden/);
+    const lost = app.as(ANNA).call('files.upload', { kind: 'project', projectId: 'team:' + team.id, name: 'b.csv', mime: 'text/csv', data: b64('c;d\n'), attach: true });
+    app.x.Db.update('Files', lost.id, { driveId: 'f_nope' });
+    assert.match(app.as(ME).error('files.get', { id: lost.id }), /nicht gefunden/);
+  });
+  test('a file read once is served from the cache the next time (no Drive call), still only to people who may see it', () => {
+    const { app, team } = world();
+    const r = app.as(ANNA).call('files.upload', { kind: 'project', projectId: 'team:' + team.id, name: 'a.csv', mime: 'text/csv', data: b64('a;b\n'), attach: true });
+    const first = app.measure(() => app.as(ME).call('files.get', { id: r.id }));
+    assert.ok(first.driveRead >= 1, 'the first read goes to Drive');
+    let data;
+    const second = app.measure(() => { data = app.as(ME).call('files.get', { id: r.id }).data; });
+    assert.equal(data, b64('a;b\n'));
+    assert.ok(!second.driveRead, 'the second read does not touch Drive');
+    assert.ok(app.as(OUT).error('files.get', { id: r.id }), 'the cache holds no access decision');
+  });
+  test('a bigger file is cut in pieces below the cache limit and comes back whole; a very big one is not cached', () => {
+    const { app, team } = world();
+    const body = '%PDF-1.4\n' + 'x'.repeat(200000);
+    const r = app.as(ANNA).call('files.upload', { kind: 'project', projectId: 'team:' + team.id, name: 'mid.pdf', mime: 'application/pdf', data: b64(body), attach: true });
+    app.as(ME).call('files.get', { id: r.id });
+    const hit = app.measure(() => { assert.equal(app.as(ME).call('files.get', { id: r.id }).data, b64(body)); });
+    assert.ok(!hit.driveRead, 'served from the cache in pieces');
+    const huge = '%PDF-1.4\n' + 'y'.repeat(900000);
+    const h = app.as(ANNA).call('files.upload', { kind: 'project', projectId: 'team:' + team.id, name: 'big.pdf', mime: 'application/pdf', data: b64(huge), attach: true });
+    app.as(ME).call('files.get', { id: h.id });
+    const again = app.measure(() => { app.as(ME).call('files.get', { id: h.id }); });
+    assert.ok(again.driveRead >= 1, 'too big for the cache: Drive again');
   });
   test('a document needs the attach flag and content that fits its type; HTML and scripts never get in', () => {
     const { app, team } = world();

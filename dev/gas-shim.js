@@ -229,7 +229,7 @@
   };
   root.ScriptApp = { getOAuthToken: () => 'test-token' };
   // Drive REST API (v3) on top of the in-memory Drive: what Drive.js calls with UrlFetchApp
-  const reply = (code, body, bytes) => ({ getResponseCode: () => code, getContentText: () => (typeof body === 'string' ? body : JSON.stringify(body)), getContent: () => bytes || [] });
+  const reply = (code, body, bytes) => ({ getResponseCode: () => code, getContentText: () => (typeof body === 'string' ? body : JSON.stringify(body)), getContent: () => bytes || Array.from(toBytes(typeof body === 'string' ? body : JSON.stringify(body))).map(b => (b > 127 ? b - 256 : b)) });
   const listOf = it => { const a = []; while (it.hasNext()) a.push(it.next()); return a; };
   // the built-in Drive service (Drive API v3) on top of the same in-memory Drive
   root.__driveAdvanced = () => ({
@@ -295,7 +295,9 @@
       meter('driveRead');
       const blob = item.getBlob();
       // images and documents come back as bytes (untouched), text files as text
-      return blob.getBytes ? reply(200, '', blob.getBytes()) : reply(200, blob.getDataAsString());
+      const out = blob.getBytes ? blob.getBytes() : null;
+      meter('driveKB', (out ? out.length : blob.getDataAsString().length) / 1024);
+      return out ? reply(200, '', out) : reply(200, blob.getDataAsString());
     }
     if (method === 'get') { meter('driveRead'); return reply(200, { id: id, trashed: item.isTrashed() }); }
     if (method === 'patch' && /uploadType=media/.test(url)) { item.setContent(opts.payload); return reply(200, { id: id }); }

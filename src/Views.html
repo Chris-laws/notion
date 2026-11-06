@@ -1543,19 +1543,23 @@ function teamPage(t) {
       '<span class="col2 num">' + (u.hoursPerWeek || 0) + ' h/Woche</span>' +
       '<span class="col2 num">' + open + ' offen</span></div>';
   }).join('') + '</div>';
-  return '<div class="page wide">' +
-    pageHead(t.name, t.description ? linkify(t.description) : '', mark(t, 'lg'),
-      '<button class="btn outline" data-action="team-capacity" data-id="' + esc(t.id) + '">' + icon('users', 'sm') + 'Verfügbarkeit</button>' +
-      '<button class="btn outline" data-action="team-calendar" data-id="' + esc(t.id) + '">' + icon('calendar', 'sm') + 'Kalender</button>' +
-      '<button class="icon-btn" data-action="team-edit" data-id="' + esc(t.id) + '" title="Team bearbeiten">' + icon('settings') + '</button>', teamWarnLine(t.id)) +
-    '<div class="page-meta">' + avatars(members, 6) + '<span>' + members.length + ' Mitglieder</span><span class="sep"></span>' +
-    '<span>Lead: ' + esc(teamLeads(t).map(e => user(e).name).join(', ')) + '</span><span class="sep"></span><span>' + projects.length + ' Projekte</span></div>' +
-    '<div class="db-bar"><div class="tabs">' +
-    [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length],
-      ['jf', 'Jour Fixe', 'repeat', jfData().series.filter(s => s.projectId === 'team:' + t.id).length], ['members', 'Mitglieder', 'users', members.length]]
-      .map(x => '<button class="tab' + (tab === x[0] ? ' active' : '') + '" data-action="team-tab" data-v="' + x[0] + '">' + icon(x[2]) + x[1] + ' <span class="n">' + x[3] + '</span></button>').join('') +
-    '</div>' + (tab === 'members' ? '<button class="btn primary" data-action="team-members" data-id="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Mitglieder hinzufügen</button>' : '') +
-    '</div><div class="fit-body" data-keep-scroll="fit">' + body + '</div></div>';
+  const calm = tab === 'jf';
+  const tabs = [['tasks', 'Aufgaben', 'checksq', tasks.filter(x => !isDone(x)).length], ['projects', 'Projekte', 'folder', projects.length],
+    ['jf', 'Jour Fixe', 'repeat', jfData().series.filter(s => s.projectId === 'team:' + t.id).length], ['members', 'Mitglieder', 'users', members.length]];
+  const warn = teamWarnLine(t.id);
+  // the team colour carries the banner, its projects wear the same banner; the tabs sit inside it (more room for the content)
+  return '<div class="page wide"><div class="pj-banner tm-banner ' + inkClass(t.color) + (calm ? ' calm' : '') + '" style="--pc:' + colorVar(t) + '">' +
+    '<div class="pj-top"><div class="pj-l">' + mark(t, 'lg') + '<div><div class="pj-t"><h1>' + esc(t.name) + '</h1></div>' +
+    (t.description && !calm ? '<p>' + linkify(t.description) + '</p>' : '') +
+    '<div class="pj-m">' + avatars(members, 5) + '<span>' + members.length + ' Mitglieder</span><span>Lead: ' + esc(teamLeads(t).map(e => user(e).name).join(', ')) + '</span><span>' + projects.length + ' Projekte</span></div></div></div>' +
+    '<div class="pj-acts"><button class="btn outline" data-action="team-capacity" data-id="' + esc(t.id) + '">' + icon('users', 'sm') + 'Verfügbarkeit</button>' +
+    '<button class="btn outline" data-action="team-calendar" data-id="' + esc(t.id) + '">' + icon('calendar', 'sm') + 'Kalender</button>' +
+    '<button class="icon-btn sq" data-action="team-edit" data-id="' + esc(t.id) + '" title="Team bearbeiten">' + icon('settings') + '</button></div></div>' +
+    '<div class="pj-tabsin" role="tablist">' + tabs.map(x => '<button type="button" role="tab" aria-selected="' + (tab === x[0]) + '" class="' + (tab === x[0] ? 'on' : '') + '" data-action="team-tab" data-v="' + x[0] + '">' +
+      icon(x[2], 'sm') + x[1] + ' <span class="n">' + x[3] + '</span></button>').join('') + '</div></div>' +
+    (warn ? '<div class="ph tm-warn">' + warn + '</div>' : '') +
+    (tab === 'members' ? '<div class="db-bar" style="justify-content:flex-end"><button class="btn primary" data-action="team-members" data-id="' + esc(t.id) + '">' + icon('plus', 'sm') + 'Mitglieder hinzufügen</button></div>' : '') +
+    '<div class="fit-body" data-keep-scroll="fit">' + body + '</div></div>';
 }
 A['team-tab'] = el => {
   // leaving the minutes with unsaved text: the draft stays in the browser and comes back next time
@@ -1575,7 +1579,8 @@ function projectCard(p) {
   const done = tasks.filter(isDone).length;
   const pct = tasks.length ? Math.round(done / tasks.length * 100) : 0;
   const st = Shared.PROJECT_STATUSES.find(s => s.key === p.status) || Shared.PROJECT_STATUSES[1];
-  return '<button class="pcard" data-action="nav" data-view="project" data-id="' + esc(p.id) + '">' +
+  const tm = team(p.teamId);
+  return '<button class="pcard" data-action="nav" data-view="project" data-id="' + esc(p.id) + '"' + (tm ? ' style="--tc:' + colorVar(tm) + '"' : '') + '>' +
     '<div class="t">' + mark(p, 'md') + esc(p.name) + '</div>' +    (p.description ? '<div class="d">' + esc(p.description) + '</div>' : '') +
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="chip soft">' + esc(st.label) + '</span>' +
     (p.endDate ? '<span class="meta">' + icon('flag', 'sm') + esc(fmtDate(p.endDate, { absolute: true })) + '</span>' : '') + '</div>' +
@@ -1595,7 +1600,9 @@ function projectPage(p) {
   const members = projectMembers(p);
   const today = TODAY();
   const tab = ['overview', 'tasks', 'members'].indexOf(S.projTab) >= 0 ? S.projTab : 'overview';
-  const pc = projectColor(p);
+  // the banner wears the colour of the team (the project's own colour stays on its mark)
+  const bannerKey = t && t.color && t.color !== 'default' ? t.color : projectColorKey(p);
+  const bannerColor = 'var(--c-' + esc(bannerKey) + ')';
   const over = top.filter(x => !isDone(x) && x.dueDate && x.dueDate < today).length;
   const hoursAll = top.reduce((s2, x) => s2 + (x.estimate || 0), 0);
   const hoursDone = top.filter(isDone).reduce((s2, x) => s2 + (x.estimate || 0), 0);
@@ -1637,7 +1644,7 @@ function projectPage(p) {
           '<button class="icon-btn" data-action="project-unmember" data-id="' + esc(p.id) + '" data-v="' + esc(e) + '" title="Aus dem Projekt entfernen" aria-label="Aus dem Projekt entfernen">' + icon('x', 'sm') + '</button></div>';
       }).join('') : '<div class="empty-mini">Noch niemand im Projekt. Füge Personen hinzu.</div>') + '</div></div>';
   }
-  return '<div class="page wide"><div class="pj-banner ' + inkClass(projectColorKey(p)) + '" style="--pc:' + pc + '">' +
+  return '<div class="page wide"><div class="pj-banner ' + inkClass(bannerKey) + '" style="--pc:' + bannerColor + '">' +
     '<div class="pj-l">' + mark(p, 'lg') + '<div><div class="pj-t"><h1>' + esc(p.name) + '</h1><span class="pb-chip">' + esc(st.label) + '</span></div>' +
     '<p>' + (p.description ? linkify(p.description) : 'Keine Beschreibung.') + '</p>' +
     ((p.links || []).length || canEditProject(p) ? '<div class="lk-row pj-links">' + linksHtml(p.links, 'project', p.id, canEditProject(p)) + '</div>' : '') +

@@ -10,7 +10,7 @@ function imgRead(blob) {
 }
 /** Big photos get smaller in the browser (less to send and to store); small images stay as they are. */
 function imgShrink(file) {
-  if (file.size <= 1500000 || typeof createImageBitmap !== 'function' || file.type === 'image/gif') return Promise.resolve(file);
+  if (file.size <= 600000 || typeof createImageBitmap !== 'function' || file.type === 'image/gif') return Promise.resolve(file);
   // photos as JPEG; PNG and WebP as WebP (keeps transparency)
   const type = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp';
   return createImageBitmap(file).then(bmp => {
