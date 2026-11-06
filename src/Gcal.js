@@ -6,6 +6,8 @@
  * is kept in the protected sheet GoogleLinks and never leaves the server.
  */
 const Gcal = {
+  T: 'GoogleLinks', // the table
+  MIDNIGHT: 'T00:00:00Z',
   SCOPE: 'https://www.googleapis.com/auth/calendar.readonly',
   AUTH_URL: 'https://accounts.google.com/o/oauth2/v2/auth',
   TOKEN_URL: 'https://oauth2.googleapis.com/token',
@@ -34,7 +36,7 @@ const Gcal = {
   /** What the settings page shows. Admins also get the redirect address to enter at Google. */
   status() {
     const me = Auth.currentUser();
-    const row = Db.get('GoogleLinks', me.email);
+    const row = Db.get(Gcal.T, me.email);
     return {
       configured: Gcal.configured_(),
       connected: !!row,
@@ -61,10 +63,12 @@ const Gcal = {
   connectDirect() {
     const me = Auth.currentUser();
     const probe = Gcal.own_(Gcal.API + '/calendars/' + encodeURIComponent(me.email) + '/events?maxResults=1&singleEvents=true&timeMin=' +
-      encodeURIComponent(Util.today() + 'T00:00:00Z'), ScriptApp.getOAuthToken());
-    if (probe.code !== 200) throw new Error(Gcal.refused_(probe, me.email === Gcal.owner_()));
+      encodeURIComponent(Util.today() + Gcal.MIDNIGHT), ScriptApp.getOAuthToken());
+    if (probe.code !== 200 && !Gcal.noProject_(probe)) throw new Error(Gcal.refused_(probe, me.email === Gcal.owner_()));
+    // the account may not use the cloud project behind the script: the built-in calendar service needs none
+    if (probe.code !== 200 && !Gcal.calendarOf_(me.email)) throw new Error(Gcal.shareHint_());
     const row = { email: me.email, refreshToken: '', scope: Gcal.SCOPE, connectedAt: new Date().toISOString(), lastSync: '', lastError: '', mode: 'direct' };
-    Db.tx(() => { if (Db.get('GoogleLinks', me.email)) Db.update('GoogleLinks', me.email, row); else Db.insert('GoogleLinks', row); });
+    Db.tx(() => { if (Db.get(Gcal.T, me.email)) Db.update(Gcal.T, me.email, row); else Db.insert(Gcal.T, row); });
     try { Gcal.sync_(me.email); } catch (e) { /* the settings show the error */ }
     return Gcal.status();
   },
@@ -119,7 +123,7 @@ const Gcal = {
       const account = String(cal.json.id || '').toLowerCase();
       if (cal.code !== 200 || account !== me.email) throw new Error('Bitte mit dem Konto ' + me.email + ' verbinden' + (account ? ' (gewählt war ' + account + ')' : '') + '.');
       const row = { email: me.email, refreshToken: tok.json.refresh_token, scope: Gcal.SCOPE, connectedAt: new Date().toISOString(), lastSync: '', lastError: '' };
-      Db.tx(() => { if (Db.get('GoogleLinks', me.email)) Db.update('GoogleLinks', me.email, row); else Db.insert('GoogleLinks', row); });
+      Db.tx(() => { if (Db.get(Gcal.T, me.email)) Db.update(Gcal.T, me.email, row); else Db.insert(Gcal.T, row); });
       cache.put('gcal_at_' + me.email, tok.json.access_token, Math.max(60, Math.min(3000, (tok.json.expires_in || 3600) - 120)));
       try { Gcal.sync_(me.email); } catch (e) { /* the page shows the error with the next sync */ }
       return page(true, 'Deine Termine erscheinen jetzt in LidlFlow, Abwesenheiten aus Google („Abwesend“) zählen für die Teamplanung.');
@@ -158,7 +162,7 @@ const Gcal = {
     const cache = Gcal.cache_();
     const hit = cache.get('gcal_at_' + email);
     if (hit) return hit;
-    const row = Db.get('GoogleLinks', email);
+    const row = Db.get(Gcal.T, email);
     if (!row) throw new Error('Google Kalender ist nicht verbunden.');
     if (row.mode === 'direct') return ScriptApp.getOAuthToken();
     const r = Gcal.http_('post', Gcal.TOKEN_URL, {
@@ -175,19 +179,66 @@ const Gcal = {
   },
 
   note_(email, msg) {
-    try { Db.tx(() => { if (Db.get('GoogleLinks', email)) Db.update('GoogleLinks', email, { lastError: msg }); }); } catch (e) { /* only a hint */ }
+    try { Db.tx(() => { if (Db.get(Gcal.T, email)) Db.update(Gcal.T, email, { lastError: msg }); }); } catch (e) { /* only a hint */ }
   },
 
   /** The entries of the primary calendar between two days, as LidlFlow calendar items. */
   fetch_(email, from, to) {
+    const link = Db.get(Gcal.T, email);
+    if (link && link.mode === 'direct') {
+      try { return Gcal.fetchRest_(email, from, to); } catch (e) { if (!e.noProject) throw e; }
+      return Gcal.fetchBuiltin_(email, from, to);
+    }
+    return Gcal.fetchRest_(email, from, to);
+  },
+
+  /** True when Google refuses because the account may not use the cloud project of the script. */
+  noProject_(r) { return r.code === 403 && /serviceusage|service usage|required permission to use project/i.test(JSON.stringify(r.json)); },
+
+  /** The calendar through the built-in service (subscribing is needed for calendars shared by others); null when not readable. */
+  calendarOf_(email) {
+    try {
+      let c = CalendarApp.getCalendarById(email);
+      if (!c && email !== Gcal.owner_()) c = CalendarApp.subscribeToCalendar(email);
+      return c || null;
+    } catch (e) { return null; }
+  },
+
+  /**
+   * Same entries through the built-in calendar service (no cloud project, no API quota). It cannot tell "out of office"
+   * from other entries, so all-day entries called vacation/absent/out of office count as that.
+   */
+  fetchBuiltin_(email, from, to) {
+    const cal = Gcal.calendarOf_(email);
+    if (!cal) { const msg = Gcal.shareHint_(); Gcal.note_(email, msg); throw new Error(msg); }
+    const tz = Session.getScriptTimeZone();
+    const day = d => Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+    const clock = d => Utilities.formatDate(d, tz, 'HH:mm');
+    const out = [];
+    cal.getEvents(new Date(Shared.addDays(from, -1) + Gcal.MIDNIGHT), new Date(Shared.addDays(to, 1) + Gcal.MIDNIGHT)).forEach(e => {
+      const allDay = e.isAllDayEvent();
+      const title = String(e.getTitle() || '(ohne Titel)').slice(0, 200);
+      const startDate = allDay ? day(e.getAllDayStartDate()) : day(e.getStartTime());
+      let endDate = allDay ? Shared.addDays(day(e.getAllDayEndDate()), -1) : day(e.getEndTime());
+      if (endDate < startDate) endDate = startDate;
+      out.push({
+        id: 'g_' + String(e.getId()).slice(0, 80) + '_' + startDate, type: 'google', source: 'google', readOnly: true, title: title, startDate: startDate, endDate: endDate, allDay: allDay,
+        time: allDay ? '' : clock(e.getStartTime()), endTime: allDay ? '' : clock(e.getEndTime()), link: '', meetLink: '',
+        ooo: allDay && /urlaub|abwesen|out of office|\booo\b|vacation|holiday/i.test(title), attendees: [email], teamId: '',
+      });
+    });
+    return out;
+  },
+
+  fetchRest_(email, from, to) {
     const token = Gcal.token_(email);
-    const link = Db.get('GoogleLinks', email);
+    const link = Db.get(Gcal.T, email);
     const cal = link && link.mode === 'direct' ? encodeURIComponent(email) : 'primary';
     const out = [];
     let page = '';
     for (let i = 0; i < 6; i++) {
-      const q = 'singleEvents=true&orderBy=startTime&maxResults=250&timeMin=' + encodeURIComponent(Shared.addDays(from, -1) + 'T00:00:00Z') +
-        '&timeMax=' + encodeURIComponent(Shared.addDays(to, 1) + 'T00:00:00Z') + (page ? '&pageToken=' + encodeURIComponent(page) : '');
+      const q = 'singleEvents=true&orderBy=startTime&maxResults=250&timeMin=' + encodeURIComponent(Shared.addDays(from, -1) + Gcal.MIDNIGHT) +
+        '&timeMax=' + encodeURIComponent(Shared.addDays(to, 1) + Gcal.MIDNIGHT) + (page ? '&pageToken=' + encodeURIComponent(page) : '');
       const url = Gcal.API + '/calendars/' + cal + '/events?' + q;
       const r = cal === 'primary' ? Gcal.http_('get', url, { token: token }) : Gcal.own_(url, token);
       if (r.code === 401) Gcal.cache_().remove('gcal_at_' + email);
@@ -201,6 +252,7 @@ const Gcal = {
 
   /** Notes and throws the reason of a refused read. */
   fail_(email, r, direct) {
+    if (direct && Gcal.noProject_(r)) { const e = new Error(Gcal.refused_(r, true)); e.noProject = true; throw e; }
     const msg = direct ? Gcal.refused_(r, email === Gcal.owner_()) : 'Google Kalender nicht lesbar (' + ((r.json.error && (r.json.error.message || r.json.error)) || r.code) + ').';
     Gcal.note_(email, msg);
     throw new Error(msg);
@@ -232,7 +284,7 @@ const Gcal = {
 
   /** My Google entries for the calendar: only mine, kept five minutes. A problem never breaks the calendar. */
   events_(email, from, to) {
-    if (!Db.get('GoogleLinks', email)) return [];
+    if (!Db.get(Gcal.T, email)) return [];
     const key = 'gcal_ev_' + email + '_' + from + '_' + to;
     const cache = Gcal.cache_();
     const hit = cache.get(key);
@@ -269,7 +321,7 @@ const Gcal = {
       ooo.forEach(e => { keep[e.id] = true; });
       let removed = 0;
       mine.forEach(a => { if (a.source === 'google' && a.endDate >= from && a.startDate <= to && !keep[a.extId]) { Db.remove('Absences', a.id); removed++; } });
-      if (Db.get('GoogleLinks', email)) Db.update('GoogleLinks', email, { lastSync: new Date().toISOString(), lastError: '' });
+      if (Db.get(Gcal.T, email)) Db.update(Gcal.T, email, { lastSync: new Date().toISOString(), lastError: '' });
       return { added: added, removed: removed };
     });
     return { events: list.length, absences: ooo.length, added: done.added, removed: done.removed };
@@ -277,7 +329,7 @@ const Gcal = {
 
   sync() {
     const me = Auth.currentUser();
-    if (!Db.get('GoogleLinks', me.email)) throw new Error('Google Kalender ist nicht verbunden.');
+    if (!Db.get(Gcal.T, me.email)) throw new Error('Google Kalender ist nicht verbunden.');
     const r = Gcal.sync_(me.email);
     const cache = Gcal.cache_();
     cache.remove('gcal_ev_' + me.email + '_' + Shared.addDays(Util.today(), -7) + '_' + Shared.addDays(Util.today(), 35));
@@ -287,12 +339,12 @@ const Gcal = {
   /** Ends the link: Google is told to drop the token, the imported absences go. */
   disconnect() {
     const me = Auth.currentUser();
-    const row = Db.get('GoogleLinks', me.email);
+    const row = Db.get(Gcal.T, me.email);
     if (!row) return Gcal.status();
     try { if (row.refreshToken) Gcal.http_('post', Gcal.REVOKE_URL, { payload: { token: row.refreshToken } }); } catch (e) { /* the link is removed here anyway */ }
     Db.tx(() => {
       Db.all('Absences').filter(a => a.email === me.email && a.source === 'google').forEach(a => Db.remove('Absences', a.id));
-      Db.remove('GoogleLinks', me.email);
+      Db.remove(Gcal.T, me.email);
     });
     Gcal.cache_().remove('gcal_at_' + me.email);
     return Gcal.status();
@@ -302,7 +354,7 @@ const Gcal = {
   syncAll() {
     const t0 = Date.now();
     let n = 0;
-    Db.all('GoogleLinks').forEach(r => {
+    Db.all(Gcal.T).forEach(r => {
       if (Date.now() - t0 > 240000) return;
       try { Gcal.sync_(r.email); n++; } catch (e) { /* noted in the row */ }
     });

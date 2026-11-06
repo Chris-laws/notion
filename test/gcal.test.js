@@ -246,3 +246,45 @@ describe('direct link: Google refusals are told as they are', () => {
     assert.ok(c2.filter(c => /googleapis/.test(c.url)).every(c => !c.opts.headers['x-goog-user-project']), 'no header when it works without');
   });
 });
+
+describe('direct link: the account may not use the cloud project of the script', () => {
+  const blocked = { error: { code: 403, message: 'Caller does not have required permission to use project 123. Grant the caller the roles/serviceusage.serviceUsageConsumer role.', status: 'PERMISSION_DENIED' } };
+  const fakeEvent = (o) => Object.assign({
+    isAllDayEvent: () => false, getTitle: () => 'Planung', getId: () => 'abc@google.com',
+    getStartTime: () => new Date(day(2) + 'T09:00:00Z'), getEndTime: () => new Date(day(2) + 'T10:30:00Z'),
+  }, o);
+  function world(shared, events) {
+    const app = freshApp();
+    app.ctx.__GAS_OWNER__ = 'chris@firma.de';
+    app.as(ANNA).call('bootstrap');
+    app.fakeFetch(() => ({ code: 403, body: blocked }));
+    const sub = [];
+    app.ctx.CalendarApp = {
+      getCalendarById: () => null,
+      subscribeToCalendar: id => { sub.push(id); if (!shared) throw new Error('no access'); return { getEvents: () => events }; },
+    };
+    return { app, sub };
+  }
+  test('the built-in calendar service reads it instead: timed and all-day entries, vacation titles count as absence', () => {
+    const w = world(true, [
+      fakeEvent({}),
+      fakeEvent({ isAllDayEvent: () => true, getTitle: () => 'Urlaub', getAllDayStartDate: () => new Date(day(5) + 'T00:00:00Z'), getAllDayEndDate: () => new Date(day(8) + 'T00:00:00Z'), getId: () => 'v@g' }),
+    ]);
+    const st = w.app.call('gcal.connectDirect');
+    assert.equal(st.connected, true);
+    assert.deepEqual(w.sub, [ANNA, ANNA].slice(0, w.sub.length), 'only their own calendar');
+    const r = w.app.call('calendar.range', { from: day(0), to: day(12) });
+    const g = r.events.filter(e => e.type === 'google');
+    assert.equal(g.length, 2);
+    const timed = g.find(e => e.title === 'Planung');
+    assert.equal(timed.startDate, day(2));
+    assert.match(timed.time, /^\d\d:\d\d$/);
+    const off = g.find(e => e.title === 'Urlaub');
+    assert.deepEqual([off.startDate, off.endDate], [day(5), day(7)]);
+    assert.ok(r.absences.some(a => a.email === ANNA && a.startDate === day(5) && a.endDate === day(7)));
+  });
+  test('not readable through the service either: the share hint', () => {
+    const w = world(false, []);
+    assert.match(w.app.error('gcal.connectDirect'), /nicht freigegeben/);
+  });
+});

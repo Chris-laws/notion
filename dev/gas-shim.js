@@ -148,8 +148,9 @@
       const hex = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, '0');
       return hex() + hex() + '-' + hex() + '-' + hex() + '-' + hex() + '-' + hex() + hex() + hex();
     },
-    formatDate(date, tz) {
-      // Only the 'yyyy-MM-dd' pattern is used by the app.
+    formatDate(date, tz, pattern) {
+      if (pattern === 'HH:mm') return new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'UTC', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+      // Otherwise only the 'yyyy-MM-dd' pattern is used by the app.
       return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' })
         .format(date);
     },
