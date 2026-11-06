@@ -226,12 +226,23 @@ describe('direct link: Google refusals are told as they are', () => {
     const nope = refusing(404, { error: { code: 404, message: 'Not Found' } });
     assert.match(nope.app.error('gcal.connectDirect'), /nicht freigegeben/);
   });
-  test('the company cloud project is named as billing project when it is set (like for the AI)', () => {
-    const w = refusing(200, { items: [] });
-    w.app.ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_PROJECT_ID', 'lidl-proj');
-    w.app.ctx.__exports.Config.reset();
-    w.app.call('gcal.connectDirect');
-    const g = w.calls.find(c => /googleapis/.test(c.url));
-    assert.equal(g.opts.headers['x-goog-user-project'], 'lidl-proj');
+  test('the billing project is named only when Google says the API is off without it (an account without the role is not forced into it)', () => {
+    const app = freshApp();
+    app.ctx.__GAS_OWNER__ = 'chris@firma.de';
+    app.as(ANNA).call('bootstrap');
+    app.ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_PROJECT_ID', 'lidl-proj');
+    app.ctx.__exports.Config.reset();
+    const off = { error: { code: 403, message: 'Google Calendar API has not been used in project 1 before.', errors: [{ reason: 'accessNotConfigured' }] } };
+    const calls = app.fakeFetch((url, opts) => (opts.headers['x-goog-user-project'] ? { code: 200, body: { items: [] } } : { code: 403, body: off }));
+    app.call('gcal.connectDirect');
+    const g = calls.filter(c => /googleapis/.test(c.url));
+    assert.equal(g[0].opts.headers['x-goog-user-project'], undefined, 'first without');
+    assert.equal(g[1].opts.headers['x-goog-user-project'], 'lidl-proj', 'then with');
+    const app2 = freshApp();
+    app2.ctx.__GAS_OWNER__ = 'chris@firma.de';
+    app2.as(ANNA).call('bootstrap');
+    const c2 = app2.fakeFetch(() => ({ code: 200, body: { items: [] } }));
+    app2.call('gcal.connectDirect');
+    assert.ok(c2.filter(c => /googleapis/.test(c.url)).every(c => !c.opts.headers['x-goog-user-project']), 'no header when it works without');
   });
 });

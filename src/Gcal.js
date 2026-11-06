@@ -25,6 +25,7 @@ const Gcal = {
     const why = String((e.errors && e.errors[0] && e.errors[0].reason) || e.status || '');
     const text = String(e.message || r.code);
     if (/accessNotConfigured|SERVICE_DISABLED|has not been used/i.test(why + ' ' + text)) return 'Die Google Calendar API ist im Cloud-Projekt der App nicht aktiv. In der Cloud Console unter „APIs & Dienste“ die Google Calendar API aktivieren (' + text.slice(0, 160) + ').';
+    if (/serviceusage|service usage|required permission to use project/i.test(text)) return 'Dein Konto darf das Cloud-Projekt nicht als abrechnendes Projekt nutzen (' + text.slice(0, 120) + '). Entweder die Rolle „Service Usage Consumer“ im Projekt geben, oder die Google Calendar API im Projekt des Apps-Script-Skripts aktivieren.';
     if (/insufficient|ACCESS_TOKEN_SCOPE|scope/i.test(why + ' ' + text)) return 'Der App fehlt die Berechtigung „Kalender lesen“. Im Apps-Script-Editor die Funktion setup ausführen und die Berechtigung bestätigen, danach eine neue Version bereitstellen.';
     if (own || r.code === 429 || r.code >= 500) return 'Google Kalender nicht lesbar (' + r.code + ': ' + text.slice(0, 160) + ').';
     return Gcal.shareHint_();
@@ -59,8 +60,8 @@ const Gcal = {
    */
   connectDirect() {
     const me = Auth.currentUser();
-    const probe = Gcal.http_('get', Gcal.API + '/calendars/' + encodeURIComponent(me.email) + '/events?maxResults=1&singleEvents=true&timeMin=' +
-      encodeURIComponent(Util.today() + 'T00:00:00Z'), { token: ScriptApp.getOAuthToken(), project: true });
+    const probe = Gcal.own_(Gcal.API + '/calendars/' + encodeURIComponent(me.email) + '/events?maxResults=1&singleEvents=true&timeMin=' +
+      encodeURIComponent(Util.today() + 'T00:00:00Z'), ScriptApp.getOAuthToken());
     if (probe.code !== 200) throw new Error(Gcal.refused_(probe, me.email === Gcal.owner_()));
     const row = { email: me.email, refreshToken: '', scope: Gcal.SCOPE, connectedAt: new Date().toISOString(), lastSync: '', lastError: '', mode: 'direct' };
     Db.tx(() => { if (Db.get('GoogleLinks', me.email)) Db.update('GoogleLinks', me.email, row); else Db.insert('GoogleLinks', row); });
@@ -140,6 +141,18 @@ const Gcal = {
     return { code: res.getResponseCode(), json: json };
   },
 
+  /**
+   * Reads with the app's own token. Without a billing project first (works when the Calendar API is on in the script's
+   * own project); only when Google says the API is off there, once more with the company project named (like the AI).
+   */
+  own_(url, token) {
+    const r = Gcal.http_('get', url, { token: token });
+    if (r.code === 403 && Config.get('VERTEX_PROJECT_ID') && /accessNotConfigured|SERVICE_DISABLED|has not been used/i.test(JSON.stringify(r.json))) {
+      return Gcal.http_('get', url, { token: token, project: true });
+    }
+    return r;
+  },
+
   /** A valid access token of the person (kept 50 minutes in the cache). */
   token_(email) {
     const cache = Gcal.cache_();
@@ -175,7 +188,8 @@ const Gcal = {
     for (let i = 0; i < 6; i++) {
       const q = 'singleEvents=true&orderBy=startTime&maxResults=250&timeMin=' + encodeURIComponent(Shared.addDays(from, -1) + 'T00:00:00Z') +
         '&timeMax=' + encodeURIComponent(Shared.addDays(to, 1) + 'T00:00:00Z') + (page ? '&pageToken=' + encodeURIComponent(page) : '');
-      const r = Gcal.http_('get', Gcal.API + '/calendars/' + cal + '/events?' + q, { token: token, project: cal !== 'primary' });
+      const url = Gcal.API + '/calendars/' + cal + '/events?' + q;
+      const r = cal === 'primary' ? Gcal.http_('get', url, { token: token }) : Gcal.own_(url, token);
       if (r.code === 401) Gcal.cache_().remove('gcal_at_' + email);
       if (r.code !== 200) Gcal.fail_(email, r, cal !== 'primary');
       (r.json.items || []).forEach(it => { const e = Gcal.item_(it, email); if (e) out.push(e); });
