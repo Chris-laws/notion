@@ -13,7 +13,8 @@ const BUDGET = {
   // raised from 520/150 with documents and jour fixe (editor, Markdown view): about 5 KB more
   // jour fixe minutes form (v47): about 2 KB more
   // jour fixe overview, sheet, topic cards and task mask in one file (v62.1): about 10 KB more
-  pageKB: 600, pageGzipKB: 170,
+  // larger type and icons, the banner with tabs and the lighter sheet (v62.3): about 5 KB more
+  pageKB: 620, pageGzipKB: 175,
   bootstrapKB: 250,
   ms: { bootstrap: 900, poll: 600, pollSame: 450, calendar: 800, report: 600, update: 1000, create: 1000, comment: 1000,
     // pictures and files of the jour fixe (v62.2): read from the file cache, upload of a 250 KB file

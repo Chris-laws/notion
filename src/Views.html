@@ -1552,8 +1552,8 @@ function teamPage(t) {
     '<div class="pj-top"><div class="pj-l">' + mark(t, 'lg') + '<div><div class="pj-t"><h1>' + esc(t.name) + '</h1></div>' +
     (t.description && !calm ? '<p>' + linkify(t.description) + '</p>' : '') +
     '<div class="pj-m">' + avatars(members, 5) + '<span>' + members.length + ' Mitglieder</span><span>Lead: ' + esc(teamLeads(t).map(e => user(e).name).join(', ')) + '</span><span>' + projects.length + ' Projekte</span></div></div></div>' +
-    '<div class="pj-acts"><button class="btn outline" data-action="team-capacity" data-id="' + esc(t.id) + '">' + icon('users', 'sm') + 'Verfügbarkeit</button>' +
-    '<button class="btn outline" data-action="team-calendar" data-id="' + esc(t.id) + '">' + icon('calendar', 'sm') + 'Kalender</button>' +
+    '<div class="pj-acts"><button class="btn outline" data-action="team-capacity" data-id="' + esc(t.id) + '"' + labelled(L('Verfügbarkeit', 'Availability')) + '>' + icon('users', 'sm') + '<span>Verfügbarkeit</span></button>' +
+    '<button class="btn outline" data-action="team-calendar" data-id="' + esc(t.id) + '"' + labelled(L('Kalender', 'Calendar')) + '>' + icon('calendar', 'sm') + '<span>Kalender</span></button>' +
     '<button class="icon-btn sq" data-action="team-edit" data-id="' + esc(t.id) + '" title="Team bearbeiten">' + icon('settings') + '</button></div></div>' +
     '<div class="pj-tabsin" role="tablist">' + tabs.map(x => '<button type="button" role="tab" aria-selected="' + (tab === x[0]) + '" class="' + (tab === x[0] ? 'on' : '') + '" data-action="team-tab" data-v="' + x[0] + '">' +
       icon(x[2], 'sm') + x[1] + ' <span class="n">' + x[3] + '</span></button>').join('') + '</div></div>' +

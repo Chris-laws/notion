@@ -47,7 +47,9 @@ async function openSaved() {
 }
 async function openEditor() {
   await openSaved();
-  click($('[data-action="proto-edit"]'));
+  // no "Edit" button: the first change starts the form (here a click into the description of the open first topic)
+  await until(() => $('.tc-desc[data-action="tc-edit"]'));
+  click($('.tc-desc[data-action="tc-edit"]'));
   await until(() => $('.proto-edit'));
 }
 
@@ -95,6 +97,19 @@ describe('jour fixe of a team: the overview', () => {
     assert.match($('.jfs-chips').textContent, /\d\d:\d\d – \d\d:\d\d/, 'date and time');
     click($('[data-action="jf-back"]'));
     assert.ok($('.jfo-tbl'), 'back at the overview (nothing was changed)');
+  });
+  test('with a Meet link the row shows a camera that opens the Meet (not the minutes); without a link there is none', async () => {
+    await tab();
+    const cam = $('.jfo-row.next .jfo-meet');
+    assert.ok(cam, 'the series has a Meet link now');
+    assert.match(cam.getAttribute('href'), /^https:\/\/meet\.google\.com\//);
+    assert.equal(cam.getAttribute('target'), '_blank');
+    assert.match(cam.getAttribute('rel'), /noopener/);
+    assert.ok(cam.getAttribute('aria-label'));
+    assert.equal(cam.closest('.jfo-row').querySelector('.jf-hit').dataset.action, 'jf-open', 'the row button stays a separate element');
+    await w.eval(`(async () => { const s = jfData().series.find(x => x.projectId === ${JSON.stringify(place)}); await call('jf.saveSeries', Object.assign({}, s, { meetLink: '' })); S.jf = await call('jf.list', {}); render(); })()`);
+    await tab();
+    assert.equal($('.jfo-meet'), null, 'no link, no camera');
   });
   test('9 entries per page with a pager and "1 – 9 von n" (200+ meetings stay fast)', () => {
     const many = Array.from({ length: 230 }, (_, i) => ({ id: 'dc_' + i, projectId: place, seriesId: 'jf_x', date: w.eval(`Shared.addDays('2020-01-06', ${(i % 52) * 7})`), title: 'Alt', people: { present: [], absent: [] } }));
@@ -253,15 +268,16 @@ describe('the mask: topic cards', () => {
 describe('closing a meeting and anchoring', () => {
   test('"Abschließen" marks the meeting closed; editing is off until "Wieder öffnen"', async () => {
     await openSaved();
-    assert.ok($('[data-action="proto-edit"]'));
+    assert.ok($('.tc-desc[data-action="tc-edit"]'), 'a click into the text starts the form');
+    assert.equal($('[data-action="proto-edit"]'), null, 'no "Edit" step');
     click($('[data-action="proto-close"]'));
     await until(() => $('.dv-save.ok') && /Abgeschlossen/.test($('.jfs-title .chip').textContent));
-    assert.equal($('[data-action="proto-edit"]'), null, 'no editing while closed');
+    assert.equal($('.tc-desc[data-action="tc-edit"]'), null, 'no editing while closed');
     assert.match($('[data-action="proto-close"]').textContent, /Wieder öffnen/);
     const m = w.eval(`jfData().minutes.find(x => x.id === S.doc.id)`);
     assert.equal(m.people.closed, true, 'the table knows');
     click($('[data-action="proto-close"]'));
-    await until(() => $('.dv-save.ok') && $('[data-action="proto-edit"]'));
+    await until(() => $('.dv-save.ok') && $('.tc-desc[data-action="tc-edit"]'));
     assert.match($('.jfs-title .chip').textContent, /In Bearbeitung/);
   });
   test('a topic can be anchored in the card; the minutes show the anchor', async () => {
@@ -281,8 +297,8 @@ describe('tasks from topics', () => {
     id = id || 'tq'; title = title || 'Go-Live';
     await tab();
     click($('.jfo-row.next .jf-hit'));
-    await until(() => $('.proto-edit') || $('[data-action="proto-edit"]'));
-    if (!$('.proto-edit')) { click($('[data-action="proto-edit"]')); await until(() => $('.proto-edit')); }
+    await until(() => $('.proto-edit') || $('.tc-desc[data-action="tc-edit"]'));
+    if (!$('.proto-edit')) { click($('.tc-desc[data-action="tc-edit"]')); await until(() => $('.proto-edit')); }
     const items = lines === undefined ? [
       { id: 'q1', type: 'A', text: 'Server buchen', owner: w.eval('S.users[1].email'), due: '2030-02-01', done: false, taskId: '' },
       { id: 'q2', type: 'I', text: 'Budget ist frei', owner: '', due: '', done: false, taskId: '' },
@@ -634,5 +650,37 @@ describe('around the mask', () => {
     await openSaved();
     w.eval("go('home')");
     assert.equal(w.eval('S.doc'), null);
+  });
+});
+
+describe('less to click: the sheet opens ready, the first change starts the form', () => {
+  const leave = () => { if ($('[data-action="proto-discard"]')) click($('[data-action="proto-discard"]')); w.eval('closeModal()'); };
+  test('the first topic is open, links / screenshots / files have boxes of a fixed height that scroll inside', async () => {
+    leave();
+    await openSaved();
+    assert.equal($$('.tc.open').length, 1);
+    assert.equal($('.tc-list .tc').classList.contains('open'), true, 'the first one');
+    assert.equal($$('.tc.open .tc-cols .tc-scroll').length, 3, 'one scroll box per column');
+    assert.equal($('[data-action="proto-edit"]'), null, 'no separate "Edit" button');
+    assert.equal($('.tc.open [data-action="tc-rm"]'), null, 'nothing to remove while reading');
+    assert.ok($('.tc.open [data-action="tc-link"]'), 'a link can be added at once');
+  });
+  test('"Verantwortlich" in the read-only sheet starts the form and opens the people mask', async () => {
+    assert.equal($('.proto-edit'), null);
+    click($('.tc.open [data-action="tc-owners"]'));
+    await until(() => $('.proto-edit') && $('#modal-root').children.length);
+    assert.ok($('.proto-edit'), 'the form started by itself');
+    w.eval('closeModal()');
+    leave();
+  });
+  test('the chip with the people opens one mask for the minute taker, the present and the absent; no panel in the form', async () => {
+    await openSaved();
+    click($('.jfs-chips [data-action="jf-people"]'));
+    await until(() => $('#modal-root select'));
+    assert.ok($('#modal-root [data-action="proto-person"][data-k="present"]'));
+    assert.ok($('#modal-root [data-action="proto-person"][data-k="absent"]'));
+    assert.equal($('.jfs-people'), null, 'the big people panel is gone');
+    w.eval('closeModal()');
+    leave();
   });
 });

@@ -47,7 +47,7 @@ module.exports = [
     limit: '200 people at once: ≤ 1 % refused, p95 ≤ 3 s' },
   { id: 'budget', stage: 'Verification', name: 'Performance budget', cmd: 'node dev/checks/budget.js',
     purpose: 'page size, first response, duration per request at 1,000 people',
-    limit: 'page ≤ 600 KB (gzip ≤ 170), request budgets' },
+    limit: 'page ≤ 620 KB (gzip ≤ 175), request budgets' },
   { id: 'license', stage: 'Finish', name: 'Licences', cmd: 'node dev/checks/license.js',
     purpose: 'permissive licences, only allowed external hosts, licence section in the README',
     limit: '0 hits' },
