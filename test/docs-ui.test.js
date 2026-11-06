@@ -64,7 +64,7 @@ describe('jour fixe of a team: the overview', () => {
     assert.ok($('.jfo-filters input[type="search"]'), 'search');
     assert.ok($('.jfo-filters select[data-on-change="jf-filter"]'), 'filter');
     const heads = $$('.jfo-th [role="columnheader"]').map(x => x.textContent.trim());
-    assert.deepEqual(heads.slice(0, 5), ['KW', 'Datum', 'Themen', 'Aufgaben', 'Letzte Änderung']);
+    assert.deepEqual(heads.slice(0, 6), ['KW', 'Datum', 'Themen', 'Meet', 'Aufgaben', 'Letzte Änderung']);
     const next = $('.jfo-row.next');
     assert.ok(next, 'the next meeting is marked');
     assert.match(next.textContent, /Team-JF/);
@@ -79,7 +79,7 @@ describe('jour fixe of a team: the overview', () => {
     const row = $$('.jfo-row').find(r => !r.classList.contains('next') && r.querySelector('[data-doc]'));
     assert.ok(row, 'a row with saved minutes');
     assert.match(row.querySelector('.jfo-kw').title, /In Bearbeitung/);
-    assert.match(row.children[4].textContent, /^(Heute|Gestern), \d\d:\d\d$|^\d\d\. \S+, \d\d:\d\d$/);
+    assert.match(row.children[5].textContent, /^(Heute|Gestern), \d\d:\d\d$|^\d\d\. \S+, \d\d:\d\d$/);
     assert.equal(w.eval(`jfStatus({ people: { closed: true } }, false).label`), 'Abgeschlossen');
     assert.equal(w.eval(`jfStatus(null, false).label`), 'Protokoll fehlt');
     assert.equal(w.eval(`jfStamp(new Date().toISOString()).slice(0, 5)`), 'Heute');

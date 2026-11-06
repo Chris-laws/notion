@@ -465,7 +465,8 @@ const Jf = {
     return Jf.overview_(ctx, one);
   },
   overview_(ctx, projectId) {
-    const sees = pid => (projectId ? pid === projectId : Docs.sees_(pid, ctx));
+    // only team places count: what projects had in v61 (legacy) is never shown, even where the project still exists
+    const sees = pid => Docs.isTeam_(pid) && (projectId ? pid === projectId : Docs.sees_(pid, ctx));
     const docs = Db.all('Docs').filter(d => d.kind === 'jf' && sees(d.projectId));
     // the carry-over of the last minutes: the page builds the next meeting's draft itself (no call when opening)
     const last = {};
@@ -562,10 +563,10 @@ const Jf = {
   /** Meetings in a date range of the series the person can see (for the calendar). */
   events(from, to, ctx) {
     const out = [];
-    Db.all('JfSeries').filter(s => Jf.active_(s) && Docs.sees_(s.projectId, ctx)).forEach(s => {
+    Db.all('JfSeries').filter(s => Jf.active_(s) && Docs.isTeam_(s.projectId) && Docs.sees_(s.projectId, ctx)).forEach(s => {
       Shared.jfDates(s, from, to).forEach(d => out.push({
         id: 'jf_' + s.id + '_' + d, type: 'jf', title: s.title, startDate: d, endDate: d, time: s.time, duration: s.duration,
-        seriesId: s.id, projectId: s.projectId, attendees: s.attendees || [], teamId: Docs.isTeam_(s.projectId) ? String(s.projectId).slice(5) : '', note: '',
+        seriesId: s.id, projectId: s.projectId, attendees: s.attendees || [], teamId: String(s.projectId).slice(5), note: '',
       }));
     });
     return out;

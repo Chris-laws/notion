@@ -141,7 +141,7 @@ function jfListHtml(t, v) {
   if (!v.rows.length) return '<div class="empty-mini">' + esc(L('Keine Einträge für diese Auswahl.', 'No entries for this selection.')) + '</div>';
   return '<div class="jfo-tbl" role="table" aria-label="Jour Fixe"><div class="jfo-th" role="row"><div role="columnheader"><button type="button" class="jfo-sort" data-action="jf-sort"' +
     ariaL(L('Nach Kalenderwoche sortieren', 'Sort by calendar week')) + '>KW ' + icon('sort', 'sm') + '</button></div><div role="columnheader">' + esc(L('Datum', 'Date')) + '</div><div role="columnheader">' + esc(L('Themen', 'Topics')) +
-    '</div><div role="columnheader">' + icon('layers', 'sm') + esc(L('Aufgaben', 'Tasks')) + '</div><div role="columnheader">' + esc(L('Letzte Änderung', 'Last change')) + '</div><div role="columnheader"></div></div>' +
+    '</div><div role="columnheader" class="jfo-mh">' + icon('video', 'sm') + 'Meet</div><div role="columnheader">' + icon('layers', 'sm') + esc(L('Aufgaben', 'Tasks')) + '</div><div role="columnheader">' + esc(L('Letzte Änderung', 'Last change')) + '</div><div role="columnheader"></div></div>' +
     v.shown.map(r => jfRow(r, t)).join('') + '</div>' + jfPager(v);
 }
 const MEET_RE = /^https:\/\/meet\.google\.com\/[a-z0-9-]{3,40}$/i;
@@ -156,7 +156,7 @@ function jfMeetCell(s, t) {
   }
   if (link) {
     return '<span class="jfo-meetbox"><a class="jfo-meet" href="' + esc(link) + '" target="_blank" rel="noopener noreferrer" title="' + esc(link) + '"' + labelled(L('Google Meet öffnen: ', 'Open Google Meet: ') + link) + '>' +
-      icon('video') + '<span class="u">' + esc(link.replace(/^https:\/\//, '')) + '</span></a>' +
+      icon('video') + '<span class="u"><span class="pre">meet.google.com/</span>' + esc(link.replace(/^https:\/\/meet\.google\.com\//, '')) + '</span></a>' +
       (can ? '<button type="button" class="jfo-meet-ed" data-action="jf-meet-edit" data-id="' + esc(s.id) + '"' + labelled(L('Meet-Link ändern', 'Change Meet link')) + '>' + icon('edit', 'sm') + '</button>' : '') + '</span>';
   }
   return can ? '<button type="button" class="jfo-meet-add" data-action="jf-meet-edit" data-id="' + esc(s.id) + '">' + icon('plus', 'sm') + esc(L('Meet-Link', 'Meet link')) + '</button>' : '';
@@ -182,8 +182,8 @@ function jfRow(r, t) {
   return '<div class="jfo-row' + (r.next ? ' next' : '') + '" role="row"><div role="cell"><span class="jfo-kw st-' + r.st.key + '" title="' + esc(r.st.label) + '"><b>KW ' + Shared.isoWeek(r.date) + '</b><small>/ ' + jfWeekYear(r.date) + '</small></span></div>' +
     '<div role="cell">' + esc(label) + '</div>' +
     '<div role="cell"><button type="button" class="jf-hit" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(r.date) + '"' + (m ? ' data-doc="' + esc(m.id) + '"' : '') +
-    labelled(cta + ': ' + s.title + ', ' + label + ', ' + r.st.label) + '><span>' + esc(s.title) + ' –</span><span>' + esc(t.name) + '</span></button>' +
-    jfMeetCell(s, t) + '</div>' +
+    labelled(cta + ': ' + s.title + ', ' + label + ', ' + r.st.label) + '><span>' + esc(s.title) + ' –</span><span>' + esc(t.name) + '</span></button></div>' +
+    '<div role="cell" class="jfo-mc">' + jfMeetCell(s, t) + '</div>' +
     '<div role="cell"><span class="jfo-n"' + labelled(L('Aufgaben angelegt', 'Tasks made')) + '>' + icon('layers', 'sm') + made + '</span><span class="jfo-n ok"' + labelled(L('davon erledigt', 'of them done')) + '>' + icon('checkc', 'sm') + (m && m.tasksDone ? m.tasksDone : 0) + '</span></div>' +
     '<div role="cell">' + esc(m ? jfStamp(m.updatedAt) : '–') + '</div><div role="cell" class="jfo-g">' + icon('right', 'sm') + '</div></div>';
 }
@@ -225,6 +225,8 @@ function jfOpen(seriesId, date) {
   return jfOpenRemote(seriesId, date);
 }
 function jfShow(m) {
+  // only a team has a jour fixe; anything else (old data) is never opened as a page that cannot exist
+  if (String(m.projectId).indexOf('team:') !== 0 || !team(String(m.projectId).slice(5))) { toast(L('Diesen Jour Fixe gibt es nicht mehr.', 'This jour fixe no longer exists.')); calReload(); jfReload(); return; }
   const tid = String(m.projectId).slice(5);
   S.teamTab = 'jf';
   S.jfView = 'topics';

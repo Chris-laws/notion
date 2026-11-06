@@ -200,6 +200,21 @@ describe('team jour fixe: files', () => {
   });
 });
 
+describe('team jour fixe: a legacy series of a project never shows (v62.6)', () => {
+  test('an old series of a project that still exists is neither in the calendar nor in the list, for admins too; a deleted team drops its series', () => {
+    const { app, team, project, s } = world();
+    const { Db } = app.x;
+    Db.insert('JfSeries', { id: 'jf_legacy', projectId: project.id, title: 'Altes JF', rhythm: 'weekly', weekday: 1, time: '10:00', duration: 30, startDate: '2024-01-01', endDate: '', attendees: [ME], meetLink: '', active: true, createdBy: ME, createdAt: '2024-01-01' });
+    const range = () => app.call('calendar.range', { from: '2030-01-07', to: '2030-02-04' }).events.filter(e => e.type === 'jf').map(e => e.seriesId);
+    assert.ok(range().indexOf(s.id) >= 0, 'the team series is in the calendar');
+    assert.equal(range().indexOf('jf_legacy'), -1, 'the legacy series is not');
+    assert.equal(plain(app.call('jf.list', {}).series.map(x => x.id)).indexOf('jf_legacy'), -1);
+    assert.equal(plain(app.call('jf.list', { teamId: team.id }).series.map(x => x.id)).indexOf('jf_legacy'), -1);
+    app.call('teams.remove', { id: team.id });
+    assert.equal(range().indexOf(s.id), -1, 'a deleted team takes its series out of the calendar');
+  });
+});
+
 describe('team jour fixe: what projects had before is removed once', () => {
   /** A jour fixe of a project as v61 stored it: series, minutes with a Drive file, a version and an image. */
   function legacy(app, project) {
