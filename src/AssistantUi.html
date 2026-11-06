@@ -1,0 +1,134 @@
+<style>
+/* the assistant: loaded when first opened (ui.chunk), so it does not slow down the start */
+.asst { position: fixed; right: 16px; bottom: 16px; z-index: 45; width: min(440px, calc(100vw - 32px)); height: min(660px, calc(100vh - 32px)); display: flex; flex-direction: column;
+  background: var(--bg-elevated); color: var(--text); border-radius: 18px; box-shadow: var(--shadow-pop); border: 1px solid var(--border); overflow: hidden; animation: popin .14s; }
+.asst-h { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.asst-h b { flex: 1; font-size: 15px; display: inline-flex; align-items: center; gap: 6px; }
+.asst-log { flex: 1; overflow: auto; padding: 12px 14px; display: grid; gap: 10px; align-content: start; }
+.asst-m { max-width: 92%; padding: 9px 12px; border-radius: 14px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.asst-m.me { justify-self: end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.asst-m.ai { justify-self: start; background: var(--bg-hover); border-bottom-left-radius: 4px; }
+.asst-m .src { display: block; margin-top: 6px; font-size: 11.5px; color: var(--text-2); white-space: normal; }
+.asst-cite { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; white-space: normal; }
+.asst-cite button { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 3px 9px; background: var(--bg-elevated); color: var(--accent-text); border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.asst-cite button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.asst-quick { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
+.asst-quick button { font-size: 12.5px; border-radius: 999px; padding: 5px 10px; background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.asst-in { display: flex; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--border); align-items: flex-end; }
+.asst-in textarea { flex: 1; min-height: 40px; max-height: 120px; resize: none; }
+.asst-foot { font-size: 11.5px; color: var(--text-2); padding: 0 14px 10px; }
+.asst-typing { display: inline-flex; gap: 4px; }
+.asst-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); animation: asst-dot 1s infinite; }
+.asst-typing i:nth-child(2) { animation-delay: .15s; } .asst-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes asst-dot { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .asst, .asst-typing i { animation: none; } }
+</style>
+<script>
+/**
+ * Assistant panel: questions about the person's tasks, projects, jour fixe and absences (answered on the
+ * server from what they may see), a quick report of the week, and proposals that open the confirmation form.
+ * Answers are plain text (escaped here); the citations open the entries.
+ */
+const ASST = { msgs: [], busy: false, ret: null };
+const ASST_AI = '<div class="asst-m ai">';
+const ASST_TA = '#asst-root textarea';
+function asstOpen() {
+  let root = $('#asst-root');
+  if (!root) { root = document.createElement('div'); root.id = 'asst-root'; document.body.appendChild(root); }
+  if (!root.children.length) ASST.ret = document.activeElement;
+  asstDraw();
+  const ta = $(ASST_TA);
+  if (ta) ta.focus();
+}
+function asstClose() {
+  const root = $('#asst-root');
+  if (root) root.innerHTML = '';
+  if (ASST.ret && document.contains(ASST.ret) && ASST.ret.focus) ASST.ret.focus();
+}
+const ASST_QUICK = () => [L('Was ist überfällig?', 'What is overdue?'), L('Was ist diese Woche fällig?', 'What is due this week?'),
+  L('Wann ist der nächste Jour Fixe?', 'When is the next jour fixe?'), L('Wer ist abwesend?', 'Who is away?')];
+const ASST_ICON = { task: 'checksq', project: 'folder', jf: 'repeat', minutes: 'repeat', absence: 'plane' };
+function asstMsg(m, i) {
+  if (m.who === 'me') return '<div class="asst-m me">' + esc(m.text) + '</div>';
+  if (m.typing) return '<div class="asst-m ai" aria-label="' + esc(L('Antwort wird erstellt', 'Writing the answer')) + '"><span class="asst-typing"><i></i><i></i><i></i></span></div>';
+  const cites = (m.cite || []).map((c, k) => '<button type="button" data-action="asst-cite" data-m="' + i + '" data-k="' + k + '">' + icon(ASST_ICON[c.kind] || 'open', 'sm') + '<span>' + esc(c.label) + '</span></button>').join('');
+  const props = (m.proposals || []).length ? '<button type="button" class="btn sm primary" data-action="asst-proposals" data-m="' + i + '">' + icon('plus', 'sm') +
+    esc(L(m.proposals.length + ' Vorschlag/Vorschläge prüfen', 'Review ' + m.proposals.length + ' proposal(s)')) + '</button>' : '';
+  const src = m.source === 'ai' ? L('KI-Antwort, kann falsch sein', 'AI answer, may be wrong') : m.source === 'rules' ? L('Aus deinen Daten (ohne KI)', 'From your data (no AI)') : '';
+  return ASST_AI + esc(m.text) + (cites || props ? '<div class="asst-cite">' + cites + props + '</div>' : '') +
+    (src || m.note ? '<span class="src">' + esc([src, m.note].filter(Boolean).join(' · ')) + '</span>' : '') +
+    (m.report ? '<div class="asst-cite"><button type="button" data-action="asst-report" data-fresh="1">' + icon('repeat', 'sm') + '<span>' + esc(L('Neu erstellen', 'Create again')) + '</span></button></div>' : '') + '</div>';
+}
+function asstDraw() {
+  const root = $('#asst-root');
+  if (!root) return;
+  const keep = $(ASST_TA);
+  const draft = keep ? keep.value : '';
+  root.innerHTML = '<aside class="asst" aria-labelledby="asst-t">' +
+    '<div class="asst-h"><b id="asst-t">' + icon('sparkle', 'sm') + esc(L('Assistent', 'Assistant')) + '</b>' +
+    '<button type="button" class="btn sm" data-action="asst-report">' + esc(L('Schnellreport', 'Quick report')) + '</button>' +
+    '<button type="button" class="btn sm" data-action="assistant"' + labelled(L('Einträge per Text anlegen', 'Create entries from text')) + '>' + icon('plus', 'sm') + '</button>' +
+    '<button type="button" class="icon-btn" data-action="asst-close"' + labelled(L('Schließen (Esc)', 'Close (Esc)')) + '>' + icon('x') + '</button></div>' +
+    '<div class="asst-log" role="log" aria-live="polite">' + (ASST.msgs.length ? ASST.msgs.map(asstMsg).join('')
+      : ASST_AI + esc(L('Frag mich zu deinen Aufgaben, Projekten, Jour Fixe und Abwesenheiten. Ich antworte nur aus dem, was du sehen darfst, und lege nichts ohne deine Bestätigung an.',
+        'Ask me about your tasks, projects, jour fixe and absences. I answer only from what you may see and create nothing without your confirmation.')) + '</div>') + '</div>' +
+    '<div class="asst-quick">' + ASST_QUICK().map(q => '<button type="button" data-action="asst-quick">' + esc(q) + '</button>').join('') + '</div>' +
+    '<div class="asst-in"><textarea class="textarea" rows="1" maxlength="1000" aria-label="' + esc(L('Frage an den Assistenten', 'Question for the assistant')) + '" placeholder="' +
+      esc(L('Frage stellen … (Enter sendet)', 'Ask … (Enter sends)')) + '"></textarea>' +
+    '<button type="button" class="btn primary" data-action="asst-send"' + (ASST.busy ? ' disabled' : '') + '>' + esc(L('Senden', 'Send')) + '</button></div>' +
+    '<div class="asst-foot">' + esc(L('KI-Antworten können falsch sein. Vorschläge werden erst nach deiner Bestätigung angelegt.', 'AI answers can be wrong. Proposals are only created after you confirm them.')) + '</div></aside>';
+  const ta = $(ASST_TA);
+  ta.value = draft;
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); A['asst-send'](); }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); asstClose(); }
+  });
+  const log = $('#asst-root .asst-log');
+  log.scrollTop = log.scrollHeight;
+}
+/** One question: shown at once, the answer comes in the background. */
+function asstAsk(q) {
+  q = String(q || '').trim();
+  if (!q || ASST.busy) return Promise.resolve();
+  ASST.busy = true;
+  ASST.msgs.push({ who: 'me', text: q }, { who: 'ai', typing: true });
+  asstDraw();
+  return call('ai.ask', { question: q, lang: LANG }, { quiet: true }).then(r => {
+    ASST.msgs[ASST.msgs.length - 1] = { who: 'ai', text: r.answer, cite: r.cite, proposals: r.proposals, source: r.source, note: r.note };
+  }).catch(err => {
+    ASST.msgs[ASST.msgs.length - 1] = { who: 'ai', text: shortMsg(friendlyError(err.message)) };
+  }).then(() => { ASST.busy = false; asstDraw(); const ta = $(ASST_TA); if (ta) ta.focus(); });
+}
+A['asst-send'] = () => {
+  const ta = $(ASST_TA);
+  if (ASST.busy || !ta.value.trim()) return Promise.resolve();
+  const q = ta.value;
+  ta.value = '';
+  return asstAsk(q);
+};
+A['asst-quick'] = el => asstAsk(el.textContent);
+A['asst-close'] = () => asstClose();
+A['asst-cite'] = el => {
+  const c = ASST.msgs[Number(el.dataset.m)].cite[Number(el.dataset.k)];
+  const id = c.ref.split(':')[1];
+  if (c.kind === 'task') openPeek(id);
+  else if (c.kind === 'project') go('project', id);
+  else if (c.kind === 'jf' || c.kind === 'minutes') jfOpen(c.seriesId, c.date);
+  else go('capacity');
+};
+A['asst-proposals'] = el => assistWith(ASST.msgs[Number(el.dataset.m)].proposals);
+/** The week at a glance: kept per person and day on the server, "Neu erstellen" makes it again. */
+A['asst-report'] = el => {
+  if (ASST.busy) return Promise.resolve();
+  ASST.busy = true;
+  ASST.msgs.push({ who: 'ai', typing: true });
+  asstDraw();
+  return call('ai.report', { range: 'week', lang: LANG, fresh: !!(el && el.dataset.fresh) }, { quiet: true }).then(r => {
+    const lines = [r.text].concat((r.points || []).map(p => '• ' + p.text));
+    const cite = (r.points || []).filter(p => p.taskId).map(p => ({ ref: 'task:' + p.taskId, kind: 'task', label: p.text }));
+    ASST.msgs[ASST.msgs.length - 1] = { who: 'ai', text: L('Schnellreport ', 'Quick report ') + '\n' + lines.join('\n'), cite: cite, source: r.source, report: true };
+  }).catch(err => {
+    ASST.msgs[ASST.msgs.length - 1] = { who: 'ai', text: shortMsg(friendlyError(err.message)) };
+  }).then(() => { ASST.busy = false; asstDraw(); });
+};
+</script>

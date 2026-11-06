@@ -1,0 +1,409 @@
+<script>
+/* ==========================================================================
+   Task side peek (page preview next to the list): properties, description,
+   sub-tasks, comments and the smart helpers.
+   ========================================================================== */
+
+function openPeek(id) {
+  if (!task(id)) return;
+  if (S.peekId && S.peekId !== id && peekHoldsChanges()) return;
+  if (S.draft && S.draft.taskId !== id) S.draft = null;
+  if (S.peekId && task(S.peekId) !== task(id)) discardIfBlank(S.peekId);
+  S.peekId = id;
+  const fresh = /^tmp_/.test(id);
+  S.comments = fresh ? { taskId: id, list: [] } : null;
+  S.suggest = null;
+  S.breakdown = null;
+  render({ peek: true });
+  const title = $('#peek .peek-title');
+  if (title && task(id).title === 'Ohne Titel') { title.value = ''; title.focus(); }
+  if (fresh) return;
+  call('comments.list', { taskId: id }).then(list => {
+    if (S.peekId !== id) return;
+    S.comments = { taskId: id, list: list };
+    renderPeek();
+  }).catch(() => { S.comments = { taskId: id, list: [] }; renderPeek(); });
+}
+/* ---- changed properties wait for "Übernehmen" ---- */
+/** The open task with its unsaved changes applied (what the panel shows). */
+function peekTask() {
+  const t = S.peekId && task(S.peekId);
+  const d = S.draft && S.draft.taskId === S.peekId ? S.draft.patch : null;
+  return t && d ? Object.assign({}, t, d) : t;
+}
+/** Collects a change of the open task; a value set back to the saved one is no change. */
+function stageTask(id, patch) {
+  const t = task(id);
+  if (!t) return;
+  if (!S.draft || S.draft.taskId !== id) S.draft = { taskId: id, patch: {}, warned: false };
+  Object.keys(patch).forEach(k => {
+    if (JSON.stringify(patch[k]) === JSON.stringify(t[k])) delete S.draft.patch[k];
+    else S.draft.patch[k] = patch[k];
+  });
+  S.draft.warned = false;
+  if (!Object.keys(S.draft.patch).length) S.draft = null;
+  renderPeek();
+}
+const draftCount = () => (S.draft && S.draft.taskId === S.peekId ? Object.keys(S.draft.patch).length : 0);
+/** True (and a warning in the panel) when the open task has unsaved changes and this is the first attempt to leave. */
+function peekHoldsChanges() {
+  if (!draftCount() || S.draft.warned) return false;
+  S.draft.warned = true;
+  renderPeek();
+  return true;
+}
+function peekBar() {
+  const n = draftCount();
+  if (!n) return '';
+  const warn = S.draft.warned;
+  return '<div class="peek-commit' + (warn ? ' warn' : '') + '" role="' + (warn ? 'alert' : 'status') + '">' + icon(warn ? 'alert' : 'edit', 'sm') +
+    '<span class="grow">' + (n === 1 ? '1 ungespeicherte Änderung' : n + ' ungespeicherte Änderungen') + (warn ? ' – erst übernehmen oder verwerfen' : '') + '</span>' +
+    '<button type="button" class="btn sm" data-action="peek-discard">Verwerfen</button>' +
+    '<button type="button" class="btn sm primary" data-action="peek-apply">Übernehmen</button></div>';
+}
+A['peek-apply'] = () => {
+  const d = S.draft;
+  S.draft = null;
+  if (d) patchTask(d.taskId, d.patch, { keepPeek: false }).then(() => toast('Änderungen übernommen'));
+};
+A['peek-discard'] = () => { S.draft = null; renderPeek(); };
+
+function closePeek() {
+  if (peekHoldsChanges()) return;
+  S.draft = null;
+  discardIfBlank(S.peekId);
+  S.peekId = null;
+  S.peekFull = false;
+  render();
+}
+A['close-peek'] = () => closePeek();
+A['progress-auto'] = el => { patchTask(el.dataset.id, { progress: 0 }, { keepPeek: true }); renderPeek(); };
+
+/* ----- time tracking ----- */
+function spentSec(t) {
+  return Math.round((Number(t.spent) || 0) * 60 + (t.timerStart ? Math.max(0, Date.now() - new Date(t.timerStart).getTime()) / 1000 : 0));
+}
+function clockText(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+function timeCardHtml(t, compact) {
+  const run = !!t.timerStart;
+  const est = t.estimate ? Math.min(100, Math.round(spentSec(t) / 3600 / t.estimate * 100)) : 0;
+  const body = '<div class="tt-row"><span class="tt-total" data-timer="total">' + clockText(spentSec(t)) + '</span>' +
+    '<button class="btn ' + (run ? 'white' : 'primary') + ' sm" data-action="timer-toggle" data-id="' + esc(t.id) + '">' + icon(run ? 'stop' : 'play', 'sm') + (run ? 'Stopp' : 'Starten') + '</button></div>' +
+    (run ? '<div class="tt-run"><span class="rec"></span>Läuft seit ' + esc(new Date(t.timerStart).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })) + ' Uhr</div>' : '') +
+    (t.estimate ? '<div class="tt-est"><span class="track"><i style="width:' + est + '%"></i></span><span class="hint">' + est + ' % von ' + esc(fmtHours(t.estimate)) + ' geplant</span></div>' : '') +
+    '<div class="tt-add"><input class="input" data-keep="tmin" data-on-keydown="time-add" placeholder="Minuten nachtragen und Enter drücken" inputmode="numeric"></div>';
+  return compact ? '<div class="time-compact"><div class="k">' + icon('clock') + 'Zeiterfassung</div>' + body + '</div>'
+    : '<div class="card-w"><h3>' + icon('clock', 'sm') + 'Zeiterfassung</h3>' + body + '</div>';
+}
+A['timer-toggle'] = el => {
+  const t = task(el.dataset.id);
+  if (!t) return;
+  if (t.timerStart) patchTask(t.id, { spent: Math.round(spentSec(t) / 60), timerStart: '' }, { keepPeek: true });
+  else patchTask(t.id, { timerStart: new Date().toISOString() }, { keepPeek: true });
+  renderPeek();
+};
+ON.keydown['time-add'] = (el, e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const min = Math.round(Number(String(el.value).replace(',', '.')) || 0);
+  const t = task(S.peekId);
+  if (!t || min <= 0) return;
+  patchTask(t.id, Shared.addTime(t.spent, t.timerStart, Date.now(), min), { keepPeek: true });
+  renderPeek();
+  toast(min + ' min nachgetragen');
+};
+function tickTimer() {
+  const t = S.peekId && task(S.peekId);
+  $$('[data-timer=total]').forEach(n => { if (t) n.textContent = clockText(spentSec(t)); });
+}
+setInterval(() => { const t = S.peekId && task(S.peekId); if (t && t.timerStart) tickTimer(); }, 1000);
+A['ed-fmt'] = el => {
+  const ta = $('[data-keep=desc]');
+  if (!ta) return;
+  const ins = { head: '\n## ', bullet: '\n- ', check: '\n- [ ] ', date: fmtDate(TODAY(), { absolute: true }) }[el.dataset.k];
+  const pos = ta.selectionStart || ta.value.length;
+  ta.value = ta.value.slice(0, pos) + ins + ta.value.slice(pos);
+  ta.focus(); ta.setSelectionRange(pos + ins.length, pos + ins.length);
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+};
+A['peek-full'] = () => { S.peekFull = !S.peekFull; renderPeek(); };
+
+function propRow(t, field, ic, label, value) {
+  return '<div class="prop"><div class="k">' + icon(ic) + esc(label) + '</div>' +
+    '<button class="v" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + field + '">' + (value || '<span class="faint">Leer</span>') + '</button></div>';
+}
+
+function renderPeek() {
+  const el = $('#peek');
+  const t = peekTask();
+  if (!t) { el.hidden = true; setHtml(el, ''); $('#app').classList.remove('peek-full'); return; }
+  const active = document.activeElement;
+  const keepFocus = active && el.contains(active) && active.dataset && active.dataset.keep;
+  const caret = keepFocus ? [active.dataset.keep, active.selectionStart] : null;
+  const scrollEl = $('.peek-scroll, .dt-scroll', el);
+  const scroll = scrollEl ? scrollEl.scrollTop : 0;
+  el.hidden = false;
+  el.classList.toggle('full', S.peekFull);
+  const parent = t.parentId && task(t.parentId);
+  const subs = subtasks(t.id).sort(bySort);
+  const rec = Shared.RECURRENCES.find(r => r.key === t.recurrence);
+
+  const props =
+    propRow(t, 'status', 'status', 'Status', statusTag(t.status)) +
+    propRow(t, 'assignees', 'user', 'Zugewiesen', t.assignees.map(person).join('')) +
+    propRow(t, 'priority', 'flag', 'Priorität', prioTag(t.priority)) +
+    propRow(t, 'dueDate', 'calendar', 'Fällig', t.dueDate ? dueTag(t) + '<span class="faint" style="font-size:12px">' + esc(fmtDate(t.dueDate, { absolute: true })) + '</span>' : '') +
+    propRow(t, 'startDate', 'clock', 'Start', t.startDate ? esc(fmtDate(t.startDate, { absolute: true })) : '') +
+    propRow(t, 'projectId', 'folder', 'Projekt', projectChip(project(t.projectId))) +
+    propRow(t, 'teams', 'users', 'Teams', t.teams.map(id => teamChip(team(id))).join('')) +
+    propRow(t, 'estimate', 'hourglass', 'Aufwand', esc(fmtHours(t.estimate))) +
+    propRow(t, 'progress', 'pie', 'Fortschritt', progressBar(t)) +
+    propRow(t, 'tags', 'tag', 'Tags', t.tags.map(tagChip).join('')) +
+    propRow(t, 'recurrence', 'repeat', 'Wiederholung', t.recurrence ? esc(rec.label) : '');
+
+  let smart = '<div class="ai-row">' +
+    '<button class="ai-btn" data-action="ai-suggest">' + icon('sparkle', 'sm') + 'Wer hat Kapazität?</button>' +
+    '<button class="ai-btn" data-action="ai-breakdown">' + icon('sparkle', 'sm') + 'In Teilaufgaben zerlegen</button></div>';
+  if (S.suggest && S.suggest.taskId === t.id) {
+    const d = S.suggest.data;
+    smart += '<div class="suggest"><div class="sh"><span>Freie Kapazität in KW ' + Shared.isoWeek(d.week) + '</span>' +
+      '<button class="icon-btn" data-action="suggest-close" aria-label="Vorschlag schließen" title="Schließen">' + icon('x', 'sm') + '</button></div>' +
+      d.candidates.map(c => '<button class="opt" data-action="suggest-pick" data-email="' + esc(c.email) + '">' + avatar(c.email) +
+        '<div style="flex:1;min-width:0"><b>' + esc(c.name) + '</b> <span class="faint">· ' + (c.free > 0 ? fmtNum(c.free) + ' h frei' : 'ausgelastet') + '</span>' +
+        '<small>' + esc(c.reasons.join(' · ')) + '</small></div>' +
+        (t.assignees.indexOf(c.email) >= 0 ? '<span class="chip ok">zugewiesen</span>' : '<span class="btn sm outline">Zuweisen</span>') + '</button>').join('') + '</div>';
+  }
+  if (S.breakdown && S.breakdown.taskId === t.id) {
+    const b = S.breakdown.data;
+    smart += '<div class="suggest"><div class="sh"><span>Vorschlag für Teilaufgaben</span><button class="icon-btn" data-action="breakdown-close" aria-label="Vorschlag schließen" title="Schließen">' + icon('x', 'sm') + '</button></div>' +
+      ((b.subtasks && b.subtasks.length) ? (b.hint ? '<div class="notice" style="margin:4px 4px 8px">' + esc(b.hint) + '</div>' : '') + '<form data-on-submit="breakdown">' + b.subtasks.map((s, i) =>
+        '<label class="opt"><input type="checkbox" name="pick" value="' + i + '" checked><span style="flex:1">' + esc(s.title) + '</span><span class="faint">' + esc(fmtHours(s.estimate)) + '</span></label>').join('') +
+        '<div style="padding:6px"><button class="btn sm primary" type="submit">Übernehmen</button></div></form>'
+        : '<div class="notice" style="margin:4px">' + esc(b.hint) + '</div>') + '</div>';
+  }
+
+  const comments = S.comments && S.comments.taskId === t.id ? S.comments.list : null;
+  const commentsList = comments === null ? skPeople(2) : comments.map(c =>
+    '<div class="comment">' + avatar(c.author) + '<div class="body"><div class="head"><b>' + esc(user(c.author).name) + '</b><span class="muted">' + esc(timeAgo(c.createdAt)) + '</span></div>' +
+    '<div class="text">' + esc(c.body) + '</div></div></div>').join('');
+  const commentForm = '<form class="comment-form" data-on-submit="comment">' + avatar(S.me.email) +
+    '<textarea class="textarea" name="body" data-keep="comment" data-on-keydown="comment-key" placeholder="Kommentar schreiben…" rows="1"></textarea>' +
+    '<button class="btn outline" type="submit">Senden</button></form>';
+  const subsList = subs.map(s => '<div class="subtask"><span class="check' + (isDone(s) ? ' on' : '') + '" data-action="toggle-done" data-id="' + esc(s.id) + '"></span>' +
+    '<span class="t' + (isDone(s) ? ' done' : '') + '" data-action="open-task" data-id="' + esc(s.id) + '">' + esc(s.title) + '</span>' +
+    (s.assignees.length ? avatars(s.assignees, 2) : '') + dueTag(s) + '</div>').join('') +
+    '<div class="inline-add">' + icon('plus', 'sm faint') + '<input data-keep="sub" data-on-keydown="add-subtask" placeholder="Unteraufgabe hinzufügen und Enter drücken"></div>';
+  const foot = '<div class="meta-foot">Erstellt von ' + esc(user(t.createdBy).name) + ' · ' + esc(timeAgo(t.createdAt)) +
+    (t.updatedAt && t.updatedAt !== t.createdAt ? ' · zuletzt geändert ' + esc(timeAgo(t.updatedAt)) : '') +
+    (t.completedAt ? ' · erledigt ' + esc(timeAgo(t.completedAt)) : '') + '</div>';
+  $('#app').classList.toggle('peek-full', !!S.peekFull);
+  if (S.peekFull) {
+    const pv = progressOf(t);
+    const dp = (label, field, inner, extra) => '<div class="card-w dp"><div class="dpl">' + label + (extra || '') + '</div>' +
+      '<button class="dpv" data-action="prop" data-id="' + esc(t.id) + '" data-field="' + field + '">' + (inner || '<span class="faint">Leer</span>') + icon('chevron', 'sm') + '</button></div>';
+    const over = !isDone(t) && t.dueDate && t.dueDate < TODAY();
+    setHtml(el, '<div class="dt-scroll"><div class="dt-wrap">' +
+      '<div class="card-w dt-head"><button class="round-btn" data-action="peek-full" title="Zurück">' + icon('back') + '</button>' +
+      '<div class="dt-main"><textarea class="peek-title" rows="1" data-keep="title" data-on-input="peek-title" placeholder="Ohne Titel">' + esc(t.title === 'Ohne Titel' ? '' : t.title) + '</textarea>' +
+      '<div class="dt-chips">' + statusTag(t.status) + prioTag(t.priority) +
+      (t.dueDate ? '<span class="chip ' + (over ? 'danger' : '') + '">' + icon('calendar', 'sm') + esc(fmtDate(t.dueDate, { absolute: true })) + '</span>' : '') +
+      '<span class="chip">' + icon('pie', 'sm') + 'Fortschritt ' + pv + ' %</span>' +
+      (parent ? '<button class="chip accent" data-action="open-task" data-id="' + esc(parent.id) + '">' + icon('left', 'sm') + esc(parent.title) + '</button>' : '') + '</div></div>' +
+      '<div class="dt-acts"><button class="btn white" data-action="toggle-done" data-id="' + esc(t.id) + '">' + (isDone(t) ? icon('repeat', 'sm') + 'Wieder öffnen' : icon('check', 'sm') + 'Erledigt') + '</button>' +
+      '<button class="icon-btn" data-action="peek-more" title="Mehr">' + icon('more') + '</button>' +
+      '<button class="icon-btn" data-action="close-peek" title="Schließen (Esc)">' + icon('x') + '</button></div></div>' +
+      '<div class="dt-props">' +
+      dp('Status', 'status', statusTag(t.status)) + dp('Priorität', 'priority', prioTag(t.priority)) +
+      dp('Start', 'startDate', t.startDate ? '<span class="dtc">' + esc(fmtDate(t.startDate, { absolute: true })) + '</span>' : '') +
+      dp('Fällig', 'dueDate', t.dueDate ? '<span class="dtc' + (over ? ' over' : '') + '">' + esc(fmtDate(t.dueDate, { absolute: true })) + '</span>' : '') +
+      '<div class="card-w dp"><div class="dpl">Fortschritt<span class="dpm">' + pv + ' % · ' + (t.progress > 0 ? 'manuell' : 'automatisch') + '</span></div>' +
+      '<button class="dpv prog" data-action="prop" data-id="' + esc(t.id) + '" data-field="progress"><span class="track"><i style="width:' + pv + '%"></i></span></button>' +
+      (t.progress > 0 ? '<button class="linkbtn" data-action="progress-auto" data-id="' + esc(t.id) + '">Auf automatisch zurücksetzen</button>' : '<span class="hint">Aus Status und Unteraufgaben berechnet</span>') + '</div></div>' +
+      '<div class="dt-grid"><div class="dt-col">' +
+      '<div class="card-w"><h3>' + icon('text', 'sm') + 'Beschreibung</h3><p class="hint" style="margin:-6px 0 12px">Kontext, Vorgehen und Ressourcen festhalten, damit später klar ist, was zu tun ist und warum.</p>' +
+      '<div class="ed-tools"><button data-action="ed-fmt" data-k="head" title="Überschrift">H</button><button data-action="ed-fmt" data-k="bullet" title="Aufzählung">' + icon('list', 'sm') + '</button>' +
+      '<button data-action="ed-fmt" data-k="check" title="Checkliste">' + icon('checksq', 'sm') + '</button><button data-action="ed-fmt" data-k="date" title="Heutiges Datum einfügen">' + icon('calendar', 'sm') + '</button>' +
+      '<label class="ed-img" title="' + esc(L('Bild einfügen (oder Strg+V)', 'Insert image (or Ctrl+V)')) + '"><input type="file" accept="image/png,image/jpeg,image/gif,image/webp" data-on-change="img-pick" aria-label="' +
+      esc(L('Bild einfügen', 'Insert image')) + '">' + icon('image', 'sm') + '</label></div>' +
+      '<textarea class="desc big" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
+      '<div class="saved">' + icon('check', 'sm') + 'Alle Änderungen gespeichert</div></div>' +
+      '<div class="card-w"><h3>' + icon('link', 'sm') + L('Links & Anhänge', 'Links & attachments') + '</h3>' + taskLinksHtml(t) + '</div>' +
+      '<div class="card-w"><h3>' + icon('sub', 'sm') + 'Unteraufgaben<span class="n">' + subs.filter(isDone).length + '/' + subs.length + ' erledigt</span></h3>' +
+      '<p class="hint" style="margin:-6px 0 10px">Unteraufgaben sind vollwertige Aufgaben mit eigener Person, Fälligkeit und Status.</p>' + subsList + '</div>' +
+      '</div><div class="dt-col">' + timeCardHtml(t) +
+      '<div class="card-w"><h3>' + icon('layers', 'sm') + 'Details</h3><div class="props" style="margin:0;background:none;padding:0">' + props.split('<div class="prop">').filter(x => /Zugewiesen|Projekt|Teams|Aufwand|Tags|Wiederholung/.test(x)).map(x => '<div class="prop">' + x).join('') + '</div></div>' +
+      '<div class="card-w"><h3>' + icon('sparkle', 'sm') + 'Smarte Hilfen</h3>' + smart + '</div>' +
+      '<div class="card-w"><h3>' + icon('msg', 'sm') + 'Kommentare<span class="n">' + (comments ? comments.length : 0) + '</span></h3>' + commentsList + commentForm + '</div>' +
+      foot + '</div></div></div></div>' + peekBar());
+  } else {
+  setHtml(el,
+    '<div class="peek-top">' +
+    '<button class="icon-btn" data-action="close-peek" title="Schließen (Esc)">' + icon('x') + '</button>' +
+    '<button class="icon-btn" data-action="peek-full" title="Ganze Seite">' + icon('expand') + '</button>' +
+    (parent ? '<button class="btn sm" data-action="open-task" data-id="' + esc(parent.id) + '">' + icon('left', 'sm') + esc(parent.title) + '</button>' : '') +
+    '<div class="spacer"></div>' +
+    '<button class="btn sm" data-action="toggle-done" data-id="' + esc(t.id) + '">' + (isDone(t) ? icon('repeat', 'sm') + 'Wieder öffnen' : icon('check', 'sm') + 'Erledigt') + '</button>' +
+    '<button class="icon-btn" data-action="peek-more" title="Mehr">' + icon('more') + '</button></div>' +
+    '<div class="peek-scroll"><div class="peek-body">' +
+    '<textarea class="peek-title" rows="1" data-keep="title" data-on-input="peek-title" placeholder="Ohne Titel">' + esc(t.title === 'Ohne Titel' ? '' : t.title) + '</textarea>' +
+    '<div class="props">' + props + '</div>' + timeCardHtml(t, true) + smart +
+    '<div class="divider"></div>' +
+    '<textarea class="desc" data-keep="desc" data-on-input="peek-desc" placeholder="Beschreibung, Notizen, Links …">' + esc(t.description) + '</textarea>' +
+    '<div class="section-label">' + icon('link', 'sm') + L('Links & Anhänge', 'Links & attachments') + '</div>' + taskLinksHtml(t) +
+    '<div class="section-label">' + icon('sub', 'sm') + 'Unteraufgaben' + (subs.length ? ' <span class="faint">' + subs.filter(isDone).length + '/' + subs.length + '</span>' : '') + '</div>' + subsList +
+    '<div class="section-label">' + icon('msg', 'sm') + 'Kommentare</div>' + commentsList + commentForm + foot +
+    '</div></div>' + peekBar());
+  }
+  tickTimer();
+  $$('#peek textarea').forEach(autosize);
+  const sc2 = $('.peek-scroll, .dt-scroll', el);
+  if (sc2) sc2.scrollTop = scroll;
+  if (caret) {
+    const n = $('[data-keep="' + caret[0] + '"]', el);
+    if (n) { n.focus(); try { n.setSelectionRange(caret[1], caret[1]); } catch (e) { /* input type */ } }
+  }
+}
+function autosize(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 'px';
+}
+
+/* ----- inline editing (saves without re-rendering the peek) ----- */
+const pendingSave = {};
+function saveQuiet(id, patch) {
+  const t = task(id);
+  if (!t) return;
+  Object.assign(t, patch);
+  pendingSave[id] = Object.assign(pendingSave[id] || {}, patch);
+  flushQuiet(id);
+}
+const flushQuiet = debounce(id => {
+  const patch = pendingSave[id];
+  delete pendingSave[id];
+  if (!patch) return;
+  call('tasks.save', Object.assign({ id: id }, patch))
+    .then(changed => { applyTasks(changed); render({ peek: false }); })
+    .catch(fail);
+}, 600);
+ON.input['peek-title'] = el => {
+  autosize(el);
+  saveQuiet(S.peekId, { title: el.value });
+  const card = $('[data-drag-id="' + S.peekId + '"] .card-title span');
+  if (card) card.textContent = el.value;
+};
+ON.input['peek-desc'] = el => {
+  autosize(el);
+  saveQuiet(S.peekId, { description: el.value });
+  // a pasted Gmail or document link shows as a chip right away
+  const box = $('#peek .lk-desc');
+  if (box) box.innerHTML = descLinksHtml(task(S.peekId));
+  const imgs = $('#peek .lf-imgs');
+  if (imgs) imgs.innerHTML = textImages(el.value);
+};
+/** The task's links, then the links found in its description (Gmail threads as "Mail öffnen"). */
+function taskLinksHtml(t) {
+  return '<div class="lk-row lf-imgs">' + textImages(t.description) + '</div><div class="lk-row">' + linksHtml(t.links, 'task', t.id, true) + '</div><div class="lk-row lk-desc">' + descLinksHtml(t) + '</div>';
+}
+
+ON.keydown['add-subtask'] = (el, e) => {
+  if (e.key !== 'Enter' || !el.value.trim()) return;
+  e.preventDefault();
+  const parent = task(S.peekId);
+  const title = el.value.trim();
+  el.value = '';
+  call('tasks.save', {
+    title: title, parentId: parent.id, projectId: parent.projectId, teams: parent.teams,
+    assignees: parent.assignees, dueDate: parent.dueDate,
+  }).then(changed => {
+    applyTasks(changed);
+    render({ peek: false });
+    renderPeek();
+    const n = $('[data-keep="sub"]');
+    if (n) n.focus();
+  }).catch(fail);
+};
+
+ON.keydown['comment-key'] = (el, e) => {
+  autosize(el);
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ON.submit.comment(el.form); }
+};
+ON.submit.comment = form => {
+  const body = form.body.value.trim();
+  if (!body) return;
+  const id = S.peekId;
+  form.body.value = '';
+  call('comments.add', { taskId: id, body: body }).then(c => {
+    if (S.comments && S.comments.taskId === id) S.comments.list.push(c);
+    renderPeek();
+  }).catch(fail);
+};
+
+/* ----- more menu ----- */
+A['peek-more'] = el => {
+  const t = task(S.peekId);
+  openMenu(el, [
+    { value: 'dup', html: icon('layers', 'sm') + '<span>Duplizieren</span>', search: '' },
+    { value: 'sub', html: icon('sub', 'sm') + '<span>Zu Unteraufgabe von…</span>', search: '' },
+    { value: 'del', html: '<span style="color: var(--danger-text);display:flex;gap:8px;align-items:center">' + icon('trash', 'sm') + 'Löschen</span>', search: '' },
+  ], {
+    search: false,
+    onPick: v => {
+      if (v === 'dup') {
+        const copy = {};
+        ['title', 'description', 'status', 'priority', 'projectId', 'teams', 'assignees', 'tags', 'startDate', 'dueDate', 'estimate', 'parentId', 'recurrence']
+          .forEach(k => { copy[k] = t[k]; });
+        copy.title = t.title + ' (Kopie)';
+        // a copy outside the parent only goes where the person may put tasks (the server checks again)
+        if (!copy.parentId) {
+          if (copy.projectId && !(project(copy.projectId) && canEditProject(project(copy.projectId)))) copy.projectId = '';
+          copy.teams = (copy.teams || []).filter(id => myTeams().some(x => x.id === id));
+        }
+        newTaskModal(copy);
+      }
+      if (v === 'sub') {
+        openMenu(el, [{ value: '', html: '<span class="faint">Keine (oberste Ebene)</span>', search: 'keine' }]
+          .concat(S.tasks.filter(x => x.id !== t.id && x.parentId !== t.id && !x.parentId).map(x => ({ value: x.id, html: '<span>' + esc(x.title) + '</span>', search: x.title }))),
+        { selected: [t.parentId], onPick: p => stageTask(t.id, { parentId: p }) });
+      }
+      if (v === 'del') {
+        deleteWithUndo(t);
+      }
+    },
+  });
+};
+
+/* ----- smart helpers ----- */
+A['ai-suggest'] = () => {
+  const id = S.peekId;
+  call('ai.suggestAssignee', { id: id, lang: LANG }).then(d => { S.suggest = { taskId: id, data: d }; renderPeek(); }).catch(fail);
+};
+A['suggest-close'] = () => { S.suggest = null; renderPeek(); };
+A['suggest-pick'] = el => {
+  const t = task(S.peekId);
+  if (t.assignees.indexOf(el.dataset.email) >= 0) return;
+  stageTask(t.id, { assignees: t.assignees.concat([el.dataset.email]) });
+};
+A['ai-breakdown'] = () => {
+  const id = S.peekId;
+  toast(S.ai.enabled ? 'Gemini denkt nach…' : 'Beispielvorschlag wird erstellt…');
+  call('ai.breakdown', { id: id, lang: LANG }).then(d => { S.breakdown = { taskId: id, data: d }; renderPeek(); }).catch(fail);
+};
+A['breakdown-close'] = () => { S.breakdown = null; renderPeek(); };
+ON.submit.breakdown = form => {
+  const parent = task(S.peekId);
+  const picks = formValues(form).pick || [];
+  const subs = S.breakdown.data.subtasks;
+  let chain = Promise.resolve();
+  picks.forEach(i => {
+    const s = subs[Number(i)];
+    chain = chain.then(() => call('tasks.save', {
+      title: s.title, estimate: s.estimate, parentId: parent.id, projectId: parent.projectId,
+      teams: parent.teams, assignees: parent.assignees,
+    }).then(applyTasks));
+  });
+  chain.then(() => { S.breakdown = null; toast(picks.length + ' Unteraufgaben angelegt'); render(); }).catch(fail);
+};
+</script>
