@@ -227,7 +227,7 @@
     getFolderById: id => { meter('driveRead'); if (!(drive[id] instanceof DFolder)) throw new Error('No item with the given ID could be found.'); return drive[id]; },
     getFileById: id => { meter('driveRead'); if (!(drive[id] instanceof DFile)) throw new Error('No item with the given ID could be found.'); return drive[id]; },
   };
-  root.ScriptApp = { getOAuthToken: () => 'test-token' };
+  root.ScriptApp = { getOAuthToken: () => 'test-token', getService: () => ({ getUrl: () => 'https://script.google.com/a/macros/firma.de/s/TEST/exec' }) };
   // Drive REST API (v3) on top of the in-memory Drive: what Drive.js calls with UrlFetchApp
   const reply = (code, body, bytes) => ({ getResponseCode: () => code, getContentText: () => (typeof body === 'string' ? body : JSON.stringify(body)), getContent: () => bytes || Array.from(toBytes(typeof body === 'string' ? body : JSON.stringify(body))).map(b => (b > 127 ? b - 256 : b)) });
   const listOf = it => { const a = []; while (it.hasNext()) a.push(it.next()); return a; };

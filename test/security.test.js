@@ -51,12 +51,13 @@ const ATTEMPTS = w => ({
   'docs.versions': { id: 'x' }, 'docs.version': { id: 'x', version: 1 }, 'docs.restore': { id: 'x', version: 1 }, 'docs.lock': { id: 'x' }, 'docs.unlock': { id: 'x' }, 'docs.remove': { id: 'x' },
   'jf.list': { projectId: w.project.id }, 'jf.saveSeries': { projectId: w.project.id, title: 'x', rhythm: 'weekly', weekday: 1 },
   'jf.removeSeries': { id: 'x' }, 'jf.makeTasks': { projectId: w.project.id, requestId: 'r', item: true, items: [{ title: 'x' }] }, 'docs.flush': { id: 'x' }, 'jf.meeting': { seriesId: 'x', date: '2030-01-07' },
+  'gcal.status': null, 'gcal.connect': null, 'gcal.sync': null, 'gcal.disconnect': null, 'gcal.setup': { clientId: 'x.apps.googleusercontent.com', clientSecret: 'hack' },
   'storage.links': {},
   'backup.status': {},
   'backup.run': {},
 });
 // read-only routes that answer the outsider with their OWN data only (checked below)
-const OWN_DATA = ['bootstrap', 'tasks.list', 'ai.status', 'ai.report', 'ai.briefing', 'ai.parse', 'ai.assist', 'calendar.range', 'capacity', 'availability'];
+const OWN_DATA = ['bootstrap', 'tasks.list', 'ai.status', 'ai.report', 'ai.briefing', 'ai.parse', 'ai.assist', 'calendar.range', 'capacity', 'availability', 'gcal.status', 'gcal.connect', 'gcal.sync', 'gcal.disconnect'];
 
 describe('rights per API method', () => {
   const w = world();

@@ -41,7 +41,11 @@ const SCHEMA = {
     json: ['attendees'],
   },
   Absences: {
-    cols: ['id', 'email', 'startDate', 'endDate', 'type', 'note', 'createdAt'],
+    cols: ['id', 'email', 'startDate', 'endDate', 'type', 'note', 'createdAt', 'source', 'extId'],
+  },
+  // Google Calendar link per person (read-only): the refresh token stays in this protected sheet, never goes to the browser
+  GoogleLinks: {
+    cols: ['email', 'refreshToken', 'scope', 'connectedAt', 'lastSync', 'lastError'],
   },
   CompanyHolidays: {
     cols: ['id', 'date', 'name', 'countries'],

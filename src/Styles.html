@@ -2003,6 +2003,11 @@ button.jfs-chip:hover { border-color: var(--jf-hi-line); }
 @media (max-width: 1180px) { .jfo-th, .jfo-row { grid-template-columns: 96px 96px minmax(120px, 1fr) 92px 122px 100px 24px; } }
 @media (max-width: 900px) { .jfo-th, .jfo-row { grid-template-columns: 96px 100px minmax(0, 1fr) auto 28px; } .jfo-th > :nth-child(5), .jfo-th > :nth-child(6), .jfo-row > :nth-child(5), .jfo-row > :nth-child(6) { display: none; } .jfo-row:has(.jfo-meet-form) > .jfo-mc { grid-column: 3 / 5; } }
 @media (max-width: 560px) { .jfo-th, .jfo-row { grid-template-columns: 84px minmax(0, 1fr) 24px; } .jfo-th > :nth-child(2), .jfo-row > :nth-child(2), .jfo-th > :nth-child(4), .jfo-row > :nth-child(4) { display: none; } .jfo-row:has(.jfo-meet-form) > .jfo-mc { display: flex; grid-column: 1 / -1; } }
+/* v62.6: Google Calendar: entries from Google are marked, the setup box in the settings */
+.event[data-id^="g_"], .wk-chip[data-id^="g_"], .blk-ev[data-id^="g_"] { box-shadow: inset 3px 0 0 #4285f4; }
+.gc-setup { margin-top: 10px; font-size: 14px; }
+.gc-setup summary { cursor: pointer; color: var(--text-2); font-weight: 600; }
+.gc-setup code { word-break: break-all; }
 /* pager: at the foot of the page, left */
 .fit-body:has(> .jfo) { display: flex; flex-direction: column; }
 .fit-body > .jfo { flex: 1 0 auto; display: flex; flex-direction: column; }

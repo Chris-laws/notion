@@ -3,8 +3,13 @@
  * The browser talks to the server through a single function, api(), which
  * dispatches to the route table below and always returns a JSON string.
  */
-function doGet() {
+function doGet(e) {
   const user = Auth.currentUser();
+  // Google sends the person back here after they allowed read access to their calendar
+  if (e && e.parameter && (e.parameter.code || e.parameter.error) && e.parameter.state) {
+    return HtmlService.createHtmlOutput(Gcal.callback(e.parameter)).setTitle(Config.get('APP_NAME'))
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   const tpl = HtmlService.createTemplateFromFile('Index');
   tpl.appName = Config.get('APP_NAME');
   tpl.userEmail = user.email;
@@ -92,6 +97,11 @@ const ROUTES = {
   'jf.meeting': p => Jf.meeting(p),
   'jf.makeTasks': p => Jf.makeTasks(p),
   'docs.flush': p => Docs.flush(p),
+  'gcal.status': () => Gcal.status(),
+  'gcal.setup': p => Gcal.setup(p),
+  'gcal.connect': () => Gcal.connect(),
+  'gcal.sync': () => Gcal.sync(),
+  'gcal.disconnect': () => Gcal.disconnect(),
   'storage.links': () => Store.adminLinks(),
   'backup.status': () => Backup.status(),
   'backup.run': () => Backup.runNow(),
@@ -134,6 +144,7 @@ const App = {
       companyHolidays: Db.all('CompanyHolidays'),
       jf: Jf.overview_(ctx, ''),
       ai: Ai.status(),
+      gcal: Gcal.status(),
     };
   },
 };

@@ -1944,6 +1944,61 @@ function aiAdminRow() {
         (S.aiTest.model ? ' · ' + S.aiTest.model : '') + (S.aiTest.style ? ' · ' + S.aiTest.style.split(' (')[0] : '') + (S.aiTest.note ? ' · ' + S.aiTest.note : '') + (S.aiTest.ms !== undefined ? ' · ' + S.aiTest.ms + ' ms' : '')) + '</span>' +
         (S.aiTest.ok ? '' : '<button class="linkbtn" data-action="ai-test-why">' + esc(L('Details', 'Details')) + '</button>') : '') + '</div>';
 }
+/** Google Calendar link of the person (read-only); admins also enter the OAuth client here. */
+function gcalBox() {
+  const g = S.gcal || {};
+  const b = (act, label, cls) => '<button class="btn sm' + (cls ? ' ' + cls : '') + '" data-action="' + act + '"' + (S.gcalBusy ? ' disabled' : '') + '>' + esc(label) + '</button>';
+  let main;
+  if (!g.configured) {
+    main = '<div class="notice">' + esc(L('Noch nicht eingerichtet. Eine Admin-Person trägt die Google-Zugangsdaten unten ein.', 'Not set up yet. An admin enters the Google credentials below.')) + '</div>';
+  } else if (g.connected) {
+    main = '<div class="list-plain"><div class="li"><span class="grow">' + esc(L('Google Kalender ist verbunden. ', 'Google Calendar is connected. ')) + '<span class="faint">' +
+      esc(g.lastSync ? L('Zuletzt abgeglichen: ', 'Last sync: ') + jfStamp(g.lastSync) : L('Noch nicht abgeglichen.', 'Not synced yet.')) + '</span>' +
+      (g.lastError ? '<br><span class="ai-test bad">' + esc(g.lastError) + '</span>' : '') + '</span>' +
+      b('gcal-sync', S.gcalBusy ? L('Gleicht ab …', 'Syncing …') : L('Jetzt abgleichen', 'Sync now'), 'primary') + b('gcal-off', L('Trennen', 'Disconnect')) + '</div></div>';
+  } else {
+    main = '<div class="list-plain"><div class="li"><span class="grow">' + esc(L('Deine Termine erscheinen in deinem Kalender (nur für dich sichtbar), „Abwesend“-Einträge aus Google zählen als Abwesenheit im Team.', 'Your entries show in your calendar (only you see them); "Out of office" entries from Google count as absences in the team.')) + '</span>' +
+      b('gcal-connect', L('Mit Google verbinden', 'Connect to Google'), 'primary') + '</div></div>' +
+      (S.gcalUrl ? '<div class="notice"><a href="' + esc(S.gcalUrl) + '" target="_blank" rel="noopener">' + esc(L('Hier bei Google freigeben →', 'Allow it at Google →')) + '</a></div>' : '');
+  }
+  const admin = S.me.admin ? '<details class="gc-setup"><summary>' + esc(L('Einrichtung (Admin)', 'Setup (admin)')) + '</summary>' +
+    '<p class="faint">' + L('Einmalig in der Google Cloud Console: Calendar API aktivieren, OAuth-Zustimmungsbildschirm <i>Intern</i>, OAuth-Client vom Typ <i>Webanwendung</i> mit dieser Weiterleitungs-URI: <code>', 'Once in the Google Cloud Console: enable the Calendar API, OAuth consent screen <i>Internal</i>, an OAuth client of type <i>Web application</i> with this redirect URI: <code>') +
+    esc(g.redirectUri || '') + '</code></p><form data-on-submit="gcal-setup" class="settings-grid">' +
+    field(L('Client-ID', 'Client ID'), '<input class="input" name="clientId" autocomplete="off" placeholder="…apps.googleusercontent.com">') +
+    field(L('Client-Secret', 'Client secret'), '<input class="input" name="clientSecret" type="password" autocomplete="off" placeholder="' + esc(g.configured ? L('gespeichert, leer lassen zum Behalten', 'stored, leave empty to keep') : '') + '">') +
+    '<div><button class="btn sm primary" type="submit">' + esc(L('Speichern', 'Save')) + '</button></div></form></details>' : '';
+  return main + admin;
+}
+A['gcal-connect'] = () => {
+  S.gcalBusy = true; render();
+  call('gcal.connect').then(r => {
+    S.gcalBusy = false;
+    S.gcalWait = true;
+    if (!window.open(r.url, '_blank', 'noopener')) S.gcalUrl = r.url;
+    render();
+  }).catch(err => { S.gcalBusy = false; render(); fail(err); });
+};
+A['gcal-sync'] = () => {
+  S.gcalBusy = true; render();
+  call('gcal.sync').then(r => { S.gcalBusy = false; S.gcal = r.status; calReload(); toast(L('Google Kalender abgeglichen: ', 'Google Calendar synced: ') + r.events + L(' Termine', ' entries')); })
+    .catch(err => { S.gcalBusy = false; call('gcal.status').then(g => { S.gcal = g; render(); }); fail(err); });
+};
+A['gcal-off'] = () => openModal({
+  title: L('Google Kalender trennen?', 'Disconnect Google Calendar?'),
+  body: '<p style="margin:0">' + esc(L('Deine Termine aus Google verschwinden hier, importierte Abwesenheiten werden entfernt. In Google ändert sich nichts.', 'Your Google entries disappear here and imported absences are removed. Nothing changes in Google.')) + '</p>',
+  submitLabel: L('Trennen', 'Disconnect'),
+  onSubmit: () => call('gcal.disconnect').then(g => { S.gcal = g; S.gcalUrl = ''; calReload(); toast(L('Getrennt', 'Disconnected')); }).catch(fail),
+});
+ON.submit['gcal-setup'] = form => call('gcal.setup', formValues(form)).then(g => { S.gcal = g; form.reset(); render(); toast(L('Gespeichert', 'Saved')); }).catch(fail);
+/** Back from Google in the other tab: the status is read again; a stale sync is renewed quietly. */
+window.addEventListener('focus', () => {
+  if (S.gcalWait) call('gcal.status', {}, { quiet: true }).then(g => { S.gcal = g; if (g.connected) { S.gcalWait = false; S.gcalUrl = ''; calReload(); } else render(); }).catch(() => {});
+});
+function gcalAuto() {
+  const g = S.gcal;
+  if (!g || !g.connected || S.gcalBusy || (g.lastSync && Date.now() - new Date(g.lastSync).getTime() < 30 * 60000)) return;
+  call('gcal.sync', {}, { quiet: true }).then(r => { S.gcal = r.status; calReload(); }).catch(() => {});
+}
 function settingsPage() {
   const me = S.me;
   const days = String(me.workDays || '').split(',');
@@ -1999,6 +2054,7 @@ function settingsPage() {
     '<div class="h2">' + icon('user') + 'Profil</div>' + profile +
     '<div class="h2">' + icon('plane') + 'Meine Abwesenheiten</div><div class="list-plain">' + absHtml + '</div>' +
     '<button class="btn sm outline" data-action="absence-new" style="margin-top:8px">' + icon('plus', 'sm') + 'Abwesenheit eintragen</button>' +
+    '<div class="h2">' + icon('calendar') + 'Google Kalender</div>' + gcalBox() +
     '<div class="h2">' + icon('sparkle') + 'Smarte Funktionen</div>' + ai + admin + '</div></div>';
 }
 ON.submit.profile = form => {

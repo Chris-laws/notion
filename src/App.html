@@ -1090,6 +1090,7 @@ function applyBoot(d) {
   S.appName = d.appName || S.appName;
   document.title = S.appName;
   $('#app').classList.remove('is-loading');
+  setTimeout(gcalAuto, 4000);
 }
 function boot() {
   S.collapsed = store.get('collapsed', {});

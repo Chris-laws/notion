@@ -18,8 +18,10 @@ const Calendar = {
       Object.assign({}, h, { affects: people.filter(u => Holidays.appliesTo(h, u)).map(u => u.email) }));
     const teamIds = p.teamId ? [p.teamId] : null;
     const jf = Jf.events(from, to, Access.context(me)).filter(e => !p.teamId || e.teamId === p.teamId);
+    // my own Google entries (nobody else sees them)
+    const google = Gcal.events_(me.email, from, to).filter(e => !p.teamId || people.some(u => u.email === me.email));
     return {
-      from: from, to: to, events: events.concat(jf), absences: absences, holidays: holidays,
+      from: from, to: to, events: events.concat(jf, google), absences: absences, holidays: holidays,
       warnings: Availability.warnings(from, to, teamIds, { email: me.email, admin: admin }), threshold: Availability.threshold(),
     };
   },
@@ -86,6 +88,7 @@ const Calendar = {
     return Db.tx(() => {
       let saved;
       if (p.id) {
+        data.source = ''; // an entry changed by hand is theirs from now on, the Google sync leaves it alone
         const a = Db.get('Absences', p.id);
         if (!a || (a.email !== me.email && !Auth.isAdmin(me))) throw new Error('Keine Berechtigung.');
         saved = Db.update('Absences', p.id, data);

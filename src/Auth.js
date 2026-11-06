@@ -114,6 +114,8 @@ const Config = {
     AI_USER_DAILY: '40',
     AI_DAILY_CHARS: '2000000',
     ALLOW_DEMO_DATA: '',
+    GOOGLE_CLIENT_ID: '',
+    GOOGLE_CLIENT_SECRET: '',
   },
 
   props_: null,
