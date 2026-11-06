@@ -209,3 +209,29 @@ describe('direct link: the app reads the shared calendar as its owner (no cloud 
     assert.equal(w.calls.length, n, 'no token to revoke');
   });
 });
+
+describe('direct link: Google refusals are told as they are', () => {
+  function refusing(code, body) {
+    const app = freshApp();
+    app.ctx.__GAS_OWNER__ = 'chris@firma.de';
+    app.as(ANNA).call('bootstrap');
+    const calls = app.fakeFetch(() => ({ code: code, body: body }));
+    return { app, calls };
+  }
+  test('API not active, scope missing and a real "not shared" each get their own message', () => {
+    const off = refusing(403, { error: { code: 403, message: 'Google Calendar API has not been used in project 123 before.', errors: [{ reason: 'accessNotConfigured' }] } });
+    assert.match(off.app.error('gcal.connectDirect'), /Calendar API ist im Cloud-Projekt/);
+    const scope = refusing(403, { error: { code: 403, message: 'Request had insufficient authentication scopes.', status: 'PERMISSION_DENIED', errors: [{ reason: 'insufficientPermissions' }] } });
+    assert.match(scope.app.error('gcal.connectDirect'), /Kalender lesen/);
+    const nope = refusing(404, { error: { code: 404, message: 'Not Found' } });
+    assert.match(nope.app.error('gcal.connectDirect'), /nicht freigegeben/);
+  });
+  test('the company cloud project is named as billing project when it is set (like for the AI)', () => {
+    const w = refusing(200, { items: [] });
+    w.app.ctx.PropertiesService.getScriptProperties().setProperty('VERTEX_PROJECT_ID', 'lidl-proj');
+    w.app.ctx.__exports.Config.reset();
+    w.app.call('gcal.connectDirect');
+    const g = w.calls.find(c => /googleapis/.test(c.url));
+    assert.equal(g.opts.headers['x-goog-user-project'], 'lidl-proj');
+  });
+});

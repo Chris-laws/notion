@@ -19,6 +19,17 @@ const Gcal = {
   redirectUri_() { return ScriptApp.getService().getUrl(); },
   cache_() { return CacheService.getScriptCache(); },
 
+  /** Google's reason of a refused call, in words the person can act on (the share hint only when the calendar is really not shared). */
+  refused_(r, own) {
+    const e = (r.json && r.json.error) || {};
+    const why = String((e.errors && e.errors[0] && e.errors[0].reason) || e.status || '');
+    const text = String(e.message || r.code);
+    if (/accessNotConfigured|SERVICE_DISABLED|has not been used/i.test(why + ' ' + text)) return 'Die Google Calendar API ist im Cloud-Projekt der App nicht aktiv. In der Cloud Console unter „APIs & Dienste“ die Google Calendar API aktivieren (' + text.slice(0, 160) + ').';
+    if (/insufficient|ACCESS_TOKEN_SCOPE|scope/i.test(why + ' ' + text)) return 'Der App fehlt die Berechtigung „Kalender lesen“. Im Apps-Script-Editor die Funktion setup ausführen und die Berechtigung bestätigen, danach eine neue Version bereitstellen.';
+    if (own || r.code === 429 || r.code >= 500) return 'Google Kalender nicht lesbar (' + r.code + ': ' + text.slice(0, 160) + ').';
+    return Gcal.shareHint_();
+  },
+
   /** What the settings page shows. Admins also get the redirect address to enter at Google. */
   status() {
     const me = Auth.currentUser();
@@ -49,9 +60,8 @@ const Gcal = {
   connectDirect() {
     const me = Auth.currentUser();
     const probe = Gcal.http_('get', Gcal.API + '/calendars/' + encodeURIComponent(me.email) + '/events?maxResults=1&singleEvents=true&timeMin=' +
-      encodeURIComponent(Util.today() + 'T00:00:00Z'), { token: ScriptApp.getOAuthToken() });
-    if (probe.code === 404 || probe.code === 403) throw new Error(Gcal.shareHint_());
-    if (probe.code !== 200) throw new Error('Google antwortet gerade nicht (' + probe.code + '). Bitte später noch einmal versuchen.');
+      encodeURIComponent(Util.today() + 'T00:00:00Z'), { token: ScriptApp.getOAuthToken(), project: true });
+    if (probe.code !== 200) throw new Error(Gcal.refused_(probe, me.email === Gcal.owner_()));
     const row = { email: me.email, refreshToken: '', scope: Gcal.SCOPE, connectedAt: new Date().toISOString(), lastSync: '', lastError: '', mode: 'direct' };
     Db.tx(() => { if (Db.get('GoogleLinks', me.email)) Db.update('GoogleLinks', me.email, row); else Db.insert('GoogleLinks', row); });
     try { Gcal.sync_(me.email); } catch (e) { /* the settings show the error */ }
@@ -121,6 +131,8 @@ const Gcal = {
   http_(method, url, o) {
     const opts = { method: method, muteHttpExceptions: true };
     if (o && o.token) opts.headers = { Authorization: 'Bearer ' + o.token };
+    // the app's own token bills the cloud project of the script; like for the AI, the project of the company is named (when set)
+    if (o && o.project && Config.get('VERTEX_PROJECT_ID')) opts.headers['x-goog-user-project'] = Config.get('VERTEX_PROJECT_ID');
     if (o && o.payload) opts.payload = o.payload;
     const res = UrlFetchApp.fetch(url, opts);
     let json = {};
@@ -163,23 +175,21 @@ const Gcal = {
     for (let i = 0; i < 6; i++) {
       const q = 'singleEvents=true&orderBy=startTime&maxResults=250&timeMin=' + encodeURIComponent(Shared.addDays(from, -1) + 'T00:00:00Z') +
         '&timeMax=' + encodeURIComponent(Shared.addDays(to, 1) + 'T00:00:00Z') + (page ? '&pageToken=' + encodeURIComponent(page) : '');
-      const r = Gcal.http_('get', Gcal.API + '/calendars/' + cal + '/events?' + q, { token: token });
+      const r = Gcal.http_('get', Gcal.API + '/calendars/' + cal + '/events?' + q, { token: token, project: cal !== 'primary' });
       if (r.code === 401) Gcal.cache_().remove('gcal_at_' + email);
-      if (r.code === 404 && cal !== 'primary') {
-        const msg = Gcal.shareHint_();
-        Gcal.note_(email, msg);
-        throw new Error(msg);
-      }
-      if (r.code !== 200) {
-        const msg = 'Google Kalender nicht lesbar (' + ((r.json.error && (r.json.error.message || r.json.error)) || r.code) + ').';
-        Gcal.note_(email, msg);
-        throw new Error(msg);
-      }
+      if (r.code !== 200) Gcal.fail_(email, r, cal !== 'primary');
       (r.json.items || []).forEach(it => { const e = Gcal.item_(it, email); if (e) out.push(e); });
       page = r.json.nextPageToken || '';
       if (!page) break;
     }
     return out;
+  },
+
+  /** Notes and throws the reason of a refused read. */
+  fail_(email, r, direct) {
+    const msg = direct ? Gcal.refused_(r, email === Gcal.owner_()) : 'Google Kalender nicht lesbar (' + ((r.json.error && (r.json.error.message || r.json.error)) || r.code) + ').';
+    Gcal.note_(email, msg);
+    throw new Error(msg);
   },
 
   /** Start day, end day and clock times of a Google entry (all-day entries end the day before Google's end date). */
