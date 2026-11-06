@@ -23,8 +23,14 @@ const Gdrive = {
     const opts = { method: method, muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } };
     if (body !== undefined) { opts.payload = body; opts.contentType = contentType || 'application/json'; }
     const res = UrlFetchApp.fetch(url, opts);
+    Gdrive.check_(method, url, res);
+    return res.getContentText();
+  },
+  /** Turns an error answer of Drive into the message the person gets (nothing happens for a good answer). */
+  check_(method, url, res) {
     const code = res.getResponseCode();
-    if (code >= 300) console.error('Drive ' + method + ' ' + url.split('?')[0] + ' -> ' + code + ': ' + res.getContentText().slice(0, 500));
+    if (code < 300) return;
+    console.error('Drive ' + method + ' ' + url.split('?')[0] + ' -> ' + code + ': ' + res.getContentText().slice(0, 500));
     // 403 also means "too many requests" or "storage full": that is no missing permission
     if ((code === 403 || code === 429) && /rateLimit|userRateLimit|quotaExceeded|storageQuota/i.test(res.getContentText())) {
       throw new Error('Google Drive ist gerade ausgelastet oder der Speicher ist voll. Bitte gleich noch einmal versuchen.');
@@ -33,8 +39,7 @@ const Gdrive = {
       throw new Error('Die App darf noch nicht in Google Drive speichern. Bitte im Apps-Script-Editor einmal „setup“ ausführen und die Berechtigung zulassen.' + Gdrive.why_(code, res.getContentText()));
     }
     if (code === 404) throw new Error('Datei in Google Drive nicht gefunden.');
-    if (code >= 300) throw new Error('Google Drive antwortet mit ' + code + '.' + Gdrive.why_(code, res.getContentText()));
-    return res.getContentText();
+    throw new Error('Google Drive antwortet mit ' + code + '.' + Gdrive.why_(code, res.getContentText()));
   },
   /** The reason Google gave, short (e.g. "Drive API has not been used in project …"), for the message and the log. */
   why_(code, text) {
@@ -122,13 +127,24 @@ const Gdrive = {
     if (!svc) throw new Error('Für Bilder muss in Apps Script der Dienst „Drive API“ hinzugefügt sein (Dienste → Drive API).');
     return Gdrive.run_(() => svc.create({ name: name, parents: [parentId], mimeType: blob.getContentType() }, blob).id);
   },
-  /** The bytes of a file (images). */
+  /**
+   * The bytes of a file (images, attachments). The REST call hands them over untouched; the Drive service
+   * decodes binary content as text, which breaks images and PDFs, so it is only the way out when the call fails.
+   */
   readBytes(id) {
-    const svc = Gdrive.svc_();
-    if (!svc) throw new Error('Für Bilder muss in Apps Script der Dienst „Drive API“ hinzugefügt sein (Dienste → Drive API).');
-    const r = Gdrive.run_(() => svc.get(id, { alt: 'media' }));
-    if (r && typeof r.getBytes === 'function') return r.getBytes();
-    return typeof r === 'string' ? Utilities.newBlob(r).getBytes() : r;
+    try {
+      const url = Gdrive.API + '/' + encodeURIComponent(id) + '?alt=media';
+      const res = UrlFetchApp.fetch(url, { method: 'get', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } });
+      Gdrive.check_('get', url, res);
+      return res.getContent();
+    } catch (first) {
+      const svc = Gdrive.svc_();
+      if (!svc) throw first;
+      const r = Gdrive.run_(() => svc.get(id, { alt: 'media' }));
+      if (r && typeof r.getBytes === 'function') return r.getBytes();
+      if (typeof r === 'string') return Utilities.newBlob(r).getBytes();
+      throw first;
+    }
   },
   rename(id, name) { Gdrive.patch_(id, { name: name }); },
   /** To the Drive trash (restorable there for 30 days), never deleted for good. */

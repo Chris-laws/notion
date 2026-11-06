@@ -28,7 +28,7 @@ const runtime = `
   globalThis.__GAS_QUIET__ = true;
   // the built-in Drive service, as in the real project (images need it)
   globalThis.Drive = __driveAdvanced();
-  globalThis.__FILES__ = ${JSON.stringify({ AssistantUi: ctx.include('AssistantUi'), JfTasksUi: ctx.include('JfTasksUi'), ImagesUi: ctx.include('ImagesUi') }).replace(/<\/script/gi, '<\\/script')};
+  globalThis.__FILES__ = ${JSON.stringify({ AssistantUi: ctx.include('AssistantUi'), ImagesUi: ctx.include('ImagesUi') }).replace(/<\/script/gi, '<\\/script')};
   ${server}
   setup();
   PropertiesService.getScriptProperties().setProperty('ALLOW_DEMO_DATA', 'true');

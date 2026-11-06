@@ -118,6 +118,18 @@ describe('team jour fixe: topics', () => {
     assert.equal(row.people.closed, true);
     assert.equal(row.people.tasks, 0);
   });
+  test('the table counts the tasks of a meeting and how many are done (ids stay on the server)', () => {
+    const { app, edit, team, s } = world();
+    const saved = edit(ME, '2030-01-07', m => { m.topics.push({ id: 't1', title: 'A', items: [] }, { id: 't2', title: 'B', items: [] }); });
+    const mk = (topicId, title) => app.call('jf.makeTasks', { teamId: team.id, docId: saved.id, topicId: topicId, requestId: 'r' + topicId, task: { title: title, assignees: [ME] }, items: [] }).tasks[0];
+    const a = mk('t1', 'Erste');
+    mk('t2', 'Zweite');
+    app.call('tasks.save', { id: a.id, status: 'done' });
+    const row = app.call('jf.list', {}).minutes.find(x => x.seriesId === s.id);
+    assert.equal(row.people.tasks, 2);
+    assert.equal(row.tasksDone, 1);
+    assert.equal(row.people.taskIds, undefined);
+  });
 });
 
 describe('team jour fixe: files', () => {
@@ -130,6 +142,21 @@ describe('team jour fixe: files', () => {
     assert.equal(app.as(ME).call('files.get', { id: r.id }).data, pdf);
     assert.ok(app.as(OUT).error('files.get', { id: r.id }));
     assert.ok(app.as(OUT).error('files.upload', { kind: 'project', projectId: 'team:' + team.id, name: 'x.png', mime: 'image/png', data: PNG }));
+  });
+  test('binary files come back byte for byte (the Drive service alone would decode them as text)', () => {
+    const { app, team } = world();
+    const bytes = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.from([0xff, 0xfe, 0x80, 0x00, 0xc3, 0x28, 0xe2, 0x82, 0xac, 0x89, 0x50, 0x4e, 0x47])]).toString('base64');
+    const r = app.as(ANNA).call('files.upload', { kind: 'project', projectId: 'team:' + team.id, name: 'echt.pdf', mime: 'application/pdf', data: bytes, attach: true });
+    assert.equal(app.as(ME).call('files.get', { id: r.id }).data, bytes);
+  });
+  test('a failed REST read falls back to the Drive service; a missing file is reported', () => {
+    const { app, team } = world();
+    const r = app.as(ANNA).call('files.upload', { kind: 'project', projectId: 'team:' + team.id, name: 'a.csv', mime: 'text/csv', data: b64('a;b\n'), attach: true });
+    app.ctx.__DRIVE_DENIED__ = 'network down';
+    assert.equal(app.as(ME).call('files.get', { id: r.id }).data, b64('a;b\n'));
+    app.ctx.__DRIVE_DENIED__ = false;
+    app.x.Db.update('Files', r.id, { driveId: 'f_nope' });
+    assert.match(app.as(ME).error('files.get', { id: r.id }), /nicht gefunden/);
   });
   test('a document needs the attach flag and content that fits its type; HTML and scripts never get in', () => {
     const { app, team } = world();

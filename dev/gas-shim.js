@@ -229,7 +229,7 @@
   };
   root.ScriptApp = { getOAuthToken: () => 'test-token' };
   // Drive REST API (v3) on top of the in-memory Drive: what Drive.js calls with UrlFetchApp
-  const reply = (code, body) => ({ getResponseCode: () => code, getContentText: () => (typeof body === 'string' ? body : JSON.stringify(body)) });
+  const reply = (code, body, bytes) => ({ getResponseCode: () => code, getContentText: () => (typeof body === 'string' ? body : JSON.stringify(body)), getContent: () => bytes || [] });
   const listOf = it => { const a = []; while (it.hasNext()) a.push(it.next()); return a; };
   // the built-in Drive service (Drive API v3) on top of the same in-memory Drive
   root.__driveAdvanced = () => ({
@@ -242,14 +242,14 @@
       },
       create: (meta, blob) => {
         const parent = meta.parents && drive[meta.parents[0]];
-        const image = blob && /^image\//.test(blob.getContentType ? blob.getContentType() : '');
+        const image = blob && !/^text\//.test(blob.getContentType ? blob.getContentType() : 'text/plain');
         if (blob) return { id: parent.createFile(meta.name, image ? blob.getBytes() : blob.getDataAsString(), meta.mimeType).getId() };
         return { id: (parent ? parent.createFolder(meta.name) : root.DriveApp.createFolder(meta.name)).getId() };
       },
       get: (id, o) => {
         const item = drive[id];
         if (!item) throw new Error('API call to drive.files.get failed with error: File not found: ' + id);
-        if (o && o.alt === 'media') { const b = item.getBlob(); return b.getBytes ? b : b.getDataAsString(); }
+        if (o && o.alt === 'media') { const b = item.getBlob(); return b.getBytes ? Array.prototype.map.call(b.getBytes(), x => String.fromCharCode((x + 256) % 256)).join('') : b.getDataAsString(); }
         return { id: id, trashed: item.isTrashed() };
       },
       update: (meta, id, blob) => {
@@ -291,7 +291,12 @@
       const f = meta.parents ? drive[meta.parents[0]].createFolder(meta.name) : root.DriveApp.createFolder(meta.name);
       return reply(200, { id: f.getId() });
     }
-    if (method === 'get' && u.searchParams.get('alt') === 'media') { meter('driveRead'); return reply(200, item.getBlob().getDataAsString()); }
+    if (method === 'get' && u.searchParams.get('alt') === 'media') {
+      meter('driveRead');
+      const blob = item.getBlob();
+      // images and documents come back as bytes (untouched), text files as text
+      return blob.getBytes ? reply(200, '', blob.getBytes()) : reply(200, blob.getDataAsString());
+    }
     if (method === 'get') { meter('driveRead'); return reply(200, { id: id, trashed: item.isTrashed() }); }
     if (method === 'patch' && /uploadType=media/.test(url)) { item.setContent(opts.payload); return reply(200, { id: id }); }
     if (method === 'patch') {

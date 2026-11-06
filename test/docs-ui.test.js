@@ -35,14 +35,14 @@ const submit = () => $('#modal-root form').dispatchEvent(new w.Event('submit', {
 async function until(cond, ms) { const end = Date.now() + (ms || 4000); while (!cond() && Date.now() < end) await wait(25); }
 const tab = async () => {
   w.eval(`S.doc = null; S.protoEdit = null; S.teamTab = 'jf'; go('team', ${JSON.stringify(tid)})`);
-  await until(() => $('.jf-table'));
+  await until(() => $('.jfo-tbl'));
 };
 /** Opens the saved minutes (past meeting) in the read-only view. */
 async function openSaved() {
   await tab();
   const m = w.eval(`jfData().minutes.find(x => x.projectId === ${JSON.stringify(place)})`);
   await w.eval(`jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
-  await until(() => $('.doc-view .tc'));
+  await until(() => $('.jfs .tc'));
   return m;
 }
 async function openEditor() {
@@ -52,48 +52,82 @@ async function openEditor() {
 }
 
 describe('jour fixe of a team: the overview', () => {
-  test('one table: next meeting on top with week chip and status; no jour fixe tab in the project any more', async () => {
+  test('the overview: header, filters, KW chip, date, topics, tasks, last change; no jour fixe tab in the project any more', async () => {
     await tab();
     assert.equal($$('.pj-tabs [data-v="jf"]').length, 0, 'no tab in the project');
     assert.ok($('.tabs [data-action="team-tab"][data-v="jf"]'), 'the tab is in the team');
-    const heads = $$('.jf-table th').map(x => x.textContent.trim());
-    assert.deepEqual(heads.slice(0, 5), ['Jour Fixe', 'Termin', 'Status', 'Aufgaben', 'Letzte Änderung']);
-    const next = $('.jf-tr.next');
-    assert.ok(next, 'the next meeting');
+    assert.match($('.jfo-head h2').textContent, /Jour Fixe – Übersicht/);
+    assert.match($('.jfo-head p').textContent, /Single Source of Truth/);
+    assert.ok($('.jfo-filters select[data-on-change="jf-year"]'), 'year');
+    assert.ok($('.jfo-filters input[type="search"]'), 'search');
+    assert.ok($('.jfo-filters select[data-on-change="jf-filter"]'), 'filter');
+    const heads = $$('.jfo-th [role="columnheader"]').map(x => x.textContent.trim());
+    assert.deepEqual(heads.slice(0, 5), ['KW', 'Datum', 'Themen', 'Aufgaben', 'Letzte Änderung']);
+    const next = $('.jfo-row.next');
+    assert.ok(next, 'the next meeting is marked');
     assert.match(next.textContent, /Team-JF/);
-    assert.match(next.querySelector('.chip.kw').textContent, /^KW \d+$/);
-    assert.match(next.querySelector('.chip[class*="st-"]').textContent, /Geplant|Protokoll fehlt|In Bearbeitung/);
-    assert.equal(next.querySelectorAll('.jf-c-p .avatar').length >= 1, true, 'people invited');
+    assert.match(next.querySelector('.jfo-kw b').textContent, /^KW \d+$/);
+    assert.match(next.querySelector('.jfo-kw small').textContent, /^\/ \d{4}$/);
+    assert.match(next.querySelector('.jfo-kw').title, /Geplant|Protokoll fehlt|In Bearbeitung/);
+    assert.match(next.children[1].textContent, /^[A-Z][a-z], \d\d\. /, 'day like "Do, 05. Nov."');
+    assert.equal(next.querySelectorAll('.jfo-n').length, 2, 'tasks made and done');
     assert.ok($('[data-action="jf-new"]'), '+ Neuer Jour Fixe');
   });
-  test('saved minutes: "In Bearbeitung", the person who changed last, tasks; a closed meeting says so', async () => {
-    const row = $$('.jf-tr').find(r => !r.classList.contains('next') && r.querySelector('[data-doc]'));
+  test('saved minutes: the status on the week chip, the last change as "Heute, 14:29", tasks made and done', async () => {
+    const row = $$('.jfo-row').find(r => !r.classList.contains('next') && r.querySelector('[data-doc]'));
     assert.ok(row, 'a row with saved minutes');
-    assert.match(row.querySelector('[class*="st-"]').textContent, /In Bearbeitung/);
-    assert.ok(row.querySelector('.jf-c-c .avatar'), 'who changed last');
+    assert.match(row.querySelector('.jfo-kw').title, /In Bearbeitung/);
+    assert.match(row.children[4].textContent, /^(Heute|Gestern), \d\d:\d\d$|^\d\d\. \S+, \d\d:\d\d$/);
     assert.equal(w.eval(`jfStatus({ people: { closed: true } }, false).label`), 'Abgeschlossen');
     assert.equal(w.eval(`jfStatus(null, false).label`), 'Protokoll fehlt');
+    assert.equal(w.eval(`jfStamp(new Date().toISOString()).slice(0, 5)`), 'Heute');
+    assert.equal(w.eval(`jfWeekYear('2027-01-01')`), '2026', 'calendar week 53 of 2026');
   });
-  test('the whole row opens the meeting through one button; Meet sits outside of it', async () => {
+  test('the whole row opens the meeting through one button; Meet is a chip of the sheet', async () => {
     await w.eval(`(async () => { const s = jfData().series.find(x => x.projectId === ${JSON.stringify(place)}); await call('jf.saveSeries', Object.assign({}, s, { meetLink: 'https://meet.google.com/abc-defg-hij' })); S.jf = await call('jf.list', {}); render(); })()`);
-    await until(() => $('.jf-tr.next .jf-meet'));
-    const a = $('.jf-tr.next .jf-meet');
-    assert.equal(a.getAttribute('href'), 'https://meet.google.com/abc-defg-hij');
-    assert.match(a.getAttribute('rel'), /noopener/);
-    assert.equal(a.closest('.jf-hit'), null);
-    const hit = $('.jf-tr.next .jf-hit');
+    const hit = $('.jfo-row.next .jf-hit');
     assert.equal(hit.tagName, 'BUTTON');
     assert.match(hit.getAttribute('aria-label'), /^Protokoll (vorbereiten|öffnen): Team-JF, /);
+    click(hit);
+    await until(() => $('.jfs .jfs-chips a[href^="https://meet.google.com/"]'));
+    assert.match($('.jfs .jfs-chips a').getAttribute('rel'), /noopener/);
+    assert.match($('.jfs-chips').textContent, /Teilnehmende/);
+    assert.match($('.jfs-chips').textContent, /\d\d:\d\d – \d\d:\d\d/, 'date and time');
+    click($('[data-action="jf-back"]'));
+    assert.ok($('.jfo-tbl'), 'back at the overview (nothing was changed)');
   });
-  test('15 entries per page with a pager (200+ meetings stay fast)', () => {
-    const many = Array.from({ length: 230 }, (_, i) => ({ id: 'dc_' + i, projectId: place, seriesId: 'jf_x', date: w.eval(`Shared.addDays('2020-01-06', ${i * 7})`), title: 'Alt', people: { present: [], absent: [] } }));
-    const html = w.eval(`(() => { const keep = S.jf; S.jf = { series: [], minutes: ${JSON.stringify(many)} }; S.jfPage = 0; const h = jfTeamTab(team(${JSON.stringify(tid)})); S.jf = keep; return h; })()`);
+  test('9 entries per page with a pager and "1 – 9 von n" (200+ meetings stay fast)', () => {
+    const many = Array.from({ length: 230 }, (_, i) => ({ id: 'dc_' + i, projectId: place, seriesId: 'jf_x', date: w.eval(`Shared.addDays('2020-01-06', ${(i % 52) * 7})`), title: 'Alt', people: { present: [], absent: [] } }));
+    const html = w.eval(`(() => { const keep = S.jf; S.jf = { series: [], minutes: ${JSON.stringify(many)} }; S.jfPage = 0; S.jfYear = undefined; const h = jfTeamTab(team(${JSON.stringify(tid)})); S.jf = keep; return h; })()`);
     const d = w.document.createElement('div');
     d.innerHTML = html;
-    assert.equal(d.querySelectorAll('.jf-tr').length, 15);
-    assert.match(d.querySelector('.jf-pager').textContent, /Seite 1 \/ 16/);
+    assert.equal(d.querySelectorAll('.jfo-row').length, 9);
+    assert.match(d.querySelector('.jfo-pager').textContent, /1 – 9 von 230/);
+    assert.equal(d.querySelectorAll('.jfo-pager .jfo-pg').length, 7, 'previous, five pages, next');
     assert.ok(d.querySelector('[data-action="jf-page"][data-v="1"]'));
     assert.ok(d.querySelector('[data-action="jf-page"][disabled]'), 'no page before the first');
+    assert.equal(d.querySelector('.jfo-pg.on').textContent, '1');
+  });
+  test('the filters narrow the list and draw only the list (the search field keeps its focus); KW sorts', async () => {
+    await tab();
+    const n = $$('.jfo-row').length;
+    assert.ok(n >= 2);
+    const box = $('.jfo-filters input[type="search"]');
+    input(box, 'zzz-nichts');
+    assert.equal($$('.jfo-row').length, 0);
+    assert.match($('#jf-list').textContent, /Keine Einträge/);
+    assert.equal($('.jfo-filters input[type="search"]'), box, 'the same field');
+    input(box, '');
+    assert.equal($$('.jfo-row').length, n);
+    change($('select[data-on-change="jf-filter"]'), 'done');
+    assert.equal($$('.jfo-row').length, 0, 'no closed meeting');
+    change($('select[data-on-change="jf-filter"]'), 'all');
+    const weeks = () => $$('.jfo-row .jfo-kw b').map(x => x.textContent);
+    const first = weeks();
+    click($('[data-action="jf-sort"]'));
+    assert.notDeepEqual(weeks(), first, 'the other way round');
+    click($('[data-action="jf-sort"]'));
+    assert.deepEqual(weeks(), first);
   });
   test('calendars name the team of a jour fixe', () => {
     assert.equal(w.eval(`evLabel({ type: 'jf', title: 'Team-JF', projectId: ${JSON.stringify(place)} })`), 'Team-JF · ' + w.eval(`team(${JSON.stringify(tid)}).name`));
@@ -132,13 +166,15 @@ describe('the mask: topic cards', () => {
     const other = w.eval('S.users.find(u => u.email !== S.me.email).email');
     w.eval(`protoSet('topics.${k}.owners', [${JSON.stringify(other)}]); protoRender()`);
     click($('[data-action="tc-project"][data-t="' + k + '"]'));
-    await until(() => $('#modal-root select[name="projectId"]'));
-    assert.ok([...$('#modal-root select[name="projectId"]').options].some(o => o.value === ''), 'an empty choice');
-    change($('#modal-root select[name="projectId"]'), pid);
+    await until(() => $('#modal-root .ptree'));
+    assert.ok($('#modal-root input[name="projectId"][value=""]'), 'an empty choice');
+    assert.equal($$('#modal-root .ptr-team').length, $$('#modal-root .ptr-team summary svg').length, 'every team has its small arrow');
+    assert.ok($('#modal-root .ptr-team[open] input[name="projectId"][value="' + pid + '"]'), 'the team of the jour fixe is open');
+    $('#modal-root input[name="projectId"][value="' + pid + '"]').checked = true;
     submit();
     await until(() => w.eval(`S.protoEdit.model.topics[${k}].projectId`) === pid);
     await until(() => $$('.tc').pop().querySelector('.tc-proj'));
-    assert.ok($$('.tc').pop().querySelector('.tc-own'), 'person with name');
+    assert.ok($$('.tc').pop().querySelector('.tc-own .avatar'), 'person as icon');
     assert.equal(w.eval('S.tasks.length'), before);
   });
   test('a link is added and removed; a link that is no address is refused', async () => {
@@ -153,7 +189,7 @@ describe('the mask: topic cards', () => {
     input($('#modal-root input[name="title"]'), 'Doku');
     submit();
     await until(() => w.eval(`S.protoEdit.model.topics[${k}].links.length`) === 1);
-    await until(() => $$('.tc').pop().querySelector('.tc-col .lk-a'));
+    await until(() => $$('.tc').pop().querySelector('.tc-col .tc-lnk'));
     click($$('.tc').pop().querySelector('[data-action="tc-rm"][data-k="link"]'));
     await until(() => w.eval(`S.protoEdit.model.topics[${k}].links.length`) === 0);
   });
@@ -182,7 +218,7 @@ describe('the mask: topic cards', () => {
   test('Übernehmen: the card shows read only with its chips; the results tab lists decisions and tasks', async () => {
     const k = w.eval('S.protoEdit.model.topics.length - 1');
     click($('[data-action="proto-save"]'));
-    await until(() => $('.dv-save.ok') && $('.doc-view .tc') && !$('.proto-edit'));
+    await until(() => $('.dv-save.ok') && $('.jfs .tc') && !$('.proto-edit'));
     const card = $$('.tc').pop();
     assert.match(card.textContent, /Budget 2031/);
     assert.ok(card.querySelector('.chip.kind.k-A'), 'type chip');
@@ -196,13 +232,15 @@ describe('the mask: topic cards', () => {
     assert.ok(k >= 1);
     click($('[data-action="jf-view"][data-v="results"]'));
     await until(() => $('.pr-sec'));
-    assert.match($('.doc-view').textContent, /Beschluss: wir machen weiter/, 'the decision');
-    assert.match($('.doc-view').textContent, /Budget 2031/, 'the task topic');
+    assert.match($('.jfs').textContent, /Beschluss: wir machen weiter/, 'the decision');
+    assert.match($('.jfs').textContent, /Budget 2031/, 'the task topic');
     click($('[data-action="jf-view"][data-v="topics"]'));
   });
   test('the version list shows who changed what; any version opens read only', async () => {
-    await until(() => $('[data-action="doc-versions"]'));
-    click($('[data-action="doc-versions"]'));
+    await until(() => $('[data-action="jf-more"]'));
+    click($('[data-action="jf-more"]'));
+    await until(() => $('#modal-root [data-action="jf-more-versions"]'));
+    click($('#modal-root [data-action="jf-more-versions"]'));
     await until(() => $('#modal-root .ver-list .li'));
     assert.match($('#modal-root .ver-list .li').textContent, /aktuell/);
     click($$('#modal-root [data-action="doc-version-view"]').pop());
@@ -217,14 +255,14 @@ describe('closing a meeting and anchoring', () => {
     await openSaved();
     assert.ok($('[data-action="proto-edit"]'));
     click($('[data-action="proto-close"]'));
-    await until(() => $('.dv-save.ok') && /Abgeschlossen/.test($('.dv-t h2').textContent));
+    await until(() => $('.dv-save.ok') && /Abgeschlossen/.test($('.jfs-title .chip').textContent));
     assert.equal($('[data-action="proto-edit"]'), null, 'no editing while closed');
     assert.match($('[data-action="proto-close"]').textContent, /Wieder öffnen/);
     const m = w.eval(`jfData().minutes.find(x => x.id === S.doc.id)`);
     assert.equal(m.people.closed, true, 'the table knows');
     click($('[data-action="proto-close"]'));
     await until(() => $('.dv-save.ok') && $('[data-action="proto-edit"]'));
-    assert.match($('.dv-t h2').textContent, /In Bearbeitung/);
+    assert.match($('.jfs-title .chip').textContent, /In Bearbeitung/);
   });
   test('a topic can be anchored in the card; the minutes show the anchor', async () => {
     await openEditor();
@@ -232,23 +270,25 @@ describe('closing a meeting and anchoring', () => {
     await until(() => $('.tc [data-action="proto-pin"][aria-pressed="true"]'));
     assert.equal(w.eval('S.protoEdit.model.topics[0].pinned'), true);
     click($('[data-action="proto-save"]'));
-    await until(() => $('.dv-save.ok') && $('.doc-view .chip.pin'));
-    assert.match($('.doc-view .chip.pin').textContent, /Fixiert/);
+    await until(() => $('.dv-save.ok') && $('.jfs .chip.pin'));
+    assert.match($('.jfs .chip.pin').textContent, /Fixiert/);
   });
 });
 
 describe('tasks from topics', () => {
   /** Opens the form of the next meeting with a topic of three lines and two responsible people. */
-  async function formWithTopic() {
+  async function formWithTopic(id, title, lines) {
+    id = id || 'tq'; title = title || 'Go-Live';
     await tab();
-    click($('.jf-tr.next .jf-hit'));
+    click($('.jfo-row.next .jf-hit'));
     await until(() => $('.proto-edit') || $('[data-action="proto-edit"]'));
     if (!$('.proto-edit')) { click($('[data-action="proto-edit"]')); await until(() => $('.proto-edit')); }
-    w.eval(`(() => { const m = S.protoEdit.model; m.topics.push({ id: 'tq', title: 'Go-Live', kind: 'A', owners: [S.me.email], items: [
-      { id: 'q1', type: 'A', text: 'Server buchen', owner: S.users[1].email, due: '2030-02-01', done: false, taskId: '' },
+    const items = lines === undefined ? [
+      { id: 'q1', type: 'A', text: 'Server buchen', owner: w.eval('S.users[1].email'), due: '2030-02-01', done: false, taskId: '' },
       { id: 'q2', type: 'I', text: 'Budget ist frei', owner: '', due: '', done: false, taskId: '' },
-      { id: 'q3', type: 'A', text: 'Doku schreiben', owner: '', due: '2030-02-03', done: false, taskId: '' }] }); S.tcOpen = { tq: true }; protoRender(); })()`);
-    await until(() => $('[data-action="pe-task"][data-t]:not([data-i])'));
+      { id: 'q3', type: 'A', text: 'Doku schreiben', owner: '', due: '2030-02-03', done: false, taskId: '' }] : lines;
+    w.eval(`(() => { const m = S.protoEdit.model; m.topics.push({ id: ${JSON.stringify(id)}, title: ${JSON.stringify(title)}, kind: 'A', owners: [S.me.email], items: ${JSON.stringify(items)} }); S.tcOpen = { ${id}: true }; protoRender(); })()`);
+    await until(() => $('.tc.open [data-action="pe-task"][data-t]:not([data-i])'));
     return w.eval('S.protoEdit.model.topics.length - 1');
   }
   test('"In Aufgabe übernehmen" without project: the task goes to the team and the people; the topic keeps them as responsible', async () => {
@@ -257,7 +297,8 @@ describe('tasks from topics', () => {
     click($('.tc [data-action="pe-task"][data-t="' + k + '"]:not([data-i])'));
     await until(() => $$('#modal-root input[name="pick"]').length === 3);
     assert.equal(w.eval('S.tasks.length'), before, 'nothing made yet');
-    assert.equal($('#modal-root select[name="projectId"]').value, '', 'no project chosen');
+    assert.equal($('#modal-root input[name="target"]:checked').value, 'person', 'no project chosen: the people');
+    assert.ok($('#modal-root input[name="target"][value="team"]') && $('#modal-root input[name="target"][value="project"]'), 'team, project, person');
     assert.ok($('#modal-root .pp-field[data-pp="assignees"]'), 'several people can be responsible');
     const other = w.eval('S.users.find(u => u.email !== S.me.email).email');
     w.eval(`ppSet($('#modal-root .pp-field[data-pp="assignees"]'), [S.me.email, ${JSON.stringify(other)}])`);
@@ -293,6 +334,117 @@ describe('tasks from topics', () => {
     await until(() => $$('.tc .tc-task').length < before);
     assert.equal($('.tc-task[data-id="' + id + '"]'), null);
   });
+  test('"Team": all members get the task and become responsible for the topic; no project, no people field', async () => {
+    const k = await formWithTopic('tt', 'Für alle', []);
+    click($('.tc.open [data-action="pe-task"][data-t="' + k + '"]:not([data-i])'));
+    await until(() => $('#modal-root input[name="target"]'));
+    const r = $('#modal-root input[name="target"][value="team"]');
+    r.checked = true;
+    change(r, 'team');
+    assert.equal($('#modal-root .jm-sec[data-for="project person"]').hidden, true, 'the people field is off');
+    assert.equal($('#modal-root .jm-sec[data-for="project"]').hidden, true);
+    assert.equal($('#modal-root .jm-sec[data-for="team"]').hidden, false);
+    assert.match($('#modal-root .jm-sec[data-for="team"]').textContent, /Alle \d+ Mitglieder/);
+    submit();
+    await until(() => w.eval("S.tasks.some(t => t.title === 'Für alle')"));
+    const t = JSON.parse(w.eval("JSON.stringify(S.tasks.find(t => t.title === 'Für alle'))"));
+    const members = JSON.parse(w.eval(`JSON.stringify(teamMembers(team(${JSON.stringify(tid)})))`));
+    assert.deepEqual(t.assignees.slice().sort(), members.slice().sort());
+    assert.deepEqual(t.teams, [tid]);
+    assert.equal(t.projectId, '');
+    await until(() => w.eval(`S.protoEdit.model.topics[${k}].taskId`) === t.id);
+    assert.deepEqual(JSON.parse(w.eval(`JSON.stringify(S.protoEdit.model.topics[${k}].owners)`)).sort(), members.slice().sort(), 'the team is responsible');
+  });
+  test('"Projekt": a project must be chosen; the task lands in it and the topic notes the project', async () => {
+    const k = await formWithTopic('tp', 'Im Projekt', []);
+    click($('.tc.open [data-action="pe-task"][data-t="' + k + '"]:not([data-i])'));
+    await until(() => $('#modal-root input[name="target"]'));
+    const r = $('#modal-root input[name="target"][value="project"]');
+    r.checked = true;
+    change(r, 'project');
+    assert.equal($('#modal-root .jm-sec[data-for="project"]').hidden, false);
+    assert.ok($('#modal-root .ptr-team summary svg'), 'teams with a small arrow');
+    submit();
+    await wait(100);
+    assert.equal(w.eval("S.tasks.some(t => t.title === 'Im Projekt')"), false, 'no project chosen: nothing made');
+    assert.ok($('#modal-root form'), 'the form stays');
+    $('#modal-root input[name="projectId"][value="' + pid + '"]').checked = true;
+    submit();
+    await until(() => w.eval("S.tasks.some(t => t.title === 'Im Projekt')"));
+    assert.equal(w.eval("S.tasks.find(t => t.title === 'Im Projekt').projectId"), pid);
+    await until(() => w.eval(`S.protoEdit.model.topics[${k}].projectId`) === pid);
+    await until(() => w.eval(`S.protoEdit.model.topics[${k}].owners.length`) >= 1);
+  });
+  test('a task from the read-only sheet: the same form, the responsibility is added to the saved topic', async () => {
+    click($('[data-action="proto-save"]'));
+    await until(() => $('.jfs .dv-save.ok') && !$('.proto-edit'));
+    const before = w.eval('S.tasks.length');
+    const id = w.eval(`Shared.protoFromText(S.doc.content).topics.find(t => t.title === 'Für alle').id`);
+    assert.equal(w.eval(`Shared.protoFromText(S.doc.content).topics.find(t => t.id === ${JSON.stringify(id)}).owners.length`) >= 1, true);
+    w.eval(`S.tcOpen = { ${id}: true }; render({ peek: false })`);
+    assert.equal($('.tc.open [data-action="proto-topic-task"]'), null, 'it has its task already: the button opens the task');
+    assert.ok($('.tc.open [data-action="open-task"]'));
+    assert.equal(w.eval('S.tasks.length'), before);
+  });
+});
+
+describe('files of a topic: open, upload quietly', () => {
+  test('an attachment opens a PDF in a tab the click opened itself, and saves other types', async () => {
+    const calls = [];
+    await openEditor();
+    const k = w.eval('S.protoEdit.model.topics.length - 1');
+    await w.eval("loadChunk('Images')");
+    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0xff, 0xfe, 0x80]);
+    const r = await w.eval(`(async f => fileUpload(f, { kind: 'project', projectId: S.protoEdit.projectId }, true))`)(new w.File([bytes], 'bericht.pdf', { type: 'application/pdf' }));
+    const docx = await w.eval(`(async f => fileUpload(f, { kind: 'project', projectId: S.protoEdit.projectId }, true))`)(new w.File([new Uint8Array([0x50, 0x4b, 3, 4, 1])], 'plan.docx', { type: '' }));
+    w.eval(`S.tcOpen = Object.assign({}, S.tcOpen, { [S.protoEdit.model.topics[${k}].id]: true }); S.protoEdit.model.topics[${k}].files.push(${JSON.stringify({ id: r.id, name: r.name, mime: r.mime, size: r.size })}, ${JSON.stringify({ id: docx.id, name: docx.name, mime: docx.mime, size: docx.size })}); protoRender()`);
+    await until(() => $$('.tc.open [data-action="tc-get"]').length === 2);
+    // the page opens the PDF in a window it opens itself; the bytes arrive untouched
+    const opened = [];
+    w.window.open = () => { const win = { closed: false, location: { set href(v) { opened.push(v); } } }; return win; };
+    w.window.URL.createObjectURL = blob => { opened.push(blob.size + ':' + blob.type); return 'blob:x'; };
+    w.window.URL.revokeObjectURL = () => {};
+    const sent = [];
+    w.eval('window.__quiet = []; const oc = call; call = function (m, p, o) { window.__quiet.push([m, !!(o && o.quiet)]); return oc.apply(null, arguments); }');
+    click($$('.tc.open [data-action="tc-get"]')[0]);
+    await until(() => opened.length >= 2);
+    assert.equal(opened[0], '8:application/pdf', 'every byte');
+    assert.equal(opened[1], 'blob:x');
+    assert.deepEqual(JSON.parse(w.eval('JSON.stringify(window.__quiet)')).filter(c => c[0] === 'files.get'), [['files.get', true]], 'loaded in the background');
+    // a document that a tab cannot show is saved with its name
+    let saved = null;
+    w.document.addEventListener('click', e => { if (e.target.download) saved = e.target.download; }, true);
+    click($$('.tc.open [data-action="tc-get"]')[1]);
+    await until(() => saved);
+    assert.equal(saved, 'plan.docx');
+    void calls; void sent;
+  });
+  test('uploads and parts of the page load without the loading bar or a message', async () => {
+    w.eval('window.__quiet = []; document.querySelector("#toasts").innerHTML = ""');
+    await w.eval("loadChunk('Images')");
+    const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const f = new w.File([Uint8Array.from(Buffer.from(PNG, 'base64'))], 'a.png', { type: 'image/png' });
+    await w.eval(`(async f => fileUpload(f, { kind: 'project', projectId: S.protoEdit.projectId }, false))`)(f);
+    const calls = JSON.parse(w.eval('JSON.stringify(window.__quiet)'));
+    assert.deepEqual(calls.filter(c => c[0] === 'files.upload'), [['files.upload', true]]);
+    assert.equal($('#toasts').textContent, '', 'no "uploading" message');
+    assert.equal(w.eval('S.busyLoud || 0'), 0, 'no loading bar');
+  });
+  test('the sheet can start the form with "Thema hinzufügen" and the topic search narrows the cards', async () => {
+    click($('[data-action="proto-discard"]'));
+    await openSaved();
+    assert.ok($('.jfs:not(.proto-edit)'), 'read only');
+    const n = $$('.tc').length;
+    input($('.jfs-q input'), 'zzz-kein-thema');
+    assert.equal($$('.tc').length, 0);
+    assert.match($('.tc-list').textContent, /Kein Thema gefunden/);
+    input($('.jfs-q input'), '');
+    assert.equal($$('.tc').length, n);
+    click($('.jfs-tools [data-action="proto-add-topic"]'));
+    await until(() => $('.proto-edit'));
+    assert.equal($$('.tc').length, n + 1, 'the new topic');
+    click($('[data-action="proto-discard"]'));
+  });
 });
 
 describe('opening a meeting', () => {
@@ -302,8 +454,8 @@ describe('opening a meeting', () => {
   test('the next meeting opens at once, without asking the server', async () => {
     await tab();
     spy();
-    click($('.jf-tr.next .jf-hit'));
-    assert.ok($('.proto-edit') || $('.doc-view'), 'shown in the same moment');
+    click($('.jfo-row.next .jf-hit'));
+    assert.ok($('.proto-edit') || $('.jfs'), 'shown in the same moment');
     assert.deepEqual(calls().filter(m => m !== 'docs.lock'), [], 'no call to open it');
     if ($('[data-action="proto-discard"]')) click($('[data-action="proto-discard"]'));
   });
@@ -315,12 +467,12 @@ describe('opening a meeting', () => {
     w.eval(`delete DOC_TEXT[${JSON.stringify(m.id)}]; delete DOC_LOADING[${JSON.stringify(m.id)}]`);
     spy();
     w.eval(`jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
-    assert.ok($('.doc-view'), 'the page switches at once (a skeleton until the text is there)');
-    await until(() => $('.doc-view .tc'));
+    assert.ok($('.jfs'), 'the page switches at once (a skeleton until the text is there)');
+    await until(() => $('.jfs .tc'));
     assert.deepEqual(calls().filter(c => c.indexOf(m.id) > 0), ['docs.get ' + m.id]);
     spy();
     w.eval(`S.doc = null; render(); jfOpen(${JSON.stringify(m.seriesId)}, ${JSON.stringify(m.date)})`);
-    assert.ok($('.doc-view .tc'), 'from the page cache');
+    assert.ok($('.jfs .tc'), 'from the page cache');
     assert.deepEqual(calls().filter(c => c.indexOf(m.id) > 0), []);
   });
 });
@@ -345,10 +497,10 @@ describe('two people, drafts', () => {
     await saveAs(other, "m => { m.topics.push({ id: 'zz', title: 'Von nebenan', items: [] }); }");
     w.eval("S.protoEdit.model.topics.push({ id: 'yy', title: 'Von mir', items: [] }); protoRender()");
     click($('[data-action="proto-save"]'));
-    await until(() => $('.dv-save.ok') && $('.doc-view .tc') && !$('.proto-edit'));
+    await until(() => $('.dv-save.ok') && $('.jfs .tc') && !$('.proto-edit'));
     assert.equal($('#modal-root form'), null, 'no conflict dialog');
-    assert.match($('.doc-view').textContent, /Von nebenan/);
-    assert.match($('.doc-view').textContent, /Von mir/);
+    assert.match($('.jfs').textContent, /Von nebenan/);
+    assert.match($('.jfs').textContent, /Von mir/);
   });
   test('someone writes in the same description: the dialog shows theirs; "Meine Fassung speichern" keeps mine', async () => {
     await openEditor();
@@ -359,8 +511,8 @@ describe('two people, drafts', () => {
     await until(() => $('#modal-root .de-preview'));
     assert.match($('#modal-root .de-preview').textContent, /Titel von nebenan/);
     submit();
-    await until(() => $('.dv-save.ok') && $('.doc-view .tc') && !$('.proto-edit'));
-    assert.match($('.doc-view').textContent, /Mein Titel/);
+    await until(() => $('.dv-save.ok') && $('.jfs .tc') && !$('.proto-edit'));
+    assert.match($('.jfs').textContent, /Mein Titel/);
   });
   test('an unsaved draft survives closing the page and comes back when the meeting is opened again', async () => {
     await openEditor();
@@ -390,10 +542,10 @@ describe('calm messages and saving in the background', () => {
     input($('.tc .tc-title'), 'Im Hintergrund gespeichert');
     await wait(200);
     click($('[data-action="proto-save"]'));
-    assert.ok($('.doc-view .tc'), 'the minutes are there right away');
-    assert.match($('.doc-view').textContent, /Im Hintergrund gespeichert/);
-    assert.match($('.doc-view .dv-save').textContent, /Speichert/);
-    await until(() => /Gespeichert/.test(($('.doc-view .dv-save') || {}).textContent || ''));
+    assert.ok($('.jfs .tc'), 'the minutes are there right away');
+    assert.match($('.jfs').textContent, /Im Hintergrund gespeichert/);
+    assert.match($('.jfs .dv-save').textContent, /Speichert/);
+    await until(() => /Gespeichert/.test(($('.jfs .dv-save') || {}).textContent || ''));
     assert.doesNotMatch($('#toasts').textContent, /Protokoll gespeichert/);
   });
   test('Drive refusing to store the file: a quiet note in the header with details', async () => {
@@ -402,8 +554,8 @@ describe('calm messages and saving in the background', () => {
     w.eval("driveTrouble('Die App darf noch nicht in Google Drive speichern. (Google 403: Drive API disabled https://console.developers.google.com/x)')");
     assert.ok($$('#toasts .toast').length <= 1, 'at most one short note per session');
     w.eval('render()');
-    await until(() => $('.doc-view .dv-drive'));
-    click($('.doc-view [data-action="drive-issue"]'));
+    await until(() => $('.jfs .dv-drive'));
+    click($('.jfs [data-action="drive-issue"]'));
     await until(() => $('#modal-root .msg-full'));
     assert.match($('#modal-root').textContent, /setup/);
     w.eval('closeModal(); S.driveIssue = null; render()');
@@ -414,13 +566,13 @@ describe('calm messages and saving in the background', () => {
     input($('.tc .tc-title'), 'Gespeichert beim Weggehen');
     await wait(200);
     click($('[data-action="proto-save"]'));
-    click($('[data-action="doc-close"]'));
-    assert.ok($('.jf-table'), 'back at the list');
+    click($('[data-action="jf-back"]'));
+    assert.ok($('.jfo-tbl'), 'back at the list');
     const saved = () => w.eval(`(jfData().minutes.find(x => x.id === ${JSON.stringify(m.id)}) || {}).version`) > m.version;
     await until(saved, 10000);
     assert.ok(saved(), 'saved');
     await wait(50);
-    assert.equal($('.doc-view'), null, 'not pulled back into the minutes');
+    assert.equal($('.jfs'), null, 'not pulled back into the minutes');
   });
 });
 

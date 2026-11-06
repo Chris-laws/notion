@@ -63,8 +63,11 @@ const Docs = {
     if (!m) return {};
     const carry = Shared.protoCarry(m);
     // by and topics: shown in the jour fixe rows without reading the file
+    // taskIds: the overview counts how many of the tasks are done without reading the file
+    const taskIds = [];
+    m.topics.forEach(t => { if (t.taskId) taskIds.push(t.taskId); t.items.forEach(i => { if (i.taskId) taskIds.push(i.taskId); }); });
     return { people: JSON.stringify({ present: m.present, absent: m.absent, by: m.minuteTaker, topics: m.topics.length,
-      tasks: m.topics.reduce((n, t) => n + (t.taskId ? 1 : 0) + t.items.filter(i => i.taskId).length, 0), closed: !!m.closed }), openItems: carry.open, pinnedTopics: carry.pinned };
+      tasks: taskIds.length, taskIds: taskIds.slice(0, 60), closed: !!m.closed }), openItems: carry.open, pinnedTopics: carry.pinned };
   },
   /** File text: from the script cache, a save Drive does not have yet, or the file. */
   read_(doc) {
@@ -466,14 +469,21 @@ const Jf = {
     // the carry-over of the last minutes: the page builds the next meeting's draft itself (no call when opening)
     const last = {};
     docs.forEach(d => { if (!last[d.seriesId] || last[d.seriesId].date < d.date) last[d.seriesId] = d; });
+    const doneTask = {};
+    if (docs.some(d => d.people && String(d.people).indexOf('taskIds') > 0)) Db.all('Tasks').forEach(t => { if (t.status === 'done') doneTask[t.id] = true; });
     return {
       series: Db.all('JfSeries').filter(s => Jf.active_(s) && sees(s.projectId)).map(s => Object.assign({}, s, {
         carryFrom: last[s.id] ? last[s.id].date : '',
         carry: last[s.id] ? Docs.liveCarry_(last[s.id]) : { open: [], pinned: [] } })),
       minutes: docs.map(d => {
         const m = Docs.meta_(d);
+        const ids = m.people.taskIds || [];
+        const people = Object.assign({}, m.people);
+        // the ids stay on the server; the page gets the count of finished tasks
+        delete people.taskIds;
         return { id: m.id, projectId: m.projectId, seriesId: m.seriesId, date: m.date, title: m.title, version: m.version,
-          updatedAt: m.updatedAt, updatedBy: m.updatedBy, lockBy: m.lockBy, people: m.people,
+          updatedAt: m.updatedAt, updatedBy: m.updatedBy, lockBy: m.lockBy, people: people,
+          tasksDone: ids.filter(id => doneTask[id]).length,
           openCount: Docs.openCount_(d), pinnedCount: (d.pinnedTopics || []).length };
       }).sort((a, b) => (a.date < b.date ? 1 : -1)),
     };

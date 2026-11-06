@@ -29,12 +29,11 @@ function imgSend(file, where, extra) {
     const mime = blob.type || file.type;
     // the name says what the file is after shrinking
     const name = String(file.name || 'Bild').replace(/\.(png|jpe?g|gif|webp)$/i, '') + '.' + mime.split('/')[1].replace('jpeg', 'jpg');
-    return imgRead(blob).then(data => call('files.upload', Object.assign({ name: name, mime: mime, data: data }, where, extra || {})));
+    return imgRead(blob).then(data => call('files.upload', Object.assign({ name: name, mime: mime, data: data }, where, extra || {}), { quiet: true }));
   });
 }
 function imgUpload(file, where, ta) {
   if (!IMG_TYPES.test(file.type)) { toast(L('Nur Bilder (JPEG, PNG, GIF oder WebP).', 'Images only (JPEG, PNG, GIF or WebP).')); return Promise.resolve(); }
-  toast(L('Bild wird hochgeladen …', 'Uploading image …'));
   return imgSend(file, where)
     .then(r => imgInsert(typeof ta === 'function' ? ta() : ta, r.token)).catch(fail);
 }
@@ -46,15 +45,13 @@ const DOC_MIME = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats
 function fileUpload(file, where, attach) {
   if (!attach) {
     if (!IMG_TYPES.test(file.type)) { toast(L('Nur Bilder (JPEG, PNG, GIF oder WebP).', 'Images only (JPEG, PNG, GIF or WebP).')); return Promise.resolve(null); }
-    toast(L('Bild wird hochgeladen …', 'Uploading image …'));
     return imgSend(file, where, { attach: true });
   }
   const ext = (/\.([a-z0-9]+)$/i.exec(file.name || '') || [])[1];
   const mime = DOC_MIME[String(ext || '').toLowerCase()];
   if (!mime) { toast(L('Dieser Dateityp ist nicht erlaubt (PDF, Word, Excel, PowerPoint, Text).', 'This file type is not allowed (PDF, Word, Excel, PowerPoint, text).')); return Promise.resolve(null); }
   if (file.size > 3 * 1024 * 1024) { toast(L('Die Datei ist zu groß (höchstens 3 MB).', 'The file is too big (at most 3 MB).'), { warn: true }); return Promise.resolve(null); }
-  toast(L('Datei wird hochgeladen …', 'Uploading file …'));
-  return imgRead(file).then(data => call('files.upload', Object.assign({ name: file.name, mime: mime, data: data, attach: true }, where)));
+  return imgRead(file).then(data => call('files.upload', Object.assign({ name: file.name, mime: mime, data: data, attach: true }, where), { quiet: true }));
 }
 /** The marker at the cursor (or at the end); the field's own input handling saves it. */
 function imgInsert(ta, token) {
