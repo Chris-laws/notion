@@ -30,8 +30,9 @@ const Docs = {
   },
   /** May the person see what belongs to this place (a project or a team)? */
   sees_(id, ctx) {
-    if (ctx.admin) return true;
-    return Docs.isTeam_(id) ? !!ctx.teamIds[String(id).slice(5)] : !!ctx.projectIds[id];
+    // a place that no longer exists is seen by nobody (admins included), so lists and calendars drop what belonged to it
+    if (Docs.isTeam_(id)) { const t = String(id).slice(5); return ctx.admin ? !!Db.get('Teams', t) : !!ctx.teamIds[t]; }
+    return ctx.admin ? !!Db.get('Projects', id) : !!ctx.projectIds[id];
   },
   /** The project of a document or list, checked for the signed-in person. */
   project_(projectId, ctx, write) {

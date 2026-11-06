@@ -125,6 +125,8 @@ const Teams = {
         Db.update('Tasks', t.id, { teams: t.teams.filter(x => x !== id) });
       });
       Db.all('Events').filter(e => e.teamId === id).forEach(e => Db.update('Events', e.id, { teamId: '' }));
+      // the jour fixe of the team ends with it: no more meetings in any calendar (the minutes stay in Drive)
+      Db.all('JfSeries').filter(x => x.projectId === 'team:' + id && Jf.active_(x)).forEach(x => Db.update('JfSeries', x.id, { active: false }));
       return Db.remove('Teams', id);
     });
   },

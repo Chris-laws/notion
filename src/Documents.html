@@ -144,6 +144,35 @@ function jfListHtml(t, v) {
     '</div><div role="columnheader">' + icon('layers', 'sm') + esc(L('Aufgaben', 'Tasks')) + '</div><div role="columnheader">' + esc(L('Letzte Änderung', 'Last change')) + '</div><div role="columnheader"></div></div>' +
     v.shown.map(r => jfRow(r, t)).join('') + '</div>' + jfPager(v);
 }
+const MEET_RE = /^https:\/\/meet\.google\.com\/[a-z0-9-]{3,40}$/i;
+/** The Meet link of a series in its rows: camera + the address open Meet at once, the pencil changes the link right there. */
+function jfMeetCell(s, t) {
+  const can = jfCanWrite('team:' + t.id);
+  const link = jfMeet(s);
+  if (S.jfMeetEdit === s.id) {
+    return '<form class="jfo-meet-form" data-on-submit="jf-meet" data-on-keydown="jf-meet-key" data-id="' + esc(s.id) + '"><input class="input" name="meet" value="' + esc(link) + '" placeholder="https://meet.google.com/…"' + ariaL(L('Google-Meet-Link', 'Google Meet link')) + '>' +
+      '<button type="submit" class="btn icon primary"' + labelled(L('Link speichern', 'Save link')) + '>' + icon('check', 'sm') + '</button>' +
+      '<button type="button" class="btn icon" data-action="jf-meet-cancel"' + labelled(L('Abbrechen', 'Cancel')) + '>' + icon('x', 'sm') + '</button></form>';
+  }
+  if (link) {
+    return '<span class="jfo-meetbox"><a class="jfo-meet" href="' + esc(link) + '" target="_blank" rel="noopener noreferrer" title="' + esc(link) + '"' + labelled(L('Google Meet öffnen: ', 'Open Google Meet: ') + link) + '>' +
+      icon('video') + '<span class="u">' + esc(link.replace(/^https:\/\//, '')) + '</span></a>' +
+      (can ? '<button type="button" class="jfo-meet-ed" data-action="jf-meet-edit" data-id="' + esc(s.id) + '"' + labelled(L('Meet-Link ändern', 'Change Meet link')) + '>' + icon('edit', 'sm') + '</button>' : '') + '</span>';
+  }
+  return can ? '<button type="button" class="jfo-meet-add" data-action="jf-meet-edit" data-id="' + esc(s.id) + '">' + icon('plus', 'sm') + esc(L('Meet-Link', 'Meet link')) + '</button>' : '';
+}
+A['jf-meet-edit'] = el => { S.jfMeetEdit = el.dataset.id; jfListDraw(); const i = $('.jfo-meet-form input'); if (i) { i.focus(); i.select(); } };
+ON.keydown['jf-meet-key'] = (el, e) => { if (e.key === 'Escape') A['jf-meet-cancel'](); };
+A['jf-meet-cancel'] = () => { S.jfMeetEdit = ''; jfListDraw(); };
+ON.submit['jf-meet'] = form => {
+  const s = jfData().series.find(x => x.id === form.dataset.id);
+  if (!s) return;
+  let v = String(form.elements.meet.value || '').trim();
+  if (v && !/^https?:\/\//i.test(v)) v = 'https://' + v;
+  if (v && !MEET_RE.test(v)) { toast(L('Bitte einen Meet-Link wie https://meet.google.com/abc-defg-hij eingeben.', 'Please enter a Meet link like https://meet.google.com/abc-defg-hij.'), { warn: true }); return; }
+  call('jf.saveSeries', { id: s.id, title: s.title, rhythm: s.rhythm, weekday: s.weekday, time: s.time, duration: s.duration, startDate: s.startDate, endDate: s.endDate, attendees: s.attendees, meetLink: v })
+    .then(() => { s.meetLink = v; S.jfMeetEdit = ''; jfListDraw(); toast(v ? L('Meet-Link gespeichert', 'Meet link saved') : L('Meet-Link entfernt', 'Meet link removed')); calReload(); }).catch(fail);
+};
 /** One meeting: week, day, name, tasks (made / done), last change; the name is the one button that opens it (stretched over the row). */
 function jfRow(r, t) {
   const s = r.s, m = r.m;
@@ -154,7 +183,7 @@ function jfRow(r, t) {
     '<div role="cell">' + esc(label) + '</div>' +
     '<div role="cell"><button type="button" class="jf-hit" data-action="jf-open" data-id="' + esc(s.id) + '" data-v="' + esc(r.date) + '"' + (m ? ' data-doc="' + esc(m.id) + '"' : '') +
     labelled(cta + ': ' + s.title + ', ' + label + ', ' + r.st.label) + '><span>' + esc(s.title) + ' –</span><span>' + esc(t.name) + '</span></button>' +
-    (jfMeet(s) ? '<a class="jfo-meet" href="' + esc(jfMeet(s)) + '" target="_blank" rel="noopener noreferrer"' + labelled(L('Google Meet öffnen', 'Open Google Meet')) + '>' + icon('video') + '</a>' : '') + '</div>' +
+    jfMeetCell(s, t) + '</div>' +
     '<div role="cell"><span class="jfo-n"' + labelled(L('Aufgaben angelegt', 'Tasks made')) + '>' + icon('layers', 'sm') + made + '</span><span class="jfo-n ok"' + labelled(L('davon erledigt', 'of them done')) + '>' + icon('checkc', 'sm') + (m && m.tasksDone ? m.tasksDone : 0) + '</span></div>' +
     '<div role="cell">' + esc(m ? jfStamp(m.updatedAt) : '–') + '</div><div role="cell" class="jfo-g">' + icon('right', 'sm') + '</div></div>';
 }
@@ -223,7 +252,7 @@ function jfOpenRemote(seriesId, date) {
   if (S.jfOpening) return Promise.resolve();
   S.jfOpening = true;
   return call('jf.meeting', { seriesId: seriesId, date: date, lang: LANG }).then(m => { S.jfOpening = false; jfShow(m); })
-    .catch(err => { S.jfOpening = false; fail(err); });
+    .catch(err => { S.jfOpening = false; if (/nicht gefunden/.test(err.message || '')) { calReload(); jfReload(); } fail(err); });
 }
 /* tasks this person deleted: links to them count as none (the server drops them on the next read too) */
 const JF_DEAD = {};
@@ -353,7 +382,7 @@ function tcHead(t, k, edit, open) {
     labelled(t.pinned ? L('Anker lösen', 'Remove anchor') : L('Fixieren: kommt in jedes nächste Protokoll', 'Anchor: carried to every next minutes')) + '>' + icon('pin', 'sm') + (t.pinned ? anchored : esc(L('Fixieren', 'Anchor'))) + '</button>'
     : (t.pinned ? '<span class="chip pin"' + labelled(L('Fixiert: kommt ins nächste Protokoll', 'Anchored: carried to the next minutes')) + '>' + icon('pin', 'sm') + anchored + '</span>' : '');
   const due = t.due ? '<span class="chip soft">' + icon('clock', 'sm') + esc(fmtDate(t.due, { absolute: true })) + '</span>' : '';
-  return '<div class="tc-h"><span class="tc-no">' + (k + 1) + '</span>' + title + kind + '<span class="grow"></span>' + pin + tcOwners(t) + tcProjectChip(t) + due + tcTaskChip(t) + toggle + '</div>';
+  return '<div class="tc-h"><span class="tc-no">' + (k + 1) + '</span>' + title + '<span class="grow"></span>' + kind + pin + tcOwners(t) + tcProjectChip(t) + due + tcTaskChip(t) + toggle + '</div>';
 }
 /** The action bar of an opened card: make a task, project on the left; people, due date, more on the right. */
 function tcBar(t, k, edit, canTask) {
@@ -658,7 +687,7 @@ function jfTop(d, m, o) {
   const more = '<button type="button" class="btn icon" data-action="jf-more"' + labelled(L('Weitere Aktionen', 'More actions')) + '>' + icon('more', 'sm') + '</button>';
   const mine = d.canWrite ? docState(d) : '';
   const close = d.canWrite && !o.edit && !o.loading && d.id ? '<button type="button" class="btn" data-action="proto-close"' + off + '>' + icon('check', 'sm') + esc(m.closed ? L('Wieder öffnen', 'Reopen') : L('Abschließen', 'Close meeting')) + '</button>' : '';
-  return '<div class="jfs-top"><button type="button" class="btn" data-action="jf-back">' + icon('back', 'sm') + esc(L('Zur Jour-Fixe-Übersicht', 'Back to the jour fixe overview')) + '</button><span class="grow"></span>' + mine + (d.id || d.canWrite ? more : '') + close + '</div>';
+  return '<div class="jfs-acts">' + mine + dvStatus(d, m) + (d.id || d.canWrite ? more : '') + close + '</div>';
 }
 /** Back to the overview; with unsaved changes the person decides first. */
 A['jf-back'] = () => {
@@ -682,8 +711,10 @@ A['jf-more-series'] = el => { closeModal(); A['jf-edit'](el); };
 /** The sheet: header (back, title, chips, state), then the tools and the topics or the results. */
 function jfSheet(d, m, o) {
   const canWrite = !!d.canWrite && !m.closed;
-  return '<div class="jfs' + (o.edit ? ' editing proto-edit' : '') + '">' + jfTop(d, m, o) +
-    '<div class="jfs-title"><span class="jfo-ico">' + icon('calendar') + '</span><div class="jfs-t"><h2>' + esc(jfSheetTitle(m, d)) + '</h2><div class="jfs-chips">' + jfChips(d, m) + '</div></div>' + dvStatus(d, m) + '</div>' +
+  // two slim rows: back, title and the state/actions on the right; below them the chips (date, people, minutes, Meet)
+  return '<div class="jfs' + (o.edit ? ' editing proto-edit' : '') + '"><div class="jfs-head">' +
+    '<button type="button" class="btn icon jfs-back" data-action="jf-back"' + labelled(L('Zur Jour-Fixe-Übersicht', 'Back to the jour fixe overview')) + '>' + icon('back', 'sm') + '</button>' +
+    '<h2>' + esc(jfSheetTitle(m, d)) + '</h2>' + jfTop(d, m, o) + '<div class="jfs-chips">' + jfChips(d, m) + '</div></div>' +
     (o.loading ? skLines(6) : jfTools(m, canWrite) + o.body) + (o.foot || '') + '</div>';
 }
 function protoViewer() {

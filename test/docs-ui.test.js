@@ -271,14 +271,14 @@ describe('closing a meeting and anchoring', () => {
     assert.ok($('.tc-desc[data-action="tc-edit"]'), 'a click into the text starts the form');
     assert.equal($('[data-action="proto-edit"]'), null, 'no "Edit" step');
     click($('[data-action="proto-close"]'));
-    await until(() => $('.dv-save.ok') && /Abgeschlossen/.test($('.jfs-title .chip').textContent));
+    await until(() => $('.dv-save.ok') && /Abgeschlossen/.test($('.jfs-head .chip').textContent));
     assert.equal($('.tc-desc[data-action="tc-edit"]'), null, 'no editing while closed');
     assert.match($('[data-action="proto-close"]').textContent, /Wieder öffnen/);
     const m = w.eval(`jfData().minutes.find(x => x.id === S.doc.id)`);
     assert.equal(m.people.closed, true, 'the table knows');
     click($('[data-action="proto-close"]'));
     await until(() => $('.dv-save.ok') && $('.tc-desc[data-action="tc-edit"]'));
-    assert.match($('.jfs-title .chip').textContent, /In Bearbeitung/);
+    assert.match($('.jfs-head .chip').textContent, /In Bearbeitung/);
   });
   test('a topic can be anchored in the card; the minutes show the anchor', async () => {
     await openEditor();

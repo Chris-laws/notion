@@ -825,7 +825,11 @@ A['event-new'] = el => eventModal(null, el && el.dataset.date);
 A['event-edit'] = (el, e) => {
   e.stopPropagation();
   const ev = calFind('events', el.dataset.id);
-  if (ev && ev.type === 'jf') jfOpen(ev.seriesId, ev.startDate);
+  // a jour fixe that no longer exists (ended or its team deleted, in another window) is dropped from the calendar instead of opening an error page
+  if (ev && ev.type === 'jf') {
+    if (!jfData().series.some(x => x.id === ev.seriesId)) { toast(L('Diesen Jour Fixe gibt es nicht mehr.', 'This jour fixe no longer exists.')); calReload(); jfReload(); return; }
+    jfOpen(ev.seriesId, ev.startDate);
+  }
   else if (ev) eventModal(ev);
 };
 
